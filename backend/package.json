@@ -1,0 +1,12 @@
+{
+  "name": "tqi-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "start": "node dist/server.cjs",
+    "build": "esbuild src/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "lint": "tsc --noEmit -p tsconfig.json",
+    "db:reset": "tsx src/scripts/resetDatabase.ts"
+  }
+}

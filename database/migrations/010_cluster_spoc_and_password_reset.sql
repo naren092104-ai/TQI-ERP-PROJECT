@@ -1,0 +1,8 @@
+ALTER TABLE users
+  ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE clusters
+  ADD COLUMN college_name VARCHAR(255) NULL,
+  ADD COLUMN spoc_name VARCHAR(255) NULL,
+  ADD COLUMN spoc_mobile VARCHAR(50) NULL,
+  ADD COLUMN admin_id VARCHAR(64) NULL;

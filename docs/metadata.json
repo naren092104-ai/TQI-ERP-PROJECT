@@ -1,0 +1,10 @@
+{
+  "name": "Remix TQI Cluster Admin",
+  "description": "Talent Quest for India (TQI) Cluster Administration ERP for managing Panchayats, Students, Volunteers, Sessions, Attendance, Lesson Plans, Finance, and Reports.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
