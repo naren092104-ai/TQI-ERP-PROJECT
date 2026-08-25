@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
-import { User, Cluster } from '../types';
+import React, { useState } from "react";
+import { User, Cluster } from "../types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import { ActionButton } from "./ui/action-button";
+import Badge from "./ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableCell } from "./ui/table";
+import { Plus, Search, ShieldCheck, UserCheck, X, Edit3, Lock, Trash2, KeyRound } from "lucide-react";
 
 interface UserManagementViewProps {
   users: User[];
@@ -18,25 +29,25 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
   onDeleteUser,
   onResetPassword,
 }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [addError, setAddError] = useState('');
-  const [newName, setNewName] = useState('');
-  const [newEmail, setNewEmail] = useState('');
-  const [newPhone, setNewPhone] = useState('');
+  const [addError, setAddError] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
 
   const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [editName, setEditName] = useState('');
-  const [editEmail, setEditEmail] = useState('');
-  const [editPhone, setEditPhone] = useState('');
-  const [editError, setEditError] = useState('');
-  const [editRole, setEditRole] = useState<'Super Admin' | 'Cluster Admin'>('Cluster Admin');
-  const [editClusterId, setEditClusterId] = useState('');
+  const [editName, setEditName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editError, setEditError] = useState("");
+  const [editRole, setEditRole] = useState<"Super Admin" | "Cluster Admin">("Cluster Admin");
+  const [editClusterId, setEditClusterId] = useState("");
 
   const [resettingUser, setResettingUser] = useState<User | null>(null);
-  const [resetPassword, setResetPassword] = useState('');
-  const [resetPasswordConfirm, setResetPasswordConfirm] = useState('');
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetPasswordConfirm, setResetPasswordConfirm] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
 
   const filteredUsers = users.filter(
@@ -49,9 +60,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
   const handleCreateSuperAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setAddError('');
+    setAddError("");
     if (!newName.trim() || !newEmail.trim()) {
-      setAddError('Full name and email address are required.');
+      setAddError("Full name and email address are required.");
       return;
     }
 
@@ -61,9 +72,9 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
         const success = await onAddUser({
           name: newName.trim(),
           email: newEmail.trim(),
-          role: 'Super Admin',
-          phone: newPhone.trim() || '+91 90000 00000',
-          status: 'Active',
+          role: "Super Admin",
+          phone: newPhone.trim() || "+91 90000 00000",
+          status: "Active",
         });
 
         if (success === false) {
@@ -73,152 +84,144 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       }
 
       setIsAddOpen(false);
-      setNewName('');
-      setNewEmail('');
-      setNewPhone('');
-      setAddError('');
+      setNewName("");
+      setNewEmail("");
+      setNewPhone("");
+      setAddError("");
     } catch (err: any) {
-      setAddError(err?.message || 'Failed to create Super Admin account.');
+      setAddError(err?.message || "Failed to create Super Admin account.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
+    <div className="w-full space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white border border-[#c4c6d3]/80 rounded-md p-4 md:p-5 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-[#002869] text-white flex items-center justify-center font-bold">
-              <span className="material-symbols-outlined text-[20px]">manage_accounts</span>
-            </div>
-            <h1 className="text-xl md:text-2xl font-bold text-[#002869] tracking-tight">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
               User & Role Management
             </h1>
-            <span className="bg-[#002869]/10 text-[#002869] text-[11px] font-bold px-2 py-0.5 rounded-full">
+            <Badge color="primary" size="sm">
               {users.length} Authorized Accounts
-            </span>
+            </Badge>
           </div>
-          <p className="text-xs text-[#747783] mt-1">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Centrally manage Super Admins (State Coordinators) and Regional Cluster Admins across Tamil Nadu.
           </p>
         </div>
 
-        <button
+        <ActionButton
           onClick={() => {
             setIsAddOpen(true);
-            setAddError('');
+            setAddError("");
           }}
-          className="bg-[#002869] hover:bg-[#001f52] text-white px-3.5 py-2 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+          size="sm"
+          variant="primary"
+          icon={<Plus size={15} />}
         >
-          <span className="material-symbols-outlined text-[16px]">person_add</span>
           Add Super Admin
-        </button>
+        </ActionButton>
+      </div>
+
+      {/* Filter / Search Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search by name, email, or role..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+          />
+        </div>
       </div>
 
       {/* Table */}
-      <div className="bg-white border border-[#c4c6d3]/80 rounded-md overflow-hidden shadow-xs">
-        <div className="p-3 border-b border-slate-200 flex justify-between items-center">
-          <div className="relative w-full max-w-xs">
-            <span className="material-symbols-outlined absolute left-2.5 top-2 text-[18px] text-slate-400">
-              search
-            </span>
-            <input
-              type="text"
-              placeholder="Search by name, email, or role..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[#f8fafc] border border-slate-300 rounded-md pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-[#002869]"
-            />
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-[#f8fafc] text-[#002869] font-bold border-b border-slate-200">
-                <th className="py-3 px-4">User Details</th>
-                <th className="py-3 px-4">Role Designation</th>
-                <th className="py-3 px-4">Regional Scope</th>
-                <th className="py-3 px-4">Contact Phone</th>
-                <th className="py-3 px-4">Account Status</th>
-                <th className="py-3 px-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredUsers.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
-                  <td className="py-3.5 px-4">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-[#002869] text-white flex items-center justify-center font-bold text-xs">
-                        {u.name.substring(0, 1).toUpperCase()}
-                      </div>
-                      <div>
-                        <p className="font-bold text-slate-800">{u.name}</p>
-                        <p className="text-[11px] text-slate-500 font-mono">{u.email}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4 whitespace-nowrap">
-                    <span
-                      className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold ${
-                        u.role === 'Super Admin'
-                          ? 'bg-purple-100 text-purple-900 border border-purple-200'
-                          : 'bg-blue-100 text-blue-900 border border-blue-200'
-                      }`}
-                    >
-                      {u.role}
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableCell isHeader className="w-[280px]">User Details</TableCell>
+              <TableCell isHeader>Role Designation</TableCell>
+              <TableCell isHeader>Regional Scope</TableCell>
+              <TableCell isHeader>Contact Phone</TableCell>
+              <TableCell isHeader>Account Status</TableCell>
+              <TableCell isHeader className="text-right">Actions</TableCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredUsers.map((u) => (
+              <TableRow key={u.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
+                <TableCell>
+                  <div>
+                    <p className="font-semibold text-gray-900 dark:text-white text-xs">{u.name}</p>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono">{u.email}</p>
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <span
+                    className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                      u.role === "Super Admin"
+                        ? "bg-purple-100 text-purple-900 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800"
+                        : "bg-blue-100 text-blue-900 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800"
+                    }`}
+                  >
+                    {u.role}
+                  </span>
+                </TableCell>
+                <TableCell className="font-medium text-gray-700 dark:text-gray-300 text-xs">
+                  {u.role === "Super Admin" ? (
+                    <span className="text-purple-700 dark:text-purple-400 font-semibold">State Central Authority (All)</span>
+                  ) : (
+                    u.clusterName || "Assigned College Cluster"
+                  )}
+                </TableCell>
+                <TableCell className="text-gray-500 dark:text-gray-400 font-mono text-xs">
+                  {u.phone || "+91 90000 00000"}
+                </TableCell>
+                <TableCell>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                      {u.status}
                     </span>
-                  </td>
-                  <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-700">
-                    {u.role === 'Super Admin' ? (
-                      <span className="text-purple-900 font-semibold">State Central Authority (All)</span>
-                    ) : (
-                      u.clusterName || 'Assigned College Cluster'
-                    )}
-                  </td>
-                  <td className="py-3.5 px-4 whitespace-nowrap text-slate-600 font-mono text-[11px]">
-                    {u.phone || '+91 90000 00000'}
-                  </td>
-                  <td className="py-3.5 px-4 whitespace-nowrap">
-                    <div className="flex items-center gap-1.5">
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800">
-                        {u.status}
+                    {u.mustChangePassword && (
+                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800">
+                        Pending Onboarding
                       </span>
-                      {u.mustChangePassword && (
-                        <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                          Pending Onboarding
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell className="text-right">
+                  <div className="flex items-center justify-end gap-1">
                     <button
                       onClick={() => {
                         setEditingUser(u);
                         setEditName(u.name);
                         setEditEmail(u.email);
-                        setEditPhone(u.phone || '');
+                        setEditPhone(u.phone || "");
                         setEditRole(u.role);
-                        setEditClusterId(u.clusterId || clusters[0]?.id || '');
-                        setEditError('');
+                        setEditClusterId(u.clusterId || clusters[0]?.id || "");
+                        setEditError("");
                       }}
-                      className="text-[#002869] hover:bg-slate-100 p-1.5 rounded-md transition-colors cursor-pointer mr-1"
+                      className="rounded-lg p-1.5 text-gray-500 hover:bg-gray-100 hover:text-brand-500 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
                       title="Edit User"
                     >
-                      <span className="material-symbols-outlined text-[16px]">edit</span>
+                      <Edit3 className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => {
                         setResettingUser(u);
-                        setResetPassword('');
-                        setResetPasswordConfirm('');
+                        setResetPassword("");
+                        setResetPasswordConfirm("");
                       }}
-                      className="text-amber-700 hover:bg-amber-50 p-1.5 rounded-md transition-colors cursor-pointer mr-1"
+                      className="rounded-lg p-1.5 text-gray-500 hover:bg-amber-50 hover:text-amber-600 dark:text-gray-400 dark:hover:bg-amber-500/10 dark:hover:text-amber-400 transition cursor-pointer"
                       title="Reset Password"
                     >
-                      <span className="material-symbols-outlined text-[16px]">lock_reset</span>
+                      <KeyRound className="h-4 w-4" />
                     </button>
                     <button
                       onClick={() => {
@@ -226,103 +229,100 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                           onDeleteUser?.(u.id);
                         }
                       }}
-                      className="text-red-700 hover:bg-red-50 p-1.5 rounded-md transition-colors cursor-pointer"
+                      className="rounded-lg p-1.5 text-gray-500 hover:bg-error-50 hover:text-error-600 dark:text-gray-400 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition cursor-pointer"
                       title="Delete User"
                     >
-                      <span className="material-symbols-outlined text-[16px]">delete</span>
+                      <Trash2 className="h-4 w-4" />
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       </div>
 
       {/* Add Super Admin Modal */}
       {isAddOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-md shadow-lg overflow-hidden">
-            <div className="bg-[#002869] text-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px]">person_add</span>
-                <h3 className="text-base font-bold">Add Central Super Admin</h3>
-              </div>
+        <div className="fixed inset-0 z-[99999] bg-gray-900/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl w-full max-w-md shadow-theme-xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+            <div className="p-5 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Add Central Super Admin</h3>
               <button
                 onClick={() => setIsAddOpen(false)}
-                className="text-white/80 hover:text-white p-1 rounded-full cursor-pointer"
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-white p-1 rounded-lg transition cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateSuperAdmin} className="p-5 space-y-3.5 text-xs">
+            <form onSubmit={handleCreateSuperAdmin} className="p-5 space-y-4 text-xs">
               {addError && (
-                <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700 text-[11.5px]">
+                <div className="p-2.5 rounded-xl bg-error-50 border border-error-200 text-error-700 text-xs dark:bg-error-500/10 dark:border-error-500/20 dark:text-error-400">
                   {addError}
                 </div>
               )}
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Full Name *</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Full Name *</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. S. Anand"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Login Email Address *</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Login Email Address *</label>
                 <input
                   type="email"
                   required
                   placeholder="e.g. anand.s@tqi.org"
                   value={newEmail}
                   onChange={(e) => setNewEmail(e.target.value)}
-                  className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Contact Phone Number</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Contact Phone Number</label>
                 <input
                   type="text"
                   placeholder="e.g. +91 96291 55672"
                   value={newPhone}
                   onChange={(e) => setNewPhone(e.target.value)}
-                  className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
               </div>
 
-              <div className="p-3 bg-purple-50/70 border border-purple-200/80 rounded-md text-[11px] text-purple-900 space-y-1">
-                <p className="font-bold flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[14px]">shield_person</span>
+              <div className="p-3.5 bg-purple-50/70 dark:bg-purple-900/20 border border-purple-200/80 dark:border-purple-800/60 rounded-xl text-xs text-purple-900 dark:text-purple-300 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="h-4 w-4 text-purple-600 dark:text-purple-400" />
                   Central Super Admin Authority
                 </p>
-                <p className="text-purple-800">
+                <p className="text-purple-800 dark:text-purple-300/80 text-[11px]">
                   This account will have statewide authority across all college clusters, panchayats, modules, and financial approvals.
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
                 <button
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => setIsAddOpen(false)}
-                  className="px-3 py-1.5 text-slate-600 hover:bg-slate-100 rounded-md font-semibold cursor-pointer"
+                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-1.5 bg-[#002869] hover:bg-[#001f52] text-white rounded-md font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Creating Super Admin...' : 'Create Super Admin & Send Email'}
+                  {isSubmitting ? "Creating Super Admin..." : "Create Super Admin"}
                 </button>
               </div>
             </form>
@@ -332,15 +332,15 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
       {/* Edit User Modal */}
       {editingUser && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-md shadow-lg overflow-hidden">
-            <div className="bg-[#002869] text-white p-4 flex items-center justify-between">
-              <h3 className="text-base font-bold">Edit User Details</h3>
+        <div className="fixed inset-0 z-[99999] bg-gray-900/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl w-full max-w-md shadow-theme-xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+            <div className="p-5 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Edit User Details</h3>
               <button
                 onClick={() => setEditingUser(null)}
-                className="text-white/80 hover:text-white p-1 cursor-pointer"
+                className="text-gray-400 hover:text-gray-700 dark:hover:text-white p-1 rounded-lg transition cursor-pointer"
               >
-                <span className="material-symbols-outlined">close</span>
+                <X className="h-4 w-4" />
               </button>
             </div>
             <form
@@ -352,47 +352,76 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   email: editEmail.trim(),
                   phone: editPhone.trim(),
                   role: editRole,
-                  clusterId: editRole === 'Cluster Admin' ? editClusterId : undefined,
-                  clusterName: editRole === 'Cluster Admin' ? selectedCluster?.name : undefined,
+                  clusterId: editRole === "Cluster Admin" ? editClusterId : undefined,
+                  clusterName: editRole === "Cluster Admin" ? selectedCluster?.name : undefined,
                 });
                 if (updated !== false) setEditingUser(null);
-                else setEditError('Unable to save changes. Check the email or cluster assignment.');
+                else setEditError("Unable to save changes. Check the email or cluster assignment.");
               }}
-              className="p-5 space-y-3 text-xs"
+              className="p-5 space-y-3.5 text-xs"
             >
-              {editError && <div className="p-2 rounded bg-red-50 border border-red-200 text-red-700">{editError}</div>}
+              {editError && <div className="p-2.5 rounded-xl bg-error-50 border border-error-200 text-error-700 text-xs dark:bg-error-500/10 dark:border-error-500/20 dark:text-error-400">{editError}</div>}
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Full Name *</label>
-                <input required value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2" />
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Full Name *</label>
+                <input required value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Email *</label>
-                <input required type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2" />
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Email *</label>
+                <input required type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Phone</label>
-                <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2" />
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Phone</label>
+                <input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Role *</label>
-                <select value={editRole} onChange={(e) => setEditRole(e.target.value as 'Super Admin' | 'Cluster Admin')} className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2">
-                  <option>Cluster Admin</option>
-                  <option>Super Admin</option>
-                </select>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Role *</label>
+                <Select
+                  value={editRole}
+                  onValueChange={(val: any) => setEditRole(val)}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="Select Role" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Cluster Admin">Cluster Admin</SelectItem>
+                    <SelectItem value="Super Admin">Super Admin</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              {editRole === 'Cluster Admin' && (
+              {editRole === "Cluster Admin" && (
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Assigned College Cluster *</label>
-                  <select required value={editClusterId} onChange={(e) => setEditClusterId(e.target.value)} className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2">
-                    {clusters.map((cluster) => (
-                      <option key={cluster.id} value={cluster.id}>{cluster.collegeName || cluster.name} ({cluster.district})</option>
-                    ))}
-                  </select>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Assigned College Cluster *</label>
+                  <Select
+                    value={editClusterId || (clusters[0]?.id ?? undefined)}
+                    onValueChange={(val) => setEditClusterId(val)}
+                  >
+                    <SelectTrigger className="h-9 text-xs">
+                      <SelectValue placeholder="Select Cluster" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clusters.map((cluster) => (
+                        <SelectItem key={cluster.id} value={cluster.id}>
+                          {cluster.collegeName || cluster.name} ({cluster.district})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
-                <button type="button" onClick={() => setEditingUser(null)} className="px-3 py-1.5 text-slate-600 rounded-md font-semibold cursor-pointer">Cancel</button>
-                <button type="submit" className="px-4 py-1.5 bg-[#002869] text-white rounded-md font-bold cursor-pointer">Save Changes</button>
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setEditingUser(null)}
+                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
+                >
+                  Save Changes
+                </button>
               </div>
             </form>
           </div>
@@ -401,12 +430,12 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
 
       {/* Reset Password Modal */}
       {resettingUser && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-md shadow-lg overflow-hidden">
-            <div className="bg-[#002869] text-white p-4 flex items-center justify-between">
-              <h3 className="text-base font-bold">Reset User Password</h3>
-              <button onClick={() => setResettingUser(null)} className="text-white/80 hover:text-white p-1 cursor-pointer">
-                <span className="material-symbols-outlined">close</span>
+        <div className="fixed inset-0 z-[99999] bg-gray-900/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl w-full max-w-md shadow-theme-xl overflow-hidden animate-in fade-in-0 zoom-in-95">
+            <div className="p-5 flex items-center justify-between border-b border-gray-100 dark:border-gray-800">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Reset User Password</h3>
+              <button onClick={() => setResettingUser(null)} className="text-gray-400 hover:text-gray-700 dark:hover:text-white p-1 rounded-lg transition cursor-pointer">
+                <X className="h-4 w-4" />
               </button>
             </div>
             <form
@@ -421,26 +450,26 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   setResetLoading(false);
                 }
               }}
-              className="p-5 space-y-3 text-xs"
+              className="p-5 space-y-4 text-xs"
             >
-              <p className="text-slate-600">
-                Set a new password for <strong>{resettingUser.name}</strong> ({resettingUser.email}).
+              <p className="text-gray-600 dark:text-gray-400 text-xs">
+                Set a new password for <strong className="text-gray-800 dark:text-white">{resettingUser.name}</strong> ({resettingUser.email}).
               </p>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">New Password *</label>
-                <input required minLength={8} type="password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} placeholder="Minimum 8 characters" className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2" />
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">New Password *</label>
+                <input required minLength={8} type="password" value={resetPassword} onChange={(e) => setResetPassword(e.target.value)} placeholder="Minimum 8 characters" className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
               </div>
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Confirm Password *</label>
-                <input required minLength={8} type="password" value={resetPasswordConfirm} onChange={(e) => setResetPasswordConfirm(e.target.value)} placeholder="Re-enter new password" className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2" />
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">Confirm Password *</label>
+                <input required minLength={8} type="password" value={resetPasswordConfirm} onChange={(e) => setResetPasswordConfirm(e.target.value)} placeholder="Re-enter new password" className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
               </div>
               {resetPasswordConfirm && resetPassword !== resetPasswordConfirm && (
-                <p className="text-red-600 font-semibold">Passwords do not match.</p>
+                <p className="text-error-600 dark:text-error-400 font-semibold text-xs">Passwords do not match.</p>
               )}
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
-                <button type="button" onClick={() => setResettingUser(null)} className="px-3 py-1.5 text-slate-600 rounded-md font-semibold cursor-pointer">Cancel</button>
-                <button type="submit" disabled={resetLoading || resetPassword.length < 8 || resetPassword !== resetPasswordConfirm} className="px-4 py-1.5 bg-[#002869] text-white rounded-md font-bold disabled:opacity-50 cursor-pointer">
-                  {resetLoading ? 'Setting Password...' : 'Set Password'}
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
+                <button type="button" onClick={() => setResettingUser(null)} className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer">Cancel</button>
+                <button type="submit" disabled={resetLoading || resetPassword.length < 8 || resetPassword !== resetPasswordConfirm} className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer disabled:opacity-50">
+                  {resetLoading ? "Setting Password..." : "Set Password"}
                 </button>
               </div>
             </form>

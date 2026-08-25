@@ -1,14 +1,24 @@
-﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { Student, Panchayat, Village } from '../types';
+import { Badge } from './ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { ActionButton } from './ui/action-button';
 
 interface StudentsViewProps {
   students: Student[];
   panchayats: Panchayat[];
   initialFilters?: { panchayatId?: string; villageId?: string };
   onAddStudent: (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => void;
-  onBulkAddStudents?: (newStudents: Array<Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>>) => void;
-  onUpdateStudent: (id: string, updated: Partial<Student>) => void;
+  onBulkImportStudents?: (students: any[], clusterId: string) => Promise<void> | void;
+  onEditStudent?: (id: string, updated: Partial<Student>) => Promise<void> | void;
+  onUpdateStudent?: (id: string, updated: Partial<Student>) => void;
   onDeleteStudent: (id: string) => void;
 }
 
@@ -31,7 +41,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   panchayats,
   initialFilters,
   onAddStudent,
-  onBulkAddStudents,
+  onBulkImportStudents,
+  onEditStudent,
   onUpdateStudent,
   onDeleteStudent,
 }) => {
@@ -232,15 +243,27 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     const currentVillageId = targetPanchayat.villages.find(v => v.name === formData.villageName)?.id || formData.villageName.toLowerCase().replace(/\s+/g, '-');
 
     if (editingStudent) {
-      onUpdateStudent(editingStudent.id, {
-        name: formData.name.trim(),
-        gender: formData.gender,
-        dob: formData.dob,
-        standard: formData.standard,
-        parentName: formData.parentName.trim(),
-        phone: formData.phone.trim(),
-        status: formData.status,
-      });
+      if (onEditStudent) {
+        onEditStudent(editingStudent.id, {
+          name: formData.name.trim(),
+          gender: formData.gender,
+          dob: formData.dob,
+          standard: formData.standard,
+          parentName: formData.parentName.trim(),
+          phone: formData.phone.trim(),
+          status: formData.status,
+        });
+      } else if (onUpdateStudent) {
+        onUpdateStudent(editingStudent.id, {
+          name: formData.name.trim(),
+          gender: formData.gender,
+          dob: formData.dob,
+          standard: formData.standard,
+          parentName: formData.parentName.trim(),
+          phone: formData.phone.trim(),
+          status: formData.status,
+        });
+      }
       showToast(`Updated student ${formData.name.trim()}`);
       setEditingStudent(null);
     } else {
@@ -430,8 +453,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       status: r.status,
     }));
 
-    if (onBulkAddStudents) {
-      onBulkAddStudents(formattedStudents);
+    if (onBulkImportStudents) {
+      onBulkImportStudents(formattedStudents, tgtPanchayat.clusterId || tgtPanchayat.cluster || '');
     } else {
       formattedStudents.forEach((st) => onAddStudent(st));
     }
@@ -453,94 +476,92 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   // ==========================================
   if (!selectedPanchayatId) {
     return (
-      <div className="space-y-6 max-w-7xl mx-auto">
-        <div className="bg-white border border-[#c4c6d3]/60 rounded-md p-5 md:p-6 shadow-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-1.5 text-[12px] text-[#434652] mb-1">
-                <span>Dharmapuri Cluster</span>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-                <span className="text-[#002869] font-bold">Students Directory</span>
-              </div>
-              <h1 className="text-[26px] font-bold text-[#002869] tracking-tight">Students by Panchayat</h1>
-              <p className="text-[13px] text-[#434652] mt-0.5">
-                Click any Panchayat card below to explore its villages and manage student enrollments.
-              </p>
+      <div className="w-full space-y-6">
+        {/* 1. Cardless Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+                Students by Panchayat
+              </h1>
+              <Badge color="primary" size="sm">
+                {clusterTotalStudents} Total
+              </Badge>
             </div>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Select any Panchayat below to explore its villages and manage student rosters.
+            </p>
+          </div>
 
-            <div className="flex flex-col items-end gap-3">
-              <div className="flex items-center gap-2.5">
-                <button
-                  onClick={() => {
-                    setImportPanchayatId('');
-                    setImportVillageName('');
-                    setShowImportModal(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#002869] text-white text-[12px] font-bold rounded-md hover:bg-[#0b3d91] transition-all shadow-xs cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">file_upload</span>
-                  Bulk Import
-                </button>
-                <button
-                  onClick={() => {
-                    handleOpenAddModal();
-                    setFormData((prev) => ({ ...prev, panchayatId: '', villageName: '' }));
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-[#592600] text-[12px] font-bold rounded-md hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">person_add</span>
-                  Add Student
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2.5">
-                <div className="bg-[#f4f3fb] border border-[#c4c6d3]/60 px-4 py-2 rounded-md">
-                  <div className="text-[10px] uppercase font-bold text-[#747783]">Total Students</div>
-                  <div className="text-[20px] font-bold text-[#002869]">{clusterTotalStudents}</div>
-                </div>
-                <div className="bg-[#dae2ff]/50 border border-[#dae2ff] px-3.5 py-2 rounded-md">
-                  <div className="text-[10px] uppercase font-bold text-[#001947]">👦 Boys</div>
-                  <div className="text-[18px] font-bold text-[#001947]">{clusterBoys}</div>
-                </div>
-                <div className="bg-[#ffdbc8]/50 border border-[#ffdbc8] px-3.5 py-2 rounded-md">
-                  <div className="text-[10px] uppercase font-bold text-[#592600]">👧 Girls</div>
-                  <div className="text-[18px] font-bold text-[#592600]">{clusterGirls}</div>
-                </div>
-              </div>
-            </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => {
+                setImportPanchayatId('');
+                setImportVillageName('');
+                setShowImportModal(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
+            >
+              <span>Bulk Import (Excel)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                handleOpenAddModal();
+                setFormData((prev) => ({ ...prev, panchayatId: '', villageName: '' }));
+              }}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+            >
+              <span>Add Student</span>
+            </button>
           </div>
         </div>
 
-        <div className="bg-white p-4 rounded-md border border-[#c4c6d3]/60 shadow-xs">
-          <div className="relative">
-            <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-[#747783] text-[20px]">
-              search
-            </span>
-            <input
-              type="text"
-              placeholder="Search panchayats or cluster..."
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-[#f4f3fb] border border-[#c4c6d3] rounded-md focus:border-[#002869] text-[13px] h-[40px] outline-none"
-            />
+        {/* 2. Compact Metric Cards (counts & status only) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Enrolled</div>
+            <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{clusterTotalStudents}</div>
           </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-brand-500 dark:text-brand-400">👦 Boys</div>
+            <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{clusterBoys}</div>
+          </div>
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+            <div className="text-xs font-semibold uppercase tracking-wider text-orange-500 dark:text-orange-400">👧 Girls</div>
+            <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{clusterGirls}</div>
+          </div>
+        </div>
+
+        {/* 3. Cardless Search Bar */}
+        <div className="relative w-full max-w-sm">
+          <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[18px] pointer-events-none">
+            search
+          </span>
+          <input
+            type="text"
+            placeholder="Search panchayats or cluster..."
+            value={globalSearch}
+            onChange={(e) => setGlobalSearch(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+          />
         </div>
 
         {importSuccessMessage && (
-          <div className="bg-[#e6f4ea] border border-[#137333]/30 text-[#137333] p-4 rounded-md flex items-center justify-between shadow-xs">
-            <div className="flex items-center gap-2 font-bold text-[13px]">
-              <span className="material-symbols-outlined text-[20px]">check_circle</span>
-              {importSuccessMessage}
-            </div>
+          <div className="rounded-xl border border-success-200 bg-success-50 p-4 text-xs font-medium text-success-600 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 flex items-center justify-between">
+            <span>{importSuccessMessage}</span>
             <button
+              type="button"
               onClick={() => setImportSuccessMessage(null)}
-              className="text-[#137333] hover:bg-[#137333]/10 p-1 rounded-full cursor-pointer"
+              className="text-success-600 hover:text-success-800 dark:text-success-400"
             >
               <span className="material-symbols-outlined text-[16px]">close</span>
             </button>
           </div>
         )}
 
+        {/* 4. Cardless Grid List */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {panchayats
             .filter((p) => p.name.toLowerCase().includes(globalSearch.toLowerCase()))
@@ -555,62 +576,58 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 <div
                   key={panchayat.id}
                   onClick={() => handleSelectPanchayat(panchayat.id)}
-                  className="bg-white rounded-md border border-[#c4c6d3]/70 hover:border-[#002869] shadow-xs hover:shadow-sm transition-all p-5 cursor-pointer flex flex-col justify-between group"
+                  className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800 flex flex-col justify-between cursor-pointer"
                 >
-                  <div>
-                    <div className="flex items-start justify-between gap-2 mb-3">
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
                       <div>
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-[#747783]">
+                        <span className="text-[11px] font-semibold uppercase text-gray-400 block">
                           {panchayat.cluster} Cluster
                         </span>
-                        <h2 className="text-[19px] font-bold text-[#002869] group-hover:text-[#0b3d91] transition-colors">
+                        <h2 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-brand-500 transition-colors mt-0.5">
                           {panchayat.name}
                         </h2>
                       </div>
-                      <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      <Badge
+                        color={
                           panchayat.status === 'On Track'
-                            ? 'bg-[#e6f4ea] text-[#137333]'
+                            ? 'success'
                             : panchayat.status === 'Correction Required'
-                              ? 'bg-[#fff0d4] text-[#b06000]'
-                              : 'bg-[#ffdad6] text-[#ba1a1a]'
-                        }`}
+                              ? 'warning'
+                              : 'error'
+                        }
+                        size="sm"
                       >
                         {panchayat.status}
-                      </span>
+                      </Badge>
                     </div>
 
-                    <div className="flex items-center gap-2 mb-4 text-[12px] text-[#434652]">
-                      <span className="material-symbols-outlined text-[16px] text-[#002869]">location_on</span>
-                      <span className="font-semibold text-[#002869]">
-                        {panchayat.villages.length || panchayat.villagesCount} Villages
-                      </span>
-                      <span className="text-[#c4c6d3]">•</span>
-                      <span>{panStudents.length} Students enrolled</span>
+                    <div className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                      <span>{panchayat.villages.length || panchayat.villagesCount} Villages &middot; {panStudents.length} Students</span>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 bg-[#f4f3fb] p-3 rounded-md border border-[#c4c6d3]/40 mb-4">
+                    <div className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50/80 p-2.5 text-xs dark:bg-white/[0.02]">
                       <div className="flex items-center gap-2">
-                        <span className="text-[16px]">👦</span>
+                        <span className="text-sm">👦</span>
                         <div>
-                          <div className="text-[10px] font-bold uppercase text-[#747783]">Boys</div>
-                          <div className="text-[15px] font-bold text-[#001947]">{boysCount}</div>
+                          <div className="text-[10px] text-gray-400 uppercase font-semibold">Boys</div>
+                          <div className="text-sm font-bold text-gray-900 dark:text-white">{boysCount}</div>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-[16px]">👧</span>
+                        <span className="text-sm">👧</span>
                         <div>
-                          <div className="text-[10px] font-bold uppercase text-[#747783]">Girls</div>
-                          <div className="text-[15px] font-bold text-[#592600]">{girlsCount}</div>
+                          <div className="text-[10px] text-gray-400 uppercase font-semibold">Girls</div>
+                          <div className="text-sm font-bold text-gray-900 dark:text-white">{girlsCount}</div>
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5 mb-2">
+                    <div className="flex flex-wrap gap-1.5 pt-1">
                       {panchayat.villages.map((v) => (
                         <span
                           key={v.id}
-                          className="bg-white border border-[#c4c6d3]/60 text-[#434652] text-[11px] font-medium px-2 py-0.5 rounded-md"
+                          className="rounded-lg border border-gray-200 bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300"
                         >
                           {v.name}
                         </span>
@@ -618,9 +635,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-[#c4c6d3]/40 flex items-center justify-between text-[#002869] font-bold text-[13px] group-hover:translate-x-0.5 transition-transform">
+                  <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs font-bold text-brand-500 group-hover:translate-x-0.5 transition-transform">
                     <span>View Villages</span>
-                    <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                    <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                   </div>
                 </div>
               );
@@ -639,64 +656,58 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     );
 
     return (
-      <div className="space-y-6 max-w-7xl mx-auto">
-        {/* Header with Breadcrumb */}
-        <div className="bg-white border border-[#c4c6d3]/60 rounded-md p-5 md:p-6 shadow-xs">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              {/* Breadcrumb navigation */}
-              <div className="flex items-center gap-1.5 text-[12px] text-[#434652] mb-1">
-                <button
-                  onClick={handleBackToPanchayats}
-                  className="hover:text-[#002869] font-semibold flex items-center gap-0.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[14px]">arrow_back</span>
-                  Panchayats
-                </button>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-                <span className="text-[#002869] font-bold">{activePanchayat.name}</span>
-                <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-                <span className="text-[#747783]">Select Village</span>
-              </div>
-
-              <h1 className="text-[24px] font-bold text-[#002869] tracking-tight flex items-center gap-2">
-                <span>{activePanchayat.name}</span>
-                <span className="text-[13px] font-bold px-2 py-0.5 bg-[#dae2ff] text-[#001947] rounded-full">
-                  {activePanchayat.villages.length} Villages
-                </span>
-              </h1>
-              <p className="text-[13px] text-[#434652] mt-0.5">
-                Select a village card to view its student roster (Standards 9 to 12).
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2.5">
+      <div className="w-full space-y-6">
+        {/* 1. Cardless Page Header with Breadcrumbs */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mb-1">
               <button
-                onClick={() => { setImportPanchayatId(activePanchayat?.id || ''); setImportVillageName(''); setShowImportModal(true); }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#002869] text-white text-[12px] font-bold rounded-md hover:bg-[#0b3d91] transition-all shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[18px]">file_upload</span>
-                Bulk Import
-              </button>
-              <button
-                onClick={() => { handleOpenAddModal(); setFormData(prev => ({ ...prev, panchayatId: activePanchayat?.id || '', villageName: '' })); }}
-                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-[#592600] text-[12px] font-bold rounded-md hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[18px]">person_add</span>
-                Add Student
-              </button>
-              <button
+                type="button"
                 onClick={handleBackToPanchayats}
-                className="flex items-center gap-1 px-3.5 py-1.5 border border-[#747783] text-[#002869] text-[12px] font-bold rounded-md hover:bg-[#f4f3fb] transition-colors cursor-pointer self-start md:self-auto"
+                className="hover:text-brand-500 font-semibold"
               >
-                <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-                Back
+                Panchayats
               </button>
+              <span>/</span>
+              <span className="font-semibold text-gray-800 dark:text-white">{activePanchayat.name}</span>
             </div>
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white flex items-center gap-2.5">
+              <span>{activePanchayat.name}</span>
+              <Badge color="primary" size="sm">
+                {activePanchayat.villages.length} Villages
+              </Badge>
+            </h1>
+            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+              Select a village card to view its student roster (Standards 9 to 12).
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => { setImportPanchayatId(activePanchayat?.id || ''); setImportVillageName(''); setShowImportModal(true); }}
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
+            >
+              <span>Bulk Import</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { handleOpenAddModal(); setFormData(prev => ({ ...prev, panchayatId: activePanchayat?.id || '', villageName: '' })); }}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+            >
+              <span>Add Student</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleBackToPanchayats}
+              className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+            >
+              <span>Back</span>
+            </button>
           </div>
         </div>
 
-        {/* Villages Grid */}
+        {/* 2. Villages Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {activePanchayat.villages.map((village) => {
             const vStudents = panchayatStudents.filter(
@@ -705,7 +716,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             const vBoys = vStudents.filter((s) => s.gender === 'male').length;
             const vGirls = vStudents.filter((s) => s.gender === 'female').length;
 
-            // Class breakdown for 9 to 12
             const std9 = vStudents.filter((s) => s.standard === '9').length;
             const std10 = vStudents.filter((s) => s.standard === '10').length;
             const std11 = vStudents.filter((s) => s.standard === '11').length;
@@ -715,70 +725,64 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <div
                 key={village.id}
                 onClick={() => handleSelectVillage(village.name)}
-                className="bg-white rounded-md border border-[#c4c6d3]/70 hover:border-[#002869] shadow-xs hover:shadow-sm transition-all p-5 cursor-pointer flex flex-col justify-between group"
+                className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800 flex flex-col justify-between cursor-pointer"
               >
-                <div>
-                  <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="space-y-3">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-[#747783]">
-                        Village
-                      </span>
-                      <h3 className="text-[18px] font-bold text-[#002869] group-hover:text-[#0b3d91] transition-colors">
+                      <span className="text-[11px] font-semibold uppercase text-gray-400 block">Village</span>
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white group-hover:text-brand-500 transition-colors mt-0.5">
                         {village.name}
                       </h3>
                     </div>
-                    <span className="bg-[#dae2ff] text-[#001947] text-[12px] font-bold px-2.5 py-0.5 rounded-full">
+                    <Badge color="primary" size="sm">
                       {vStudents.length} Students
-                    </span>
+                    </Badge>
                   </div>
 
-                  {/* Gender Breakdown */}
-                  <div className="grid grid-cols-2 gap-2 bg-[#f4f3fb] p-3 rounded-md border border-[#c4c6d3]/40 mb-3.5">
+                  <div className="grid grid-cols-2 gap-2 rounded-xl bg-gray-50/80 p-2.5 text-xs dark:bg-white/[0.02]">
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[15px]">ðŸ‘¦</span>
+                      <span>👦</span>
                       <div>
-                        <div className="text-[10px] font-bold uppercase text-[#747783]">Boys</div>
-                        <div className="text-[14px] font-bold text-[#001947]">{vBoys}</div>
+                        <div className="text-[10px] text-gray-400 uppercase font-semibold">Boys</div>
+                        <div className="text-xs font-bold text-gray-900 dark:text-white">{vBoys}</div>
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[15px]">ðŸ‘§</span>
+                      <span>👧</span>
                       <div>
-                        <div className="text-[10px] font-bold uppercase text-[#747783]">Girls</div>
-                        <div className="text-[14px] font-bold text-[#592600]">{vGirls}</div>
+                        <div className="text-[10px] text-gray-400 uppercase font-semibold">Girls</div>
+                        <div className="text-xs font-bold text-gray-900 dark:text-white">{vGirls}</div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Standards 9 to 12 Distribution */}
-                  <div className="mb-2">
-                    <div className="text-[10px] font-bold uppercase text-[#747783] mb-1.5">
-                      Standard Distribution (9 to 12)
-                    </div>
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase text-gray-400 mb-1.5">Standard Distribution</div>
                     <div className="grid grid-cols-4 gap-1.5 text-center">
-                      <div className="bg-white border border-[#c4c6d3]/60 rounded p-1">
-                        <div className="text-[9px] text-[#747783] font-bold">9th</div>
-                        <div className="text-[12px] font-bold text-[#002869]">{std9}</div>
+                      <div className="rounded-lg border border-gray-200 p-1 dark:border-gray-700">
+                        <div className="text-[9px] text-gray-400 font-bold">9th</div>
+                        <div className="text-xs font-bold text-brand-500">{std9}</div>
                       </div>
-                      <div className="bg-white border border-[#c4c6d3]/60 rounded p-1">
-                        <div className="text-[9px] text-[#747783] font-bold">10th</div>
-                        <div className="text-[12px] font-bold text-[#002869]">{std10}</div>
+                      <div className="rounded-lg border border-gray-200 p-1 dark:border-gray-700">
+                        <div className="text-[9px] text-gray-400 font-bold">10th</div>
+                        <div className="text-xs font-bold text-brand-500">{std10}</div>
                       </div>
-                      <div className="bg-white border border-[#c4c6d3]/60 rounded p-1">
-                        <div className="text-[9px] text-[#747783] font-bold">11th</div>
-                        <div className="text-[12px] font-bold text-[#002869]">{std11}</div>
+                      <div className="rounded-lg border border-gray-200 p-1 dark:border-gray-700">
+                        <div className="text-[9px] text-gray-400 font-bold">11th</div>
+                        <div className="text-xs font-bold text-brand-500">{std11}</div>
                       </div>
-                      <div className="bg-white border border-[#c4c6d3]/60 rounded p-1">
-                        <div className="text-[9px] text-[#747783] font-bold">12th</div>
-                        <div className="text-[12px] font-bold text-[#002869]">{std12}</div>
+                      <div className="rounded-lg border border-gray-200 p-1 dark:border-gray-700">
+                        <div className="text-[9px] text-gray-400 font-bold">12th</div>
+                        <div className="text-xs font-bold text-brand-500">{std12}</div>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-3 border-t border-[#c4c6d3]/40 flex items-center justify-between text-[#002869] font-bold text-[13px] group-hover:translate-x-0.5 transition-transform mt-2">
+                <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs font-bold text-brand-500 group-hover:translate-x-0.5 transition-transform">
                   <span>Open Student Roster</span>
-                  <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
+                  <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
                 </div>
               </div>
             );
@@ -792,277 +796,187 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   // RENDER: LEVEL 3 (STUDENTS ROSTER IN VILLAGE)
   // ==========================================
   return (
-    <div className="space-y-5 max-w-7xl mx-auto">
-      {/* Header with Breadcrumb & Village Title */}
-      <div className="bg-white border border-[#c4c6d3]/60 rounded-md p-5 md:p-6 shadow-xs">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            {/* Breadcrumb */}
-            <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-[#434652] mb-1.5">
-              <button
-                onClick={handleBackToPanchayats}
-                className="hover:text-[#002869] font-semibold flex items-center gap-0.5 cursor-pointer"
-              >
-                Panchayats
-              </button>
-              <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-              <button
-                onClick={handleBackToVillages}
-                className="hover:text-[#002869] font-semibold cursor-pointer"
-              >
-                {activePanchayat?.name}
-              </button>
-              <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-              <span className="text-[#002869] font-bold">{selectedVillageName}</span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <h1 className="text-[24px] font-bold text-[#002869] tracking-tight">
-                {selectedVillageName} Roster
-              </h1>
-              <span className="bg-[#dae2ff] text-[#001947] text-[12px] font-bold px-2.5 py-0.5 rounded-full">
-                {filteredRosterStudents.length} Students
-              </span>
-            </div>
-            <p className="text-[12px] text-[#434652] mt-0.5">
-              {activePanchayat?.name} Panchayat â€¢ Dharmapuri Cluster â€¢ Standards 9 to 12
-            </p>
-          </div>
-
-          {/* Action Buttons: Add Student + Import Excel */}
-          <div className="flex flex-wrap items-center gap-2.5">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header with Breadcrumbs */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400 mb-1">
             <button
-              onClick={() => { setImportPanchayatId(activePanchayat?.id || ''); setImportVillageName(selectedVillageName || ''); setShowImportModal(true); }}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#002869] text-white text-[13px] font-bold rounded-md hover:bg-[#0b3d91] transition-all shadow-xs cursor-pointer"
+              type="button"
+              onClick={handleBackToPanchayats}
+              className="hover:text-brand-500 font-semibold"
             >
-              <span className="material-symbols-outlined text-[18px]">file_upload</span>
-              Import Students (Excel)
+              Panchayats
             </button>
-
+            <span>/</span>
             <button
-              onClick={handleOpenAddModal}
-              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#fb7800] text-[#592600] text-[13px] font-bold rounded-md hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">person_add</span>
-              Add Student
-            </button>
-
-            <button
+              type="button"
               onClick={handleBackToVillages}
-              className="flex items-center gap-1 px-3 py-2 border border-[#747783] text-[#434652] text-[12px] font-bold rounded-md hover:bg-[#f4f3fb] transition-colors cursor-pointer"
+              className="hover:text-brand-500 font-semibold"
             >
-              <span className="material-symbols-outlined text-[16px]">arrow_back</span>
-              Villages
+              {activePanchayat?.name}
             </button>
+            <span>/</span>
+            <span className="font-semibold text-gray-800 dark:text-white">{selectedVillageName}</span>
           </div>
+
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+              {selectedVillageName} Roster
+            </h1>
+            <Badge color="primary" size="sm">
+              {filteredRosterStudents.length} Students
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {activePanchayat?.name} Panchayat &middot; Standards 9 to 12
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => { setImportPanchayatId(activePanchayat?.id || ''); setImportVillageName(selectedVillageName || ''); setShowImportModal(true); }}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+          >
+            <span>Import Excel</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleOpenAddModal}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+          >
+            <span>Add Student</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleBackToVillages}
+            className="inline-flex items-center gap-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+          >
+            <span>Villages</span>
+          </button>
         </div>
       </div>
 
-      {/* Success Notification */}
-      {importSuccessMessage && (
-        <div className="bg-[#e6f4ea] border border-[#137333]/30 text-[#137333] p-4 rounded-md flex items-center justify-between shadow-xs animate-[fadeIn_0.2s_ease-out]">
-          <div className="flex items-center gap-2 font-bold text-[13px]">
-            <span className="material-symbols-outlined text-[20px]">check_circle</span>
-            {importSuccessMessage}
-          </div>
-          <button
-            onClick={() => setImportSuccessMessage(null)}
-            className="text-[#137333] hover:bg-[#137333]/10 p-1 rounded-full cursor-pointer"
-          >
-            <span className="material-symbols-outlined text-[16px]">close</span>
-          </button>
-        </div>
-      )}
-
-      {/* Filter and View Controls Bar */}
-      <div className="bg-white rounded-md shadow-xs p-4 border border-[#c4c6d3]/60 space-y-3.5">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-          {/* Search bar */}
-          <div className="md:col-span-5 relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-[#747783] text-[18px]">
-              search
-            </span>
-            <input
-              type="text"
-              placeholder="Search student by name or code..."
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-[#f4f3fb] border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869] h-[38px]"
-            />
-          </div>
-
-          {/* Standard Tabs: 9, 10, 11, 12 */}
-          <div className="md:col-span-7 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center bg-[#f4f3fb] p-1 rounded-md border border-[#c4c6d3]/60 overflow-x-auto">
-              <button
-                onClick={() => setSelectedStd('')}
-                className={`px-3 py-1 rounded text-[12px] font-bold transition-all cursor-pointer ${
-                  selectedStd === '' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652] hover:text-[#002869]'
-                }`}
-              >
-                All (9-12)
-              </button>
-              <button
-                onClick={() => setSelectedStd('9')}
-                className={`px-3 py-1 rounded text-[12px] font-bold transition-all cursor-pointer ${
-                  selectedStd === '9' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652] hover:text-[#002869]'
-                }`}
-              >
-                9th Std
-              </button>
-              <button
-                onClick={() => setSelectedStd('10')}
-                className={`px-3 py-1 rounded text-[12px] font-bold transition-all cursor-pointer ${
-                  selectedStd === '10' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652] hover:text-[#002869]'
-                }`}
-              >
-                10th Std
-              </button>
-              <button
-                onClick={() => setSelectedStd('11')}
-                className={`px-3 py-1 rounded text-[12px] font-bold transition-all cursor-pointer ${
-                  selectedStd === '11' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652] hover:text-[#002869]'
-                }`}
-              >
-                11th Std
-              </button>
-              <button
-                onClick={() => setSelectedStd('12')}
-                className={`px-3 py-1 rounded text-[12px] font-bold transition-all cursor-pointer ${
-                  selectedStd === '12' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652] hover:text-[#002869]'
-                }`}
-              >
-                12th Std
-              </button>
-            </div>
-
-            {/* View Mode */}
-            <div className="flex items-center bg-[#f4f3fb] p-1 rounded-md border border-[#c4c6d3]/60">
-              <button
-                onClick={() => setViewMode('split')}
-                title="Boys & Girls Split"
-                className={`px-2.5 py-1 rounded text-[12px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  viewMode === 'split' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[15px]">view_column</span>
-                Split
-              </button>
-              <button
-                onClick={() => setViewMode('all')}
-                title="Table View"
-                className={`px-2.5 py-1 rounded text-[12px] font-bold flex items-center gap-1 transition-all cursor-pointer ${
-                  viewMode === 'all' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652]'
-                }`}
-              >
-                <span className="material-symbols-outlined text-[15px]">table_rows</span>
-                Table
-              </button>
-              <button
-                onClick={() => setViewMode('boys')}
-                className={`px-2 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
-                  viewMode === 'boys' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652]'
-                }`}
-              >
-                ðŸ‘¦ Boys ({boyStudents.length})
-              </button>
-              <button
-                onClick={() => setViewMode('girls')}
-                className={`px-2 py-1 rounded text-[11px] font-bold transition-all cursor-pointer ${
-                  viewMode === 'girls' ? 'bg-[#002869] text-white shadow-xs' : 'text-[#434652]'
-                }`}
-              >
-                ðŸ‘§ Girls ({girlStudents.length})
-              </button>
-            </div>
-          </div>
+      {/* 2. Cardless Filter and View Controls Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <span className="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 text-[18px] pointer-events-none">
+            search
+          </span>
+          <input
+            type="text"
+            placeholder="Search student by name or code..."
+            value={globalSearch}
+            onChange={(e) => setGlobalSearch(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+          />
         </div>
 
-        {/* Counter strip */}
-        <div className="flex items-center gap-2 pt-2 border-t border-[#c4c6d3]/40 text-[12px]">
-          <span className="font-bold text-[#434652]">Showing:</span>
-          <span className="bg-[#f4f3fb] text-[#002869] font-bold px-2 py-0.5 rounded">
-            Total: {filteredRosterStudents.length}
-          </span>
-          <span className="bg-[#dae2ff] text-[#001947] font-bold px-2 py-0.5 rounded">
-            ðŸ‘¦ Boys: {boyStudents.length}
-          </span>
-          <span className="bg-[#ffdbc8] text-[#592600] font-bold px-2 py-0.5 rounded">
-            ðŸ‘§ Girls: {girlStudents.length}
-          </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 overflow-x-auto">
+            {['', '9', '10', '11', '12'].map((std) => (
+              <button
+                key={std}
+                type="button"
+                onClick={() => setSelectedStd(std)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                  selectedStd === std
+                    ? 'bg-brand-500 text-white shadow-theme-xs'
+                    : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700'
+                }`}
+              >
+                {std === '' ? 'All (9-12)' : `Std ${std}`}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex items-center gap-1 border-l border-gray-200 pl-2 dark:border-gray-800">
+            <button
+              type="button"
+              onClick={() => setViewMode('split')}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                viewMode === 'split'
+                  ? 'bg-brand-500 text-white shadow-theme-xs'
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700'
+              }`}
+            >
+              Split
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('all')}
+              className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                viewMode === 'all'
+                  ? 'bg-brand-500 text-white shadow-theme-xs'
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700'
+              }`}
+            >
+              Table
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Roster Views */}
-
-      {/* 1. AUTO SPLIT VIEW: BOYS & GIRLS */}
       {viewMode === 'split' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Boys Column */}
-          <div className="bg-white rounded-md shadow-xs border border-[#dae2ff] overflow-hidden flex flex-col">
-            <div className="px-4 py-3 bg-[#dae2ff] border-b border-[#dae2ff] flex items-center justify-between">
+          <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02] flex flex-col">
+            <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-[20px]">ðŸ‘¦</span>
-                <div>
-                  <h2 className="text-[15px] font-bold text-[#001947]">Boys Roster</h2>
-                  <p className="text-[11px] text-[#001947]/70 font-semibold">{boyStudents.length} Enrolled</p>
-                </div>
+                <span className="text-lg">👦</span>
+                <span className="font-bold text-gray-900 dark:text-white text-sm">Boys Roster</span>
               </div>
-              <span className="bg-white text-[#001947] font-bold text-[12px] px-2.5 py-0.5 rounded-full shadow-xs">
+              <Badge color="primary" size="sm">
                 {boyStudents.length} Boys
-              </span>
+              </Badge>
             </div>
 
-            <div className="divide-y divide-[#dae2ff]/50 p-2 flex-1 overflow-y-auto max-h-[560px]">
+            <div className="divide-y divide-gray-100 dark:divide-gray-800/60 p-2 flex-1 overflow-y-auto max-h-[560px]">
               {boyStudents.length === 0 ? (
-                <div className="p-8 text-center text-[#747783]">
-                  <p className="text-[13px] font-medium">No boys enrolled in this selection.</p>
+                <div className="p-8 text-center text-gray-400 text-xs">
+                  No boys enrolled in this selection.
                 </div>
               ) : (
                 boyStudents.map((student) => (
                   <div
                     key={student.id}
                     onClick={() => setViewingStudent(student)}
-                    className="p-3 hover:bg-[#f0f4ff] rounded-md transition-all flex items-center justify-between gap-3 cursor-pointer group"
+                    className="p-3 hover:bg-gray-50/80 rounded-xl transition-all flex items-center justify-between gap-3 cursor-pointer group dark:hover:bg-white/[0.02]"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-[#002869] text-white flex items-center justify-center font-bold text-[14px] flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-brand-50 text-brand-500 flex items-center justify-center font-bold text-xs flex-shrink-0 dark:bg-brand-500/10 dark:text-brand-400">
                         {student.avatarLetter}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-[14px] font-bold text-[#001947] group-hover:text-[#0b3d91]">
+                          <h4 className="text-xs font-bold text-gray-900 dark:text-white group-hover:text-brand-500">
                             {student.name}
                           </h4>
-                          <span className="bg-[#dae2ff] text-[#001947] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                          <Badge color="light" size="sm">
                             Std {student.standard}
-                          </span>
+                          </Badge>
                         </div>
-                        <p className="text-[11px] text-[#434652] mt-0.5">
-                          Parent: {student.parentName || 'N/A'} â€¢ {student.phone}
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          Parent: {student.parentName || 'N/A'} &middot; {student.phone}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditStudent(student);
-                        }}
-                        className="p-1.5 text-[#434652] hover:text-[#002869] rounded hover:bg-white cursor-pointer"
+                        onClick={() => handleEditStudent(student)}
+                        className="p-1 text-gray-400 hover:text-brand-500 rounded"
                         title="Edit Student"
                       >
                         <span className="material-symbols-outlined text-[16px]">edit</span>
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setStudentToDelete(student);
-                        }}
-                        className="p-1.5 text-[#434652] hover:text-[#ba1a1a] rounded hover:bg-[#ffdad6] cursor-pointer"
+                        onClick={() => setStudentToDelete(student)}
+                        className="p-1 text-gray-400 hover:text-error-500 rounded"
                         title="Delete Student"
                       >
                         <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -1075,70 +989,61 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </div>
 
           {/* Girls Column */}
-          <div className="bg-white rounded-md shadow-xs border border-[#ffdbc8] overflow-hidden flex flex-col">
-            <div className="px-4 py-3 bg-[#ffdbc8] border-b border-[#ffdbc8] flex items-center justify-between">
+          <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02] flex flex-col">
+            <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <span className="text-[20px]">ðŸ‘§</span>
-                <div>
-                  <h2 className="text-[15px] font-bold text-[#592600]">Girls Roster</h2>
-                  <p className="text-[11px] text-[#592600]/70 font-semibold">{girlStudents.length} Enrolled</p>
-                </div>
+                <span className="text-lg">👧</span>
+                <span className="font-bold text-gray-900 dark:text-white text-sm">Girls Roster</span>
               </div>
-              <span className="bg-white text-[#592600] font-bold text-[12px] px-2.5 py-0.5 rounded-full shadow-xs">
+              <Badge color="warning" size="sm">
                 {girlStudents.length} Girls
-              </span>
+              </Badge>
             </div>
 
-            <div className="divide-y divide-[#ffdbc8]/50 p-2 flex-1 overflow-y-auto max-h-[560px]">
+            <div className="divide-y divide-gray-100 dark:divide-gray-800/60 p-2 flex-1 overflow-y-auto max-h-[560px]">
               {girlStudents.length === 0 ? (
-                <div className="p-8 text-center text-[#747783]">
-                  <p className="text-[13px] font-medium">No girls enrolled in this selection.</p>
+                <div className="p-8 text-center text-gray-400 text-xs">
+                  No girls enrolled in this selection.
                 </div>
               ) : (
                 girlStudents.map((student) => (
                   <div
                     key={student.id}
                     onClick={() => setViewingStudent(student)}
-                    className="p-3 hover:bg-[#fff5ee] rounded-md transition-all flex items-center justify-between gap-3 cursor-pointer group"
+                    className="p-3 hover:bg-gray-50/80 rounded-xl transition-all flex items-center justify-between gap-3 cursor-pointer group dark:hover:bg-white/[0.02]"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-[#fb7800] text-white flex items-center justify-center font-bold text-[14px] flex-shrink-0">
+                      <div className="w-8 h-8 rounded-full bg-orange-50 text-orange-500 flex items-center justify-center font-bold text-xs flex-shrink-0 dark:bg-orange-500/10 dark:text-orange-400">
                         {student.avatarLetter}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">
-                          <h4 className="text-[14px] font-bold text-[#592600] group-hover:text-[#b06000]">
+                          <h4 className="text-xs font-bold text-gray-900 dark:text-white group-hover:text-orange-500">
                             {student.name}
                           </h4>
-                          <span className="bg-[#ffdbc8] text-[#592600] text-[10px] font-bold px-1.5 py-0.5 rounded">
+                          <Badge color="light" size="sm">
                             Std {student.standard}
-                          </span>
+                          </Badge>
                         </div>
-                        <p className="text-[11px] text-[#434652] mt-0.5">
-                          Parent: {student.parentName || 'N/A'} â€¢ {student.phone}
+                        <p className="text-[11px] text-gray-400 mt-0.5">
+                          Parent: {student.parentName || 'N/A'} &middot; {student.phone}
                         </p>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditStudent(student);
-                        }}
-                        className="p-1.5 text-[#434652] hover:text-[#002869] rounded hover:bg-white cursor-pointer"
+                        onClick={() => handleEditStudent(student)}
+                        className="p-1 text-gray-400 hover:text-brand-500 rounded"
                         title="Edit Student"
                       >
                         <span className="material-symbols-outlined text-[16px]">edit</span>
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setStudentToDelete(student);
-                        }}
-                        className="p-1.5 text-[#434652] hover:text-[#ba1a1a] rounded hover:bg-[#ffdad6] cursor-pointer"
+                        onClick={() => setStudentToDelete(student)}
+                        className="p-1 text-gray-400 hover:text-error-500 rounded"
                         title="Delete Student"
                       >
                         <span className="material-symbols-outlined text-[16px]">delete</span>
@@ -1154,25 +1059,25 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
       {/* 2. TABLE VIEW */}
       {(viewMode === 'all' || viewMode === 'boys' || viewMode === 'girls') && (
-        <div className="bg-white rounded-md border border-[#c4c6d3]/60 shadow-xs overflow-hidden">
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
           <table className="w-full text-left border-collapse">
-            <thead className="bg-[#f4f3fb] text-[11px] font-bold text-[#002869] uppercase tracking-wider">
+            <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Code</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Student Name</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Gender</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Standard</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Parent / Guardian</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Phone</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3]">Status</th>
-                <th className="px-4 py-3 border-b border-[#c4c6d3] text-right">Actions</th>
+                <th className="px-5 py-3.5">Code</th>
+                <th className="px-5 py-3.5">Student Name</th>
+                <th className="px-5 py-3.5">Gender</th>
+                <th className="px-5 py-3.5">Standard</th>
+                <th className="px-5 py-3.5">Parent / Guardian</th>
+                <th className="px-5 py-3.5">Phone</th>
+                <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="text-[13px] divide-y divide-[#c4c6d3]/40">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
               {(viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents).length ===
               0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-[#747783] text-[13px]">
+                  <td colSpan={8} className="px-5 py-12 text-center text-gray-400">
                     No students found matching the selected filters.
                   </td>
                 </tr>
@@ -1182,54 +1087,42 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     <tr
                       key={student.id}
                       onClick={() => setViewingStudent(student)}
-                      className="hover:bg-[#faf8ff] transition-colors cursor-pointer"
+                      className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
                     >
-                      <td className="px-4 py-3 text-[12px] font-semibold text-[#747783]">{student.code}</td>
-                      <td className="px-4 py-3 font-bold text-[#002869]">{student.name}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
-                            student.gender === 'male' ? 'bg-[#dae2ff] text-[#001947]' : 'bg-[#ffdbc8] text-[#592600]'
-                          }`}
-                        >
-                          {student.gender === 'male' ? 'ðŸ‘¦ Boy' : 'ðŸ‘§ Girl'}
-                        </span>
+                      <td className="px-5 py-3.5 font-mono text-gray-400">{student.code}</td>
+                      <td className="px-5 py-3.5 font-bold text-gray-900 dark:text-white">{student.name}</td>
+                      <td className="px-5 py-3.5">
+                        <Badge color={student.gender === 'male' ? 'primary' : 'warning'} size="sm">
+                          {student.gender === 'male' ? '👦 Boy' : '👧 Girl'}
+                        </Badge>
                       </td>
-                      <td className="px-4 py-3 font-bold text-[#002869]">{student.standard}th Standard</td>
-                      <td className="px-4 py-3 text-[#434652]">{student.parentName || 'â€”'}</td>
-                      <td className="px-4 py-3 text-[#434652] text-[12px]">{student.phone}</td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold ${
-                            student.status === 'active' ? 'bg-[#e6f4ea] text-[#137333]' : 'bg-[#ffdad6] text-[#ba1a1a]'
-                          }`}
-                        >
+                      <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300 font-medium">
+                        {student.standard}th Standard
+                      </td>
+                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">{student.parentName || '—'}</td>
+                      <td className="px-5 py-3.5 font-mono text-gray-500 dark:text-gray-400">{student.phone}</td>
+                      <td className="px-5 py-3.5">
+                        <Badge color={student.status === 'active' ? 'success' : 'light'} size="sm">
                           {student.status === 'active' ? 'Active' : 'Inactive'}
-                        </span>
+                        </Badge>
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1.5">
+                      <td className="px-5 py-3.5 text-right">
+                        <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleEditStudent(student);
-                            }}
-                            className="p-1 text-[#434652] hover:text-[#002869] rounded hover:bg-[#e8e7ef] cursor-pointer"
+                            onClick={() => handleEditStudent(student)}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition"
                             title="Edit"
                           >
-                            <span className="material-symbols-outlined text-[17px]">edit</span>
+                            <span className="material-symbols-outlined text-[16px]">edit</span>
                           </button>
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setStudentToDelete(student);
-                            }}
-                            className="p-1 text-[#434652] hover:text-[#ba1a1a] rounded hover:bg-[#ffdad6] cursor-pointer"
+                            onClick={() => setStudentToDelete(student)}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition"
                             title="Delete"
                           >
-                            <span className="material-symbols-outlined text-[17px]">delete</span>
+                            <span className="material-symbols-outlined text-[16px]">delete</span>
                           </button>
                         </div>
                       </td>
@@ -1248,9 +1141,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           - Panchayat & Village removed (automatic)
          ========================================== */}
       {showAddModal && (
-        <div className="fixed inset-0 z-[100] flex justify-end">
+        <div className="fixed inset-0 z-[99999] flex justify-end">
           <div
-            className="fixed inset-0 bg-[#001947]/40  transition-opacity"
+            className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm transition-opacity"
             onClick={() => setShowAddModal(false)}
           />
 
@@ -1270,35 +1163,39 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
             <form onSubmit={handleSaveStudent} className="flex-1 overflow-y-auto p-6 space-y-4">
               {/* Target Location */}
-                <div className="grid grid-cols-2 gap-3 bg-[#f4f3fb] border border-[#c4c6d3]/60 rounded-md p-3.5 mb-4">
+                <div className="grid grid-cols-2 gap-3 bg-gray-50 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 rounded-xl p-3.5 mb-4">
                   <div>
-                    <label className="block text-[12px] font-bold text-[#002869] mb-1">Target Panchayat *</label>
-                    <select
-                      value={formData.panchayatId}
-                      onChange={(e) => setFormData({ ...formData, panchayatId: e.target.value, villageName: '' })}
-                      className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
-                      required
+                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Target Panchayat *</label>
+                    <Select
+                      value={formData.panchayatId || (panchayats[0]?.id ?? undefined)}
+                      onValueChange={(val) => setFormData({ ...formData, panchayatId: val, villageName: '' })}
                     >
-                      <option value="" disabled>Select Panchayat</option>
-                      {panchayats.map(p => (
-                        <option key={p.id} value={p.id}>{p.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Panchayat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {panchayats.map(p => (
+                          <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
-                    <label className="block text-[12px] font-bold text-[#002869] mb-1">Target Village *</label>
-                    <select
-                      value={formData.villageName}
-                      onChange={(e) => setFormData({ ...formData, villageName: e.target.value })}
-                      className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
-                      required
+                    <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1">Target Village *</label>
+                    <Select
+                      value={formData.villageName || (panchayats.find(p => p.id === formData.panchayatId)?.villages[0]?.name ?? undefined)}
+                      onValueChange={(val) => setFormData({ ...formData, villageName: val })}
                       disabled={!formData.panchayatId}
                     >
-                      <option value="" disabled>Select Village</option>
-                      {panchayats.find(p => p.id === formData.panchayatId)?.villages.map(v => (
-                        <option key={v.id} value={v.name}>{v.name}</option>
-                      ))}
-                    </select>
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Village" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {panchayats.find(p => p.id === formData.panchayatId)?.villages.map(v => (
+                          <SelectItem key={v.id} value={v.name}>{v.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
                 <div>
@@ -1349,16 +1246,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[12px] font-bold text-[#002869] mb-1">Standard (Class) *</label>
-                  <select
+                  <Select
                     value={formData.standard}
-                    onChange={(e) => setFormData({ ...formData, standard: e.target.value })}
-                    className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869] h-[38px] font-bold text-[#002869]"
+                    onValueChange={(val) => setFormData({ ...formData, standard: val })}
                   >
-                    <option value="9">9th Standard</option>
-                    <option value="10">10th Standard</option>
-                    <option value="11">11th Standard</option>
-                    <option value="12">12th Standard</option>
-                  </select>
+                    <SelectTrigger className="w-full h-[38px] text-[13px] border-[#c4c6d3] font-bold text-[#002869]">
+                      <SelectValue placeholder="Standard" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="9">9th Standard</SelectItem>
+                      <SelectItem value="10">10th Standard</SelectItem>
+                      <SelectItem value="11">11th Standard</SelectItem>
+                      <SelectItem value="12">12th Standard</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
@@ -1396,16 +1297,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
               <div>
                 <label className="block text-[12px] font-bold text-[#002869] mb-1">Enrollment Status</label>
-                <select
+                <Select
                   value={formData.status}
-                  onChange={(e) =>
-                    setFormData({ ...formData, status: e.target.value as 'active' | 'inactive' })
-                  }
-                  className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869] h-[38px]"
+                  onValueChange={(val) => setFormData({ ...formData, status: val as 'active' | 'inactive' })}
                 >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                </select>
+                  <SelectTrigger className="w-full h-[38px] text-[13px] border-[#c4c6d3]">
+                    <SelectValue placeholder="Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="p-4 border-t border-[#c4c6d3] bg-[#faf8ff] flex justify-end gap-3 -mx-6 -mb-6 mt-6">
@@ -1432,7 +1335,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           EXCEL BULK IMPORT MODAL
          ========================================== */}
       {showImportModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#001947]/40 ">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/75 backdrop-blur-sm">
           <div className="bg-white rounded-md shadow-sm w-full max-w-2xl overflow-hidden animate-[fadeIn_0.2s_ease-out] flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 border-b border-[#c4c6d3] flex justify-between items-center bg-[#f4f3fb]">
               <div className="flex items-center gap-2">
@@ -1463,30 +1366,43 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <div className="grid grid-cols-2 gap-3 bg-[#f4f3fb] border border-[#c4c6d3]/60 rounded-md p-3.5">
                 <div>
                   <label className="block text-[12px] font-bold text-[#002869] mb-1">Target Panchayat *</label>
-                  <select
+                  <Select
                     value={importPanchayatId}
-                    onChange={(e) => { setImportPanchayatId(e.target.value); setImportVillageName(''); }}
-                    className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                    onValueChange={(val) => {
+                      setImportPanchayatId(val);
+                      setImportVillageName('');
+                    }}
                   >
-                    <option value="" disabled>Select Panchayat</option>
-                    {panchayats.map(p => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-[38px] text-[13px] border-[#c4c6d3] bg-white">
+                      <SelectValue placeholder="Select Panchayat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {panchayats.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="block text-[12px] font-bold text-[#002869] mb-1">Target Village *</label>
-                  <select
+                  <Select
                     value={importVillageName}
-                    onChange={(e) => setImportVillageName(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                    onValueChange={(val) => setImportVillageName(val)}
                     disabled={!importPanchayatId}
                   >
-                    <option value="" disabled>Select Village</option>
-                    {panchayats.find(p => p.id === importPanchayatId)?.villages.map(v => (
-                      <option key={v.id} value={v.name}>{v.name}</option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-[38px] text-[13px] border-[#c4c6d3] bg-white disabled:opacity-50">
+                      <SelectValue placeholder="Select Village" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(panchayats.find((p) => p.id === importPanchayatId)?.villages || []).map((v) => (
+                        <SelectItem key={v.id} value={v.name}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1619,7 +1535,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           VIEW STUDENT DETAILS MODAL
          ========================================== */}
       {viewingStudent && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-[#001947]/40 ">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/75 backdrop-blur-sm">
           <div className="bg-white rounded-md shadow-sm w-full max-w-md overflow-hidden animate-[fadeIn_0.2s_ease-out]">
             <div className="px-6 py-4 border-b border-[#c4c6d3] flex justify-between items-center bg-[#f4f3fb]">
               <h3 className="text-[17px] font-bold text-[#002869] flex items-center gap-2">
@@ -1741,7 +1657,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           IN-APP DELETE CONFIRMATION MODAL
          ========================================== */}
       {studentToDelete && (
-        <div className="fixed inset-0 bg-black/60  z-[150] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-md max-w-sm w-full overflow-hidden shadow-sm border border-[#c4c6d3] p-6 space-y-4 text-center">
             <div className="w-12 h-12 rounded-full bg-[#ffdad6] text-[#ba1a1a] flex items-center justify-center mx-auto">
               <span className="material-symbols-outlined text-[26px]">delete_forever</span>

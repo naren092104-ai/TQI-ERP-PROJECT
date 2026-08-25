@@ -16,6 +16,11 @@ import {
   ApprovalItem,
   AuditLogEntry,
   User,
+  DateChangeRequest,
+  SessionReport,
+  SessionSubmission,
+  AcademicYear,
+  TqiModule,
 } from './types';
 import { Navigation } from './components/Navigation';
 import { LoginPage, AuthSession } from './components/LoginPage';
@@ -42,6 +47,9 @@ import { ModuleLibraryView } from './components/ModuleLibraryView';
 import { AcademicSetupView } from './components/AcademicSetupView';
 import { Header } from './components/Header';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import DateChangeRequestView from './components/DateChangeRequestView';
+import SessionReportView from './components/SessionReportView';
+import SessionSubmissionView from './components/SessionSubmissionView';
 import { apiUrl } from './utils/api';
 
 
@@ -77,6 +85,7 @@ export default function App() {
   const [activeFinanceDraftId, setActiveFinanceDraftId] = useState<string | undefined>(undefined);
   const [openNewFinanceModal, setOpenNewFinanceModal] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [selectedLessonPlanId, setSelectedLessonPlanId] = useState<string | undefined>(undefined);
 
   useEffect(() => {
@@ -102,6 +111,11 @@ export default function App() {
   const [lessonPlans, setLessonPlans] = useState<LessonPlan[]>([]);
   const [photoGroups, setPhotoGroups] = useState<SessionPhotoGroup[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [dateChangeRequests, setDateChangeRequests] = useState<DateChangeRequest[]>([]);
+  const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
+  const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
+  const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [modules, setModules] = useState<TqiModule[]>([]);
 
   // Sync with API Backend
   const fetchBackendData = useCallback(async (signal: AbortSignal) => {
@@ -148,6 +162,11 @@ export default function App() {
         notificationsRes,
         clustersRes,
         usersRes,
+        dateChangeRequestsRes,
+        sessionReportsRes,
+        sessionSubmissionsRes,
+        academicYearsRes,
+        modulesRes,
       ] = await Promise.all([
         get(`/api/panchayats?clusterId=${currentUserClusterId}`),
         get(`/api/students?clusterId=${currentUserClusterId}`),
@@ -161,6 +180,11 @@ export default function App() {
         get('/api/notifications'),
         get('/api/clusters'),
         get('/api/users'),
+        get('/api/date-change-requests'),
+        get('/api/session-reports'),
+        get('/api/session-submissions'),
+        get('/api/academic-years'),
+        get('/api/modules'),
       ]);
 
       if (signal.aborted) return;
@@ -177,6 +201,12 @@ export default function App() {
       if (Array.isArray(notificationsRes?.notifications))   setNotifications(notificationsRes.notifications);
       if (Array.isArray(clustersRes?.clusters))             setClusters(clustersRes.clusters);
       if (Array.isArray(usersRes?.users))                   setUsers(usersRes.users);
+      if (Array.isArray(dateChangeRequestsRes?.dateChangeRequests)) setDateChangeRequests(dateChangeRequestsRes.dateChangeRequests);
+      if (Array.isArray(sessionReportsRes?.sessionReports))         setSessionReports(sessionReportsRes.sessionReports);
+      if (Array.isArray(sessionSubmissionsRes?.sessionSubmissions)) setSessionSubmissions(sessionSubmissionsRes.sessionSubmissions);
+      if (Array.isArray(academicYearsRes?.academicYears))           setAcademicYears(academicYearsRes.academicYears);
+      if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
+      else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
     } catch {
       // Network error or abort — keep existing in-memory state.
     }
@@ -409,6 +439,19 @@ export default function App() {
       return true;
     } catch (error: any) {
       throw error;
+    }
+  };
+
+  // Delete Cluster Mutation
+  const handleDeleteCluster = async (clusterId: string) => {
+    try {
+      await fetch(apiUrl(`/api/clusters/${clusterId}`), {
+        method: 'DELETE',
+        headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+      });
+      setClusters((prev) => prev.filter((c) => c.id !== clusterId));
+    } catch (error: any) {
+      setClusters((prev) => prev.filter((c) => c.id !== clusterId));
     }
   };
 
@@ -861,6 +904,191 @@ export default function App() {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
   };
 
+  // Date Change Request handlers
+  const handleSubmitDateChangeRequest = async (sessionId: string, originalDate: string, requestedDate: string, reason: string) => {
+    try {
+      const response = await fetch(apiUrl('/api/date-change-requests'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify({ sessionId, originalDate, requestedDate, reason }),
+      });
+      const data = await response.json();
+      if (data?.success && data.dateChangeRequest) {
+        setDateChangeRequests(prev => [data.dateChangeRequest, ...prev]);
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleReviewDateChangeRequest = async (requestId: string, action: 'approve' | 'reject', remarks: string) => {
+    try {
+      const response = await fetch(apiUrl(`/api/date-change-requests/${requestId}/${action}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify({ remarks }),
+      });
+      const data = await response.json();
+      if (data?.success) {
+        setDateChangeRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: action === 'approve' ? 'APPROVED' : 'REJECTED', reviewRemarks: remarks } : r));
+        if (action === 'approve') {
+          // Refresh sessions to get updated dates
+          fetchBackendData(new AbortController().signal);
+        }
+      }
+    } catch { /* ignore */ }
+  };
+
+  // Session Report handlers
+  const handleSaveSessionReport = async (report: Partial<SessionReport>) => {
+    try {
+      const response = await fetch(apiUrl('/api/session-reports'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify(report),
+      });
+      const data = await response.json();
+      if (data?.success && data.sessionReport) {
+        setSessionReports(prev => {
+          const idx = prev.findIndex(r => r.id === data.sessionReport.id);
+          if (idx >= 0) { const copy = [...prev]; copy[idx] = data.sessionReport; return copy; }
+          return [data.sessionReport, ...prev];
+        });
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteSessionReport = async (reportId: string) => {
+    try {
+      await fetch(apiUrl(`/api/session-reports/${reportId}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      setSessionReports(prev => prev.filter(r => r.id !== reportId));
+    } catch { /* ignore */ }
+  };
+
+  // Session Submission handlers
+  const handleSubmitSession = async (sessionId: string, clusterId: string, dayNumber: number) => {
+    try {
+      const response = await fetch(apiUrl('/api/session-submissions'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify({ sessionId, clusterId, dayNumber }),
+      });
+      const data = await response.json();
+      if (data?.success && data.submission) {
+        setSessionSubmissions(prev => [data.submission, ...prev]);
+        return { success: true };
+      }
+      return { success: false, error: data?.error, missingItems: data?.missingItems };
+    } catch {
+      return { success: false, error: 'Network error' };
+    }
+  };
+
+  const handleReviewSubmission = async (submissionId: string, action: 'approve' | 'resubmission', remarks: string) => {
+    try {
+      await fetch(apiUrl(`/api/session-submissions/${submissionId}/review`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify({ action, remarks }),
+      });
+      setSessionSubmissions(prev => prev.map(s => s.id === submissionId ? {
+        ...s,
+        status: action === 'approve' ? 'APPROVED' : 'RESUBMISSION_REQUIRED',
+        reviewRemarks: remarks,
+      } : s));
+    } catch { /* ignore */ }
+  };
+
+  const handleResubmitSession = async (submissionId: string) => {
+    try {
+      await fetch(apiUrl(`/api/session-submissions/${submissionId}/resubmit`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      setSessionSubmissions(prev => prev.map(s => s.id === submissionId ? { ...s, status: 'RESUBMITTED' } : s));
+    } catch { /* ignore */ }
+  };
+
+  // Module handlers
+  const handleCreateModule = async (moduleData: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => {
+    try {
+      const response = await fetch(apiUrl('/api/modules'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify(moduleData),
+      });
+      const data = await response.json();
+      const newMod: TqiModule = {
+        id: data?.module?.id || `mod-${Date.now()}`,
+        moduleNumber: moduleData.moduleNumber,
+        moduleName: moduleData.moduleName,
+        topic: moduleData.topic,
+        description: moduleData.description,
+        academicYear: moduleData.academicYear,
+        dayNumber: moduleData.dayNumber,
+        status: 'Active',
+        version: 1,
+        resources: [],
+        createdBy: currentUser?.name || 'Super Admin',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      setModules(prev => [newMod, ...prev]);
+    } catch { /* ignore */ }
+  };
+
+  const handleUpdateModule = async (id: string, moduleData: any) => {
+    try {
+      const response = await fetch(apiUrl(`/api/modules/${id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: JSON.stringify(moduleData),
+      });
+      const data = await response.json();
+      if (data?.success && data.data) {
+        setModules(prev => prev.map(m => m.id === id ? { ...m, ...data.data } : m));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDeleteModule = async (id: string) => {
+    try {
+      await fetch(apiUrl(`/api/modules/${id}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      setModules(prev => prev.filter(m => m.id !== id));
+    } catch { /* ignore */ }
+  };
+
+  const handleUploadModuleResource = async (moduleId: string, file: File) => {
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+        body: formData,
+      });
+      const data = await response.json();
+      if (data?.success && data.resource) {
+        setModules(prev => prev.map(m => {
+          if (m.id === moduleId) {
+            const resources = m.resources ? [...m.resources, data.resource] : [data.resource];
+            return { ...m, resources };
+          }
+          return m;
+        }));
+      }
+    } catch { /* ignore */ }
+  };
+
+  const handleDownloadModuleResource = (moduleId: string, resourceId: string) => {
+    const downloadUrl = apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download`);
+    window.open(downloadUrl, '_blank');
+  };
+
   // If user is logged out, render the Login Page
   if (!currentUser) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
@@ -911,6 +1139,18 @@ export default function App() {
     ? auditLogs
     : auditLogs.filter((al) => al.clusterId === currentUserClusterId);
 
+  const displayDateChangeRequests = currentUserRole === 'Super Admin'
+    ? dateChangeRequests
+    : dateChangeRequests.filter(r => r.clusterId === currentUserClusterId);
+
+  const displaySessionReports = currentUserRole === 'Super Admin'
+    ? sessionReports
+    : sessionReports.filter(r => r.clusterId === currentUserClusterId);
+
+  const displaySessionSubmissions = currentUserRole === 'Super Admin'
+    ? sessionSubmissions
+    : sessionSubmissions.filter(s => s.clusterId === currentUserClusterId);
+
   const currentPanchayat = displayPanchayats.find((p) => p.id === selectedPanchayatId) || displayPanchayats[0] || panchayats[0];
   const pendingApprovalsCount = displayApprovals.filter((a) => a.status === 'Pending').length;
   const pendingCount = notifications.filter((n) => !n.isRead).length;
@@ -919,14 +1159,15 @@ export default function App() {
   const activeClusterName = currentUserRole === 'Super Admin' ? 'All Clusters (Tamil Nadu)' : (currentClusterObj?.name || 'Dharmapuri Cluster');
 
   return (
-    <div className="min-h-screen w-full bg-gray-50 dark:bg-gray-950 font-outfit">
-      {/* Navigation (fixed sidebar) */}
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-gray-50 dark:bg-gray-950 font-outfit">
+      {/* Navigation (fixed sidebar on desktop, slide-in drawer on mobile) */}
       <Navigation
         currentTab={currentTab}
         onSelectTab={(tab) => {
           if (tab === 'attendance') setActiveDraftId(undefined);
           if (tab === 'students') setInitialStudentFilters(undefined);
-          setCurrentTab(tab);
+          setCurrentTab(tab as TabType);
+          setMobileSidebarOpen(false);
         }}
         notifications={notifications}
         userRole={currentUserRole}
@@ -937,9 +1178,11 @@ export default function App() {
         isCollapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
         onLogout={handleLogout}
+        isMobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
       />
 
-      {/* Main content with offset for fixed sidebar */}
+      {/* Main content with offset for fixed sidebar on desktop */}
       <div
         className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
           sidebarCollapsed ? 'lg:ml-[90px]' : 'lg:ml-[290px]'
@@ -955,14 +1198,23 @@ export default function App() {
           onSelectCluster={(cid) => setCurrentUserClusterId(cid)}
           notifications={notifications}
           pendingApprovalsCount={pendingApprovalsCount}
-          onNavigate={handleNavigate}
+          onNavigate={(tab, targetId) => {
+            handleNavigate(tab, targetId);
+            setMobileSidebarOpen(false);
+          }}
           onLogout={handleLogout}
           onRoleChange={(role) => handleRoleChange(role, currentUserClusterId)}
-          onToggleSidebar={() => setSidebarCollapsed((prev) => !prev)}
+          onToggleSidebar={() => {
+            if (window.innerWidth < 1024) {
+              setMobileSidebarOpen((prev) => !prev);
+            } else {
+              setSidebarCollapsed((prev) => !prev);
+            }
+          }}
         />
 
-        <main className="flex-1">
-          <div className="p-4 mx-auto max-w-[1600px] md:p-6 lg:p-8">
+        <main className="flex-1 w-full max-w-full overflow-x-hidden">
+          <div className="w-full p-4 md:p-6 lg:p-8">
             <ErrorBoundary key={`${currentTab}-${currentUserRole}`}>
 
               {currentTab === 'dashboard' && (
@@ -1016,8 +1268,10 @@ export default function App() {
               {currentTab === 'clusters' && (
                 <ClustersView
                   clusters={clusters}
+                  userRole={currentUserRole}
                   onNavigate={handleNavigate}
                   onAddCluster={handleAddCluster}
+                  onDeleteCluster={handleDeleteCluster}
                 />
               )}
 
@@ -1067,7 +1321,7 @@ export default function App() {
                   panchayats={displayPanchayats}
                   initialFilters={initialStudentFilters}
                   onAddStudent={handleAddStudent}
-                  onBulkAddStudents={handleBulkAddStudents}
+                  onBulkImportStudents={handleBulkAddStudents}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                 />
@@ -1136,6 +1390,7 @@ export default function App() {
                 <FinanceView
                   financeEntries={displayFinance}
                   panchayats={displayPanchayats}
+                  sessions={sessions}
                   drafts={displayFinanceDrafts}
                   onNavigate={handleNavigate}
                   onAddFinanceEntry={handleAddFinanceEntry}
@@ -1192,8 +1447,64 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'settings' && <SettingsView />}
-              {currentTab === 'module-library' && <ModuleLibraryView authToken={currentUser.token} />}
+              {currentTab === 'settings' && (
+                <SettingsView
+                  currentUser={currentUser}
+                  onUpdateProfile={(updated) => {
+                    setCurrentUser((prev) => (prev ? { ...prev, ...updated } : prev));
+                  }}
+                />
+              )}
+
+              {currentTab === 'date-change-requests' && (
+                <DateChangeRequestView
+                  dateChangeRequests={displayDateChangeRequests}
+                  sessions={displaySessions}
+                  currentUserRole={currentUserRole}
+                  currentUserId={currentUser.id || ''}
+                  currentUserClusterId={currentUserClusterId}
+                  onSubmitRequest={handleSubmitDateChangeRequest}
+                  onReviewRequest={handleReviewDateChangeRequest}
+                />
+              )}
+
+              {currentTab === 'session-reports' && (
+                <SessionReportView
+                  sessionReports={displaySessionReports}
+                  sessions={displaySessions}
+                  clusters={clusters}
+                  currentUserRole={currentUserRole}
+                  currentUserClusterId={currentUserClusterId}
+                  onSaveReport={handleSaveSessionReport}
+                  onDeleteReport={handleDeleteSessionReport}
+                />
+              )}
+
+              {currentTab === 'session-submissions' && (
+                <SessionSubmissionView
+                  sessionSubmissions={displaySessionSubmissions}
+                  sessions={displaySessions}
+                  clusters={clusters}
+                  currentUserRole={currentUserRole}
+                  currentUserId={currentUser.id || ''}
+                  currentUserClusterId={currentUserClusterId}
+                  onSubmitSession={handleSubmitSession}
+                  onReviewSubmission={handleReviewSubmission}
+                  onResubmit={handleResubmitSession}
+                  onNavigateToTab={(tab) => setCurrentTab(tab as TabType)}
+                />
+              )}
+              {currentTab === 'module-library' && (
+                <ModuleLibraryView
+                  modules={modules}
+                  currentUserRole={currentUserRole}
+                  onCreateModule={handleCreateModule}
+                  onUpdateModule={handleUpdateModule}
+                  onDeleteModule={handleDeleteModule}
+                  onUploadResource={handleUploadModuleResource}
+                  onDownloadResource={handleDownloadModuleResource}
+                />
+              )}
             </ErrorBoundary>
           </div>
         </main>

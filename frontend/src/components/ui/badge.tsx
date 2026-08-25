@@ -1,78 +1,66 @@
-import React from "react";
+import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 
-export type BadgeVariant = "light" | "solid";
-export type BadgeSize = "sm" | "md";
-export type BadgeColor =
-  | "primary"
-  | "success"
-  | "error"
-  | "warning"
-  | "info"
-  | "light"
-  | "dark";
+import { cn } from "@/lib/utils";
 
-export interface BadgeProps {
-  variant?: BadgeVariant;
-  size?: BadgeSize;
-  color?: BadgeColor;
-  startIcon?: React.ReactNode;
-  endIcon?: React.ReactNode;
-  children: React.ReactNode;
-  className?: string;
+const badgeVariants = cva(
+  "inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+  {
+    variants: {
+      variant: {
+        default:
+          "border-transparent bg-brand-500 text-white hover:bg-brand-600",
+        secondary:
+          "border-transparent bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200",
+        destructive:
+          "border-transparent bg-error-500 text-white hover:bg-error-600",
+        outline: "text-foreground border-gray-200 dark:border-gray-800",
+        success: "border-transparent bg-success-50 text-success-700 border-success-200 dark:bg-success-950/40 dark:text-success-400",
+        warning: "border-transparent bg-warning-50 text-warning-700 border-warning-200 dark:bg-warning-950/40 dark:text-warning-400",
+        error: "border-transparent bg-error-50 text-error-700 border-error-200 dark:bg-error-950/40 dark:text-error-400",
+        info: "border-transparent bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400",
+      },
+      size: {
+        sm: "px-2 py-0.5 text-[10px]",
+        md: "px-2.5 py-0.5 text-[11px]",
+        lg: "px-3 py-1 text-xs",
+      },
+    },
+    defaultVariants: {
+      variant: "default",
+      size: "md",
+    },
+  },
+);
+
+export interface BadgeProps
+  extends React.HTMLAttributes<HTMLDivElement>,
+    VariantProps<typeof badgeVariants> {
+  color?: string;
+  size?: "sm" | "md" | "lg" | any;
+  variant?: any;
 }
 
-export const Badge: React.FC<BadgeProps> = ({
-  variant = "light",
-  color = "primary",
-  size = "md",
-  startIcon,
-  endIcon,
-  children,
-  className = "",
-}) => {
-  const baseStyles =
-    "inline-flex items-center px-2.5 py-0.5 justify-center gap-1 rounded-full font-medium transition-colors";
+function Badge({ className, variant, color, size, ...props }: BadgeProps) {
+  // If color is passed, map it to matching variant
+  let resolvedVariant = variant;
+  if (!resolvedVariant && color) {
+    if (color === "success") resolvedVariant = "success";
+    else if (color === "warning") resolvedVariant = "warning";
+    else if (color === "error" || color === "destructive") resolvedVariant = "destructive";
+    else if (color === "info" || color === "primary") resolvedVariant = "default";
+    else resolvedVariant = "secondary";
+  }
 
-  const sizeStyles = {
-    sm: "text-theme-xs",
-    md: "text-sm",
-  };
-
-  const variants = {
-    light: {
-      primary:
-        "bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400",
-      success:
-        "bg-success-50 text-success-600 dark:bg-success-500/15 dark:text-success-500",
-      error:
-        "bg-error-50 text-error-600 dark:bg-error-500/15 dark:text-error-500",
-      warning:
-        "bg-warning-50 text-warning-600 dark:bg-warning-500/15 dark:text-orange-400",
-      info: "bg-blue-light-50 text-blue-light-500 dark:bg-blue-light-500/15 dark:text-blue-light-500",
-      light: "bg-gray-100 text-gray-700 dark:bg-white/5 dark:text-white/80",
-      dark: "bg-gray-500 text-white dark:bg-white/5 dark:text-white",
-    },
-    solid: {
-      primary: "bg-brand-500 text-white dark:text-white",
-      success: "bg-success-500 text-white dark:text-white",
-      error: "bg-error-500 text-white dark:text-white",
-      warning: "bg-warning-500 text-white dark:text-white",
-      info: "bg-blue-light-500 text-white dark:text-white",
-      light: "bg-gray-400 dark:bg-white/5 text-white dark:text-white/80",
-      dark: "bg-gray-700 text-white dark:text-white",
-    },
-  };
-
-  const sizeClass = sizeStyles[size] || sizeStyles.md;
-  const colorStyles = variants[variant]?.[color] || variants.light.primary;
+  const resolvedSize = size === "sm" || size === "md" || size === "lg" ? size : "md";
 
   return (
-    <span className={`${baseStyles} ${sizeClass} ${colorStyles} ${className}`}>
-      {startIcon && <span className="mr-1 inline-flex items-center">{startIcon}</span>}
-      {children}
-      {endIcon && <span className="ml-1 inline-flex items-center">{endIcon}</span>}
-    </span>
+    <div
+      className={cn(badgeVariants({ variant: resolvedVariant, size: resolvedSize }), className)}
+      {...props}
+    />
   );
-};
+}
 
 export default Badge;
+export { Badge, badgeVariants };

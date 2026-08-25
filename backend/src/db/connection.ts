@@ -3,9 +3,11 @@ import path from 'path';
 import mysql, { Pool, PoolOptions } from 'mysql2/promise';
 
 dotenv.config();
+dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
 dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') });
+dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
-const DB_NAME = process.env.DB_NAME || 'quest';
+const DB_NAME = process.env.DB_NAME || 'TQI_ERP';
 const baseConfig: PoolOptions = {
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),

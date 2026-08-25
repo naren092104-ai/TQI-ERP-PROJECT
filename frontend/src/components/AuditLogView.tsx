@@ -1,20 +1,30 @@
-import React, { useState, useMemo } from 'react';
-import { AuditLogEntry } from '../types';
+import React, { useState, useMemo } from "react";
+import { AuditLogEntry } from "../types";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "./ui/select";
+import Badge from "./ui/badge";
+import { Table, TableHeader, TableBody, TableRow, TableCell } from "./ui/table";
+import { Search, Download } from "lucide-react";
 
 interface AuditLogViewProps {
   auditLogs: AuditLogEntry[];
-  userRole: 'Super Admin' | 'Cluster Admin';
+  userRole: "Super Admin" | "Cluster Admin";
 }
 
 export const AuditLogView: React.FC<AuditLogViewProps> = ({ auditLogs = [], userRole }) => {
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedModule, setSelectedModule] = useState('all');
-  const [selectedAction, setSelectedAction] = useState('all');
+  const [searchTerm, setSearchTerm] = useState("");
+  const [selectedModule, setSelectedModule] = useState("all");
+  const [selectedAction, setSelectedAction] = useState("all");
 
   const filteredLogs = useMemo(() => {
     return auditLogs.filter((log) => {
-      if (selectedModule !== 'all' && log.module !== selectedModule) return false;
-      if (selectedAction !== 'all' && !log.action.toLowerCase().includes(selectedAction.toLowerCase())) return false;
+      if (selectedModule !== "all" && log.module !== selectedModule) return false;
+      if (selectedAction !== "all" && !log.action.toLowerCase().includes(selectedAction.toLowerCase())) return false;
 
       if (searchTerm) {
         const q = searchTerm.toLowerCase();
@@ -32,174 +42,155 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ auditLogs = [], user
   }, [auditLogs, selectedModule, selectedAction, searchTerm]);
 
   const handleExportCSV = () => {
-    window.open('/api/export/excel?module=audit-logs', '_blank');
+    window.open("/api/export/excel?module=audit-logs", "_blank");
   };
 
-  const getActionBadgeColor = (action: string) => {
+  const getActionBadge = (action: string) => {
     const act = action.toLowerCase();
-    if (act.includes('approved')) return 'bg-emerald-50 text-emerald-800 border-emerald-200';
-    if (act.includes('correction') || act.includes('rejected')) return 'bg-amber-50 text-amber-900 border-amber-200';
-    if (act.includes('created') || act.includes('submitted')) return 'bg-blue-50 text-blue-800 border-blue-200';
-    if (act.includes('deleted')) return 'bg-red-50 text-red-800 border-red-200';
-    return 'bg-slate-50 text-slate-700 border-slate-200';
+    if (act.includes("approved")) return <Badge color="success" size="sm">{action}</Badge>;
+    if (act.includes("correction") || act.includes("rejected")) return <Badge color="warning" size="sm">{action}</Badge>;
+    if (act.includes("created") || act.includes("submitted")) return <Badge color="primary" size="sm">{action}</Badge>;
+    if (act.includes("deleted")) return <Badge color="error" size="sm">{action}</Badge>;
+    return <Badge color="light" size="sm">{action}</Badge>;
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
+    <div className="w-full space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white border border-[#c4c6d3]/80 rounded-md p-4 md:p-5 shadow-xs">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-[#002869] text-white flex items-center justify-center font-bold">
-              <span className="material-symbols-outlined text-[20px]">history_edu</span>
-            </div>
-            <h1 className="text-xl md:text-2xl font-bold text-[#002869] tracking-tight">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
               Audit & Governance Trail
             </h1>
-            <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-full">
+            <Badge color="primary" size="sm">
               {filteredLogs.length} Events Logged
-            </span>
+            </Badge>
           </div>
-          <p className="text-xs text-[#747783] mt-1">
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
             Immutable chronological record of submissions, approvals, corrections, enrollments, and status modifications.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleExportCSV}
-            className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-          >
-            <span className="material-symbols-outlined text-[16px] text-emerald-600">table_view</span>
-            Export CSV / Excel
-          </button>
-        </div>
+        <button
+          onClick={handleExportCSV}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition cursor-pointer self-start sm:self-auto"
+        >
+          <Download className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+          Export CSV / Excel
+        </button>
       </div>
 
       {/* Filter Bar */}
-      <div className="bg-white border border-[#c4c6d3]/80 rounded-md p-3 shadow-xs flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-[280px]">
-          {/* Module Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-slate-500">Module:</span>
-            <select
-              value={selectedModule}
-              onChange={(e) => setSelectedModule(e.target.value)}
-              className="bg-[#f8fafc] border border-slate-300 rounded-md px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:border-[#002869] cursor-pointer"
-            >
-              <option value="all">All Modules</option>
-              <option value="Attendance">Attendance</option>
-              <option value="Lesson Plan">Lesson Plans</option>
-              <option value="Finance">Finance</option>
-              <option value="Sessions">Sessions</option>
-              <option value="Correction Request">Correction Requests</option>
-              <option value="Students">Students</option>
-              <option value="Clusters">Clusters</option>
-            </select>
-          </div>
-
-          {/* Action Filter */}
-          <div className="flex items-center gap-1.5">
-            <span className="font-semibold text-slate-500">Action:</span>
-            <select
-              value={selectedAction}
-              onChange={(e) => setSelectedAction(e.target.value)}
-              className="bg-[#f8fafc] border border-slate-300 rounded-md px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:border-[#002869] cursor-pointer"
-            >
-              <option value="all">All Actions</option>
-              <option value="approved">Approvals</option>
-              <option value="correction">Corrections</option>
-              <option value="submitted">Submissions</option>
-              <option value="created">Creations</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Search */}
-        <div className="relative min-w-[240px]">
-          <span className="material-symbols-outlined absolute left-2.5 top-2 text-[18px] text-slate-400">
-            search
-          </span>
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search by user, action, details..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-[#f8fafc] border border-slate-300 rounded-md pl-8 pr-3 py-1.5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#002869]"
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
           />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="w-48">
+            <Select
+              value={selectedModule || "all"}
+              onValueChange={(val) => setSelectedModule(val)}
+            >
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Modules" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Modules</SelectItem>
+                <SelectItem value="Attendance">Attendance</SelectItem>
+                <SelectItem value="Lesson Plan">Lesson Plans</SelectItem>
+                <SelectItem value="Finance">Finance</SelectItem>
+                <SelectItem value="Sessions">Sessions</SelectItem>
+                <SelectItem value="Correction Request">Correction Requests</SelectItem>
+                <SelectItem value="Students">Students</SelectItem>
+                <SelectItem value="Clusters">Clusters</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="w-40">
+            <Select
+              value={selectedAction || "all"}
+              onValueChange={(val) => setSelectedAction(val)}
+            >
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Actions" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Actions</SelectItem>
+                <SelectItem value="approved">Approvals</SelectItem>
+                <SelectItem value="correction">Corrections</SelectItem>
+                <SelectItem value="submitted">Submissions</SelectItem>
+                <SelectItem value="created">Creations</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       </div>
 
       {/* Audit Log Table */}
-      <div className="bg-white border border-[#c4c6d3]/80 rounded-md overflow-hidden shadow-xs">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="bg-[#f8fafc] text-[#002869] font-bold border-b border-slate-200">
-                <th className="py-3 px-4">Timestamp</th>
-                <th className="py-3 px-4">User</th>
-                <th className="py-3 px-4">Role</th>
-                <th className="py-3 px-4">Action</th>
-                <th className="py-3 px-4">Module</th>
-                <th className="py-3 px-4">Cluster</th>
-                <th className="py-3 px-4">Event Details</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredLogs.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-10 text-slate-400">
-                    No matching audit log events found.
-                  </td>
-                </tr>
-              ) : (
-                filteredLogs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3 px-4 whitespace-nowrap text-slate-500 font-mono text-[11px]">
-                      {log.timestamp}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-800 whitespace-nowrap">
-                      {log.userName}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${
-                          log.userRole === 'Super Admin'
-                            ? 'bg-[#002869] text-white'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}
-                      >
-                        {log.userRole}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-md text-[10.5px] font-semibold border ${getActionBadgeColor(
-                          log.action
-                        )}`}
-                      >
-                        {log.action}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap font-medium text-slate-600">
-                      {log.module}
-                    </td>
-                    <td className="py-3 px-4 whitespace-nowrap text-slate-500">
-                      {log.clusterName || 'Central'}
-                    </td>
-                    <td className="py-3 px-4 text-slate-700 max-w-[320px]">
-                      <div className="truncate" title={log.details}>
-                        {log.details}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableCell isHeader className="w-[180px]">Timestamp</TableCell>
+              <TableCell isHeader>User</TableCell>
+              <TableCell isHeader>Role</TableCell>
+              <TableCell isHeader>Action</TableCell>
+              <TableCell isHeader>Module</TableCell>
+              <TableCell isHeader>Cluster</TableCell>
+              <TableCell isHeader>Event Details</TableCell>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredLogs.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-12 text-gray-400 dark:text-gray-500">
+                  No matching audit log events found.
+                </TableCell>
+              </TableRow>
+            ) : (
+              filteredLogs.map((log) => (
+                <TableRow key={log.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
+                  <TableCell className="text-gray-500 dark:text-gray-400 font-mono text-xs whitespace-nowrap">
+                    {log.timestamp}
+                  </TableCell>
+                  <TableCell className="font-semibold text-gray-900 dark:text-white text-xs whitespace-nowrap">
+                    {log.userName}
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    <Badge color={log.userRole === "Super Admin" ? "primary" : "light"} size="sm">
+                      {log.userRole}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {getActionBadge(log.action)}
+                  </TableCell>
+                  <TableCell className="font-medium text-gray-700 dark:text-gray-300 text-xs whitespace-nowrap">
+                    {log.module}
+                  </TableCell>
+                  <TableCell className="text-gray-500 dark:text-gray-400 text-xs whitespace-nowrap">
+                    {log.clusterName || "Central"}
+                  </TableCell>
+                  <TableCell className="text-gray-700 dark:text-gray-300 text-xs max-w-[340px]">
+                    <div className="truncate" title={log.details}>
+                      {log.details}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
       </div>
     </div>
   );
 };
-

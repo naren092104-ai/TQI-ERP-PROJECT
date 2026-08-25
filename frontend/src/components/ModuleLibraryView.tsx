@@ -1,69 +1,267 @@
-import React, { useEffect, useState } from 'react';
-import { TqiModule } from '../types';
-import { apiUrl } from '../utils/api';
+import React, { useState } from 'react';
+import { TqiModule, UserRole } from '../types';
+import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface ModuleLibraryViewProps {
-  authToken?: string;
+  modules: TqiModule[];
+  currentUserRole: UserRole;
+  onCreateModule?: (module: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => Promise<void>;
+  onUpdateModule?: (id: string, module: any) => Promise<void>;
+  onDeleteModule?: (id: string) => Promise<void>;
+  onUploadResource?: (moduleId: string, file: File) => Promise<void>;
+  onDownloadResource?: (moduleId: string, resourceId: string) => void;
 }
 
-export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({ authToken }) => {
-  const [modules, setModules] = useState<TqiModule[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
+  modules,
+  currentUserRole,
+  onCreateModule,
+  onUpdateModule,
+  onDeleteModule,
+  onUploadResource,
+  onDownloadResource
+}) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingModule, setEditingModule] = useState<TqiModule | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const loadModules = async () => {
-      try {
-        const response = await fetch(apiUrl('/api/modules'), { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} });
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load modules.');
-        if (!cancelled) setModules(data.modules || []);
-      } catch (error) {
-        if (!cancelled) setErrorMessage(error instanceof Error ? error.message : 'Unable to load modules.');
-      } finally {
-        if (!cancelled) setIsLoading(false);
+  const [formData, setFormData] = useState({
+    moduleNumber: '',
+    moduleName: '',
+    topic: '',
+    description: '',
+    academicYear: '2023-2024',
+    dayNumber: 1
+  });
+
+  const filteredModules = modules.filter(m => 
+    m.moduleName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    m.topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    m.moduleNumber.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handleOpenModal = (mod?: TqiModule) => {
+    if (mod) {
+      setEditingModule(mod);
+      setFormData({
+        moduleNumber: mod.moduleNumber,
+        moduleName: mod.moduleName,
+        topic: mod.topic,
+        description: mod.description || '',
+        academicYear: mod.academicYear,
+        dayNumber: mod.dayNumber || 1
+      });
+    } else {
+      setEditingModule(null);
+      setFormData({
+        moduleNumber: '',
+        moduleName: '',
+        topic: '',
+        description: '',
+        academicYear: '2023-2024',
+        dayNumber: 1
+      });
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingModule && onUpdateModule) {
+      await onUpdateModule(editingModule.id, formData);
+    } else if (onCreateModule) {
+      await onCreateModule(formData);
+    }
+    setIsModalOpen(false);
+  };
+
+  const handleUpload = async (moduleId: string) => {
+    if (!onUploadResource) return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.ppt,.pptx';
+    input.onchange = async (e: any) => {
+      const file = e.target.files[0];
+      if (file) {
+        await onUploadResource(moduleId, file);
       }
     };
-
-    loadModules();
-    return () => { cancelled = true; };
-  }, [authToken]);
+    input.click();
+  };
 
   return (
-    <section className="p-4 sm:p-6 space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+    <div className="w-full space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.16em] font-semibold" style={{ color: 'var(--color-text-muted)' }}>Program library</p>
-          <h1 className="text-2xl font-bold mt-1" style={{ color: 'var(--color-text)' }}>Modules</h1>
-          <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>Approved learning modules available to TQI centres.</p>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+            Module Library
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Manage curriculum modules and download learning resources.
+          </p>
         </div>
-        <div className="text-xs px-3 py-2 rounded-md border" style={{ color: 'var(--color-text-secondary)', borderColor: 'var(--color-border)', background: 'var(--color-surface-white)' }}>{modules.length} modules</div>
+        <div className="flex items-center gap-2">
+          {currentUserRole === 'Super Admin' && (
+            <button
+              onClick={() => handleOpenModal()}
+              className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Create Module</span>
+            </button>
+          )}
+        </div>
       </div>
 
-      {isLoading && <div className="py-16 text-center text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading modules...</div>}
-      {errorMessage && <div className="p-3 rounded-md text-sm" style={{ color: 'var(--color-error)', background: 'var(--color-error-bg)', border: '1px solid var(--color-error-border)' }}>{errorMessage}</div>}
-      {!isLoading && !errorMessage && modules.length === 0 && <div className="py-16 text-center border rounded-md" style={{ color: 'var(--color-text-muted)', borderColor: 'var(--color-border)' }}>No modules found.</div>}
+      <div className="relative">
+        <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search modules..."
+          className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
+        />
+      </div>
 
-      {!isLoading && !errorMessage && modules.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {modules.map((module) => (
-            <article key={module.id} className="p-5 rounded-md border" style={{ background: 'var(--color-surface-white)', borderColor: 'var(--color-border)', boxShadow: 'var(--shadow-sm)' }}>
-              <div className="flex items-start justify-between gap-3">
-                <span className="text-xs font-bold px-2 py-1 rounded" style={{ color: 'var(--color-brand)', background: 'var(--color-brand-soft)' }}>{module.moduleNumber}</span>
-                <span className="text-[11px] font-semibold" style={{ color: module.status === 'Active' ? '#16803c' : 'var(--color-text-muted)' }}>{module.status}</span>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filteredModules.map((module) => (
+          <div key={module.id} className="flex flex-col rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+            <div className="flex items-start justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
+                  {module.moduleNumber}
+                </span>
+                <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                  Day {module.dayNumber}
+                </span>
               </div>
-              <h2 className="text-base font-bold mt-4" style={{ color: 'var(--color-text)' }}>{module.moduleName}</h2>
-              <p className="text-sm mt-1" style={{ color: 'var(--color-text-secondary)' }}>{module.topic}</p>
-              <p className="text-xs mt-4 leading-5" style={{ color: 'var(--color-text-muted)' }}>{module.description || 'Learning module for TQI academic sessions.'}</p>
-              <div className="flex items-center justify-between mt-5 pt-4 border-t text-xs" style={{ borderColor: 'var(--color-border)', color: 'var(--color-text-muted)' }}>
-                <span>{module.academicYear}</span>
-                <span>{module.resources.length} resources</span>
+              <div className="flex items-center gap-1">
+                {currentUserRole === 'Super Admin' && (
+                  <>
+                    <button onClick={() => handleOpenModal(module)} className="p-1.5 text-gray-400 hover:text-brand-500 hover:bg-brand-50 rounded-lg transition">
+                      <Edit3 className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => onDeleteModule && onDeleteModule(module.id)} className="p-1.5 text-gray-400 hover:text-error-500 hover:bg-error-50 rounded-lg transition">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </>
+                )}
               </div>
-            </article>
-          ))}
+            </div>
+
+            <div className="flex justify-between items-center mt-2">
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">{module.moduleName}</h3>
+              <span className={`text-[10px] px-2 py-1 rounded font-bold ${module.status === 'Active' ? 'bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{module.status || 'Active'}</span>
+            </div>
+            
+            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-1">{module.topic}</p>
+            <p className="text-xs text-gray-600 dark:text-gray-400 mt-3 line-clamp-3 flex-1">{module.description}</p>
+            
+            <div className="mt-4 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+              <span className="px-2 py-1 bg-gray-100 rounded dark:bg-gray-800">{module.academicYear}</span>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 space-y-2">
+              <div className="flex items-center justify-between text-xs mb-2">
+                <span className="font-semibold text-gray-500">Resources ({module.resources?.length || 0})</span>
+                {currentUserRole === 'Super Admin' && (
+                  <button onClick={() => handleUpload(module.id)} className="text-brand-500 font-semibold hover:underline flex items-center gap-1">
+                    <Upload className="w-3 h-3" /> Upload
+                  </button>
+                )}
+              </div>
+              {module.resources?.map(res => (
+                <div key={res.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-white/[0.02] rounded-lg border border-gray-100 dark:border-gray-800 text-xs">
+                  <div className="flex items-center gap-2 truncate">
+                    <FileText className="w-3.5 h-3.5 text-brand-500 shrink-0" />
+                    <span className="truncate text-gray-700 dark:text-gray-300">{res.fileName}</span>
+                  </div>
+                  <button onClick={() => onDownloadResource && onDownloadResource(module.id, res.id)} className="text-gray-500 hover:text-brand-500 p-1">
+                    <Download className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+              {(!module.resources || module.resources.length === 0) && (
+                <div className="text-xs text-gray-400 text-center py-2 bg-gray-50 dark:bg-white/[0.02] rounded-lg">No resources attached</div>
+              )}
+            </div>
+          </div>
+        ))}
+        {filteredModules.length === 0 && (
+          <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl dark:border-gray-800">
+            No modules found matching your search.
+          </div>
+        )}
+      </div>
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4">
+          <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
+              <h2 className="font-bold text-gray-900 dark:text-white">
+                {editingModule ? 'Edit Module' : 'Create Module'}
+              </h2>
+              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-num">Module Number</label>
+                  <input id="mod-num" required value={formData.moduleNumber} onChange={e => setFormData({...formData, moduleNumber: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" placeholder="e.g. M-101" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Day Number (1-8)</label>
+                  <Select
+                    value={String(formData.dayNumber)}
+                    onValueChange={(val) => setFormData({ ...formData, dayNumber: Number(val) })}
+                  >
+                    <SelectTrigger className="w-full text-xs h-9 rounded-xl border border-gray-300 dark:bg-gray-800 dark:border-gray-700 dark:text-white">
+                      <SelectValue placeholder="Select Day" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                        <SelectItem key={d} value={String(d)}>
+                          Day {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-name">Module Name</label>
+                <input id="mod-name" required value={formData.moduleName} onChange={e => setFormData({...formData, moduleName: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-topic">Topic</label>
+                <input id="mod-topic" required value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-year">Academic Year</label>
+                <input id="mod-year" required value={formData.academicYear} onChange={e => setFormData({...formData, academicYear: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-desc">Description</label>
+                <textarea id="mod-desc" rows={3} value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
+              </div>
+              <div className="pt-4 flex justify-end gap-2 border-t border-gray-100 dark:border-gray-800">
+                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300">Cancel</button>
+                <button type="submit" className="px-4 py-2 text-xs font-semibold text-white bg-brand-500 rounded-xl hover:bg-brand-600">Save Module</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
-    </section>
+    </div>
   );
 };

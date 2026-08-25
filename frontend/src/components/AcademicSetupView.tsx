@@ -232,13 +232,13 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({ authToken,
       {/* Search Bar & Edit Controls */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="relative w-full max-w-sm">
-          <Search className="h-4 w-4 text-muted-foreground absolute left-3 top-3" />
+          <Search className="h-4 w-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search sessions, topics, locations..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-transparent border border-border/70 rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            className="w-full bg-transparent border border-border/70 rounded-xl pl-10 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
           />
         </div>
 

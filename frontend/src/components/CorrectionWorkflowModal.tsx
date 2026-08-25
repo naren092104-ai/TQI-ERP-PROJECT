@@ -37,7 +37,7 @@ export const CorrectionWorkflowModal: React.FC<CorrectionWorkflowModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50  flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[99999] bg-gray-900/70 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-lg shadow-sm overflow-hidden">
         {/* Header */}
         <div className="bg-[#002869] text-white p-4 flex items-center justify-between">

@@ -1,5 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { TabType, LessonPlan, Panchayat, Volunteer, Session } from '../types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { ActionButton } from './ui/action-button';
+import { Plus, Search, BookOpen, CheckCircle2, Clock, AlertTriangle, FileText, X } from 'lucide-react';
 
 interface LessonPlanViewProps {
   lessonPlans: LessonPlan[];
@@ -404,173 +413,146 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12 font-sans">
-      {/* Top Header & Breadcrumb */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mb-1">
-            <button
-              onClick={() => onNavigate('dashboard')}
-              className="hover:text-[#0B3D91] transition-colors cursor-pointer"
-            >
-              Dashboard
-            </button>
-            <span className="text-slate-400">/</span>
-            <span className="text-[#0B3D91] font-semibold">Lesson Plan</span>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Lesson Plan</h1>
-          <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
-            Manage, review and track lesson plans across your cluster.
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+            Lesson Plans
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Manage, review, and track curriculum lesson plans and learning activities across clusters.
           </p>
         </div>
 
         <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <button
+            type="button"
             onClick={() => handlePrintPDF()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
           >
-            <span className="material-symbols-outlined text-[16px] text-slate-500">picture_as_pdf</span>
-            Export PDF
+            <span>Export PDF</span>
           </button>
           <button
+            type="button"
             onClick={handleOpenNewModal}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-all active:scale-[0.98] cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
           >
-            <span className="material-symbols-outlined text-[16px]">add</span>
-            New Lesson Plan
+            <span>New Lesson Plan</span>
           </button>
         </div>
       </div>
 
-      {/* Summary Cards (Compact, data-driven) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center justify-between shadow-xs">
-          <div>
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Total Plans
-            </div>
-            <div className="text-xl font-bold text-slate-900 mt-0.5">{totalCount}</div>
-          </div>
-          <span className="w-8 h-8 rounded-md bg-slate-100 text-slate-700 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[18px]">menu_book</span>
-          </span>
+      {/* 2. Compact Metric Cards (counts & status only) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Plans</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalCount}</div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center justify-between shadow-xs">
-          <div>
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Approved
-            </div>
-            <div className="text-xl font-bold text-emerald-700 mt-0.5">{approvedCount}</div>
-          </div>
-          <span className="w-8 h-8 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[18px]">verified</span>
-          </span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-success-500">Approved</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{approvedCount}</div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center justify-between shadow-xs">
-          <div>
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Submitted / Review
-            </div>
-            <div className="text-xl font-bold text-blue-700 mt-0.5">{submittedCount}</div>
-          </div>
-          <span className="w-8 h-8 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[18px]">rate_review</span>
-          </span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand-500">Submitted / Review</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{submittedCount}</div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-md p-3 flex items-center justify-between shadow-xs">
-          <div>
-            <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Needs Correction
-            </div>
-            <div className="text-xl font-bold text-amber-700 mt-0.5">{correctionCount}</div>
-          </div>
-          <span className="w-8 h-8 rounded-md bg-amber-50 text-amber-600 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[18px]">feedback</span>
-          </span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-warning-500">Needs Correction</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{correctionCount}</div>
         </div>
       </div>
 
-      {/* FILTER PANEL */}
-      <div className="bg-white border border-slate-200 rounded-md p-3.5 shadow-xs">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
-          {/* Search bar */}
-          <div className="relative sm:col-span-2 lg:col-span-2">
-            <span className="material-symbols-outlined text-[18px] text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2">
-              search
-            </span>
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search by topic, module, volunteer or village..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91] transition-colors"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-              >
-                <span className="material-symbols-outlined text-[14px]">close</span>
-              </button>
-            )}
-          </div>
+      {/* 3. Cardless Search & Filter Row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        {/* Search bar */}
+        <div className="relative sm:col-span-2 lg:col-span-2">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by topic, module, volunteer or village..."
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
+          />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
 
           {/* Panchayat filter */}
           <div>
-            <select
-              value={selectedPanchayat}
-              onChange={(e) => {
-                setSelectedPanchayat(e.target.value);
+            <Select
+              value={selectedPanchayat || "all"}
+              onValueChange={(val) => {
+                setSelectedPanchayat(val);
                 setSelectedVillage('all');
               }}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
             >
-              <option value="all">All Panchayats</option>
-              {panchayats.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Panchayats" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Panchayats</SelectItem>
+                {panchayats.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Village filter */}
           <div>
-            <select
-              value={selectedVillage}
-              onChange={(e) => setSelectedVillage(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedVillage || "all"}
+              onValueChange={(val) => setSelectedVillage(val)}
             >
-              <option value="all">All Villages</option>
-              {currentFilterVillages.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Villages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Villages</SelectItem>
+                {currentFilterVillages.map((v) => (
+                  <SelectItem key={v.id} value={v.name}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Status filter */}
           <div>
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedStatus || "all"}
+              onValueChange={(val) => setSelectedStatus(val)}
             >
-              <option value="all">All Statuses</option>
-              <option value="Approved">Approved</option>
-              <option value="Submitted">Submitted</option>
-              <option value="Correction Requested">Correction Requested</option>
-              <option value="Resubmitted">Resubmitted</option>
-              <option value="Draft">Draft</option>
-              <option value="Completed">Completed</option>
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="Approved">Approved</SelectItem>
+                <SelectItem value="Submitted">Submitted</SelectItem>
+                <SelectItem value="Correction Requested">Correction Requested</SelectItem>
+                <SelectItem value="Resubmitted">Resubmitted</SelectItem>
+                <SelectItem value="Draft">Draft</SelectItem>
+                <SelectItem value="Completed">Completed</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
-      </div>
 
       {/* LESSON PLAN TABLE */}
       <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
@@ -702,7 +684,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
       {/* FULL LESSON PLAN DETAIL MODAL / DRAWER */}
       {activePlanDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40  overflow-y-auto">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-3xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
             {/* Header */}
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/70 rounded-t-xl flex items-start justify-between gap-4">
@@ -925,7 +907,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
       {/* CREATE / EDIT LESSON PLAN MODAL */}
       {isNewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40  overflow-y-auto">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-2xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
             {/* Header */}
             <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 rounded-t-xl">
@@ -947,6 +929,19 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
             {/* Form */}
             <div className="p-5 overflow-y-auto space-y-4 text-xs">
+              {isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '') && (
+                <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center gap-2 text-sm text-gray-700">
+                  <CheckCircle2 className="w-5 h-5 text-success-500" />
+                  <span>This lesson plan has been {activePlanDetail?.status.toLowerCase()} and cannot be edited.</span>
+                </div>
+              )}
+              {isEditMode && activePlanDetail?.status === 'Correction Requested' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm text-amber-800">
+                  <AlertTriangle className="w-5 h-5 text-amber-600" />
+                  <span>Correction Requested: {activePlanDetail.correctionReason}</span>
+                </div>
+              )}
+
               {/* Row 1: Topic & Module */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
@@ -956,12 +951,13 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <input
                     type="text"
                     value={formData.topic}
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                     onChange={(e) => {
                       setFormData({ ...formData, topic: e.target.value });
                       if (formErrors.topic) setFormErrors({ ...formErrors, topic: '' });
                     }}
                     placeholder="e.g. Basic Conversation & Dialogue Drills"
-                    className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
+                    className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50 ${
                       formErrors.topic ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
                     }`}
                   />
@@ -974,10 +970,10 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Curriculum Module
                   </label>
-                  <select
+                  <Select
                     value={formData.moduleName}
-                    onChange={(e) => {
-                      const mod = e.target.value;
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                    onValueChange={(mod) => {
                       let modId = 'M-103';
                       if (mod === 'Basic Math') modId = 'M-301';
                       if (mod === 'Life Skills') modId = 'M-102';
@@ -986,15 +982,19 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                       if (mod === 'Financial Literacy') modId = 'F-101';
                       setFormData({ ...formData, moduleName: mod, moduleId: modId });
                     }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    <option value="Spoken English">Spoken English (M-103)</option>
-                    <option value="Basic Math">Basic Math (M-301)</option>
-                    <option value="Life Skills">Life Skills (M-102)</option>
-                    <option value="Digital Literacy">Digital Literacy (D-004)</option>
-                    <option value="Science">Science (S-201)</option>
-                    <option value="Financial Literacy">Financial Literacy (F-101)</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Spoken English">Spoken English (M-103)</SelectItem>
+                      <SelectItem value="Basic Math">Basic Math (M-301)</SelectItem>
+                      <SelectItem value="Life Skills">Life Skills (M-102)</SelectItem>
+                      <SelectItem value="Digital Literacy">Digital Literacy (D-004)</SelectItem>
+                      <SelectItem value="Science">Science (S-201)</SelectItem>
+                      <SelectItem value="Financial Literacy">Financial Literacy (F-101)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1004,15 +1004,20 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Target Standard / Grade
                   </label>
-                  <select
+                  <Select
                     value={formData.targetStandard}
-                    onChange={(e) => setFormData({ ...formData, targetStandard: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                    onValueChange={(val) => setFormData({ ...formData, targetStandard: val })}
                   >
-                    <option value="4th - 5th Standard">4th - 5th Standard</option>
-                    <option value="6th - 8th Standard">6th - 8th Standard</option>
-                    <option value="9th - 10th Standard">9th - 10th Standard</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Target Standard" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="4th - 5th Standard">4th - 5th Standard</SelectItem>
+                      <SelectItem value="6th - 8th Standard">6th - 8th Standard</SelectItem>
+                      <SelectItem value="9th - 10th Standard">9th - 10th Standard</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
@@ -1022,9 +1027,10 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <input
                     type="text"
                     value={formData.duration}
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                     onChange={(e) => setFormData({ ...formData, duration: e.target.value })}
                     placeholder="90 Mins"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50"
                   />
                 </div>
 
@@ -1035,8 +1041,9 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <input
                     type="date"
                     value={formData.date}
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50"
                   />
                 </div>
               </div>
@@ -1047,10 +1054,11 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Panchayat <span className="text-rose-500">*</span>
                   </label>
-                  <select
+                  <Select
                     value={formData.panchayatId}
-                    onChange={(e) => {
-                      const found = panchayats.find((p) => p.id === e.target.value);
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                    onValueChange={(val) => {
+                      const found = panchayats.find((p) => p.id === val);
                       if (found) {
                         setFormData({
                           ...formData,
@@ -1060,59 +1068,72 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                         });
                       }
                     }}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    {panchayats.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-8 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Panchayat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {panchayats.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Village Center <span className="text-rose-500">*</span>
                   </label>
-                  <select
+                  <Select
                     value={formData.villageName}
-                    onChange={(e) => {
-                      setFormData({ ...formData, villageName: e.target.value });
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                    onValueChange={(val) => {
+                      setFormData({ ...formData, villageName: val });
                       if (formErrors.villageName) setFormErrors({ ...formErrors, villageName: '' });
                     }}
-                    className={`w-full px-2.5 py-1.5 bg-white border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
-                      formErrors.villageName ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}
                   >
-                    <option value="">Select Village Center</option>
-                    {modalVillages.map((v) => (
-                      <option key={v.id} value={v.name}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={`w-full h-8 text-xs ${
+                      formErrors.villageName ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
+                    }`}>
+                      <SelectValue placeholder="Select Village Center" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modalVillages.map((v) => (
+                        <SelectItem key={v.id} value={v.name}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Volunteer Lead
                   </label>
-                  <select
+                  <Select
                     value={formData.volunteerId}
-                    onChange={(e) => {
-                      const found = volunteers.find((v) => v.id === e.target.value);
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                    onValueChange={(val) => {
+                      const found = volunteers.find((v) => v.id === val);
                       if (found) {
                         setFormData({ ...formData, volunteerId: found.id, volunteerName: found.name });
                       }
                     }}
-                    className="w-full px-2.5 py-1.5 bg-white border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    {volunteers.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-8 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Volunteer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {volunteers.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1124,12 +1145,13 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                 <textarea
                   rows={2}
                   value={formData.objective}
+                  disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                   onChange={(e) => {
                     setFormData({ ...formData, objective: e.target.value });
                     if (formErrors.objective) setFormErrors({ ...formErrors, objective: '' });
                   }}
                   placeholder="State the core outcome students will achieve by the end of 90 minutes..."
-                  className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
+                  className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50 ${
                     formErrors.objective ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
                   }`}
                 />
@@ -1146,9 +1168,10 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                 <textarea
                   rows={3}
                   value={formData.activitiesListText}
+                  disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                   onChange={(e) => setFormData({ ...formData, activitiesListText: e.target.value })}
                   placeholder="Warm-up &amp; Icebreaker (15 mins)&#10;Concept Demonstration (25 mins)&#10;Group Activity &amp; Practice (30 mins)&#10;Exit Assessment &amp; Quiz (20 mins)"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] font-mono text-[11px]"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] font-mono text-[11px] disabled:opacity-50"
                 />
               </div>
 
@@ -1161,9 +1184,10 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <textarea
                     rows={2}
                     value={formData.materialsText}
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                     onChange={(e) => setFormData({ ...formData, materialsText: e.target.value })}
                     placeholder="Flashcards, 30 Printed Worksheets, Markers, Reward stickers"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50"
                   />
                 </div>
 
@@ -1174,11 +1198,27 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   <textarea
                     rows={2}
                     value={formData.assessmentTask}
+                    disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
                     onChange={(e) => setFormData({ ...formData, assessmentTask: e.target.value })}
                     placeholder="5-question visual fraction puzzle worksheet evaluated in pairs."
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50"
                   />
                 </div>
+              </div>
+
+              {/* Row 7: Remarks */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Remarks / Notes
+                </label>
+                <textarea
+                  rows={2}
+                  value={formData.notes}
+                  disabled={isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')}
+                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                  placeholder="Volunteer Guidance & Center Logistics..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91] disabled:opacity-50"
+                />
               </div>
             </div>
 
@@ -1192,22 +1232,24 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                 Cancel
               </button>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleFormSubmit('Draft')}
-                  className="px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-md transition-colors cursor-pointer"
-                >
-                  Save Draft
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFormSubmit('Submitted')}
-                  className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
-                >
-                  {isEditMode ? 'Save & Submit Plan' : 'Submit for Review'}
-                </button>
-              </div>
+              {!(isEditMode && ['Submitted', 'Approved', 'Completed'].includes(activePlanDetail?.status || '')) && (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleFormSubmit('Draft')}
+                    className="px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-md transition-colors cursor-pointer"
+                  >
+                    Save Draft
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFormSubmit('Submitted')}
+                    className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
+                  >
+                    {isEditMode ? 'Save & Submit Plan' : 'Submit for Review'}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1215,7 +1257,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
       {/* REQUEST CORRECTION MODAL */}
       {isCorrectionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 ">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-md w-full p-5 space-y-4">
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">

@@ -104,8 +104,8 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   return (
-    <header className="sticky top-0 z-999 flex w-full h-20 items-center justify-between border-b border-gray-200 bg-white/95 px-4 backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/95 sm:px-6 lg:px-8">
-      {/* Left: Mobile Toggle & Quick Search */}
+    <header className="sticky top-0 z-30 flex w-full h-20 items-center justify-between border-b border-gray-200 bg-white/95 px-4 backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/95 sm:px-6 lg:px-8">
+      {/* Left: Mobile Toggle */}
       <div className="flex items-center gap-3 md:gap-4">
         <button
           type="button"
@@ -115,73 +115,10 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <SlidersHorizontal className="h-5 w-5" />
         </button>
-
-        <button
-          type="button"
-          onClick={() => setShowSearchModal(true)}
-          className="group flex h-11 w-60 md:w-80 items-center justify-between rounded-xl border border-gray-200 bg-gray-50/80 px-3.5 text-sm text-gray-500 transition-all hover:border-gray-300 hover:bg-gray-100/80 dark:border-gray-800 dark:bg-white/[0.03] dark:text-gray-400 dark:hover:border-gray-700"
-        >
-          <span className="flex items-center gap-2.5">
-            <Search className="h-4 w-4 text-gray-400 transition-colors group-hover:text-gray-600 dark:group-hover:text-gray-300" />
-            <span className="truncate">Search system, rosters...</span>
-          </span>
-          <kbd className="pointer-events-none hidden select-none items-center gap-0.5 rounded-md border border-gray-200 bg-white px-2 py-0.5 font-mono text-xs font-medium text-gray-500 shadow-theme-xs dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400 sm:inline-flex">
-            <Command className="h-3 w-3" /> K
-          </kbd>
-        </button>
       </div>
 
-      {/* Right Controls: Cluster, Bell, Mode, Profile */}
+      {/* Right Controls: Bell, Mode, Profile */}
       <div className="flex items-center gap-2 sm:gap-3.5">
-        {/* Cluster Scope Selector */}
-        <div className="relative" ref={clusterRef}>
-          <button
-            type="button"
-            onClick={() => setShowClusterMenu(!showClusterMenu)}
-            className="flex h-10 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition-colors"
-          >
-            <MapPin className="h-4 w-4 text-brand-500" />
-            <span className="max-w-[130px] truncate">
-              {selectedClusterId === 'all' ? 'All Clusters' : activeCluster?.name || selectedClusterId}
-            </span>
-            <ChevronDown className="h-3.5 w-3.5 text-gray-400" />
-          </button>
-
-          {showClusterMenu && (
-            <div className="absolute right-0 mt-2 w-64 rounded-2xl border border-gray-200 bg-white p-2 shadow-theme-lg dark:border-gray-800 dark:bg-gray-900 z-50 animate-in fade-in-0 zoom-in-95">
-              <div className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                Cluster Scope
-              </div>
-              <button
-                type="button"
-                onClick={() => { onSelectCluster('all'); setShowClusterMenu(false); }}
-                className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                  selectedClusterId === 'all'
-                    ? 'bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/5'
-                }`}
-              >
-                <span>All Clusters</span>
-                {selectedClusterId === 'all' && <Check className="h-4 w-4 text-brand-500" />}
-              </button>
-              {clusters.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => { onSelectCluster(c.id); setShowClusterMenu(false); }}
-                  className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                    selectedClusterId === c.id
-                      ? 'bg-brand-50 text-brand-500 dark:bg-brand-500/15 dark:text-brand-400'
-                      : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/5'
-                  }`}
-                >
-                  <span className="truncate">{c.name}</span>
-                  {selectedClusterId === c.id && <Check className="h-4 w-4 text-brand-500" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
 
         {/* Notifications Dropdown */}
         <div className="relative" ref={notifRef}>
@@ -244,25 +181,22 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Theme Mode Toggle (Light / Dark) */}
         <ModeToggle />
 
-        {/* User Profile Menu */}
+        {/* User Profile Menu (Clean Without AD initials) */}
         <div className="relative" ref={profileRef}>
           <button
             type="button"
             onClick={() => setShowProfileMenu(!showProfileMenu)}
-            className="flex items-center gap-3 rounded-xl p-1 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5 transition-colors"
+            className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/5 transition-colors border border-gray-200 dark:border-gray-800"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 text-sm font-bold text-white shadow-theme-xs">
-              {userName.slice(0, 2).toUpperCase()}
-            </div>
-            <div className="hidden sm:flex flex-col text-left leading-tight">
-              <span className="max-w-[120px] truncate text-sm font-semibold text-gray-800 dark:text-white/90">
+            <div className="flex flex-col text-left leading-tight">
+              <span className="max-w-[140px] truncate text-xs font-bold text-gray-800 dark:text-white/90">
                 {userName}
               </span>
-              <span className="text-xs text-gray-500 dark:text-gray-400">
+              <span className="text-[10px] font-semibold text-brand-500 dark:text-brand-400 uppercase tracking-wider">
                 {userRole}
               </span>
             </div>
-            <ChevronDown className="h-4 w-4 text-gray-400" />
+            <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0" />
           </button>
 
           {showProfileMenu && (

@@ -9,6 +9,14 @@ import {
   Cluster,
 } from '../types';
 import { apiUrl } from '../utils/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { Search, X } from 'lucide-react';
 
 interface SessionPhotosViewProps {
   panchayats: Panchayat[];
@@ -498,53 +506,34 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto pb-16 font-sans">
+    <div className="w-full space-y-6 pb-16 font-sans">
       {/* ==========================================
-          HEADER & ROLE CONTROLS
+          1. CARDLESS PAGE HEADER (MAIN HEADING ONLY)
           ========================================== */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-200/80 pb-5">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mb-1">
-            <button
-              onClick={() => onNavigate && onNavigate('dashboard')}
-              className="hover:text-[#0B3D91] transition-colors cursor-pointer"
-            >
-              Dashboard
-            </button>
-            <span className="text-slate-400">/</span>
-            <span className="text-slate-700 font-semibold">{selectedCluster}</span>
-            <span className="text-slate-400">/</span>
-            <span className="text-[#0B3D91] font-semibold">Session Photos</span>
-          </div>
-
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
               Session Photographs &amp; ZIP Archives
             </h1>
-            <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold tracking-wide uppercase bg-blue-50 text-[#0B3D91] border border-blue-200">
-              {activeRole}
+            <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 border border-brand-200 dark:bg-brand-950/40 dark:text-brand-400 dark:border-brand-800">
+              {selectedCluster}
             </span>
           </div>
-
-          <p className="text-xs sm:text-sm text-slate-600 mt-1">
-            Browse and download high-resolution session activity images organized across Days 1 through 8.
-          </p>
         </div>
 
-        {/* Header Action Buttons & Role Switcher */}
-        <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-auto">
-
-
+        {/* Header Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
           {/* Super Admin: Download All Clusters ZIP */}
           {activeRole === 'Super Admin' && (
             <button
               id="download-all-clusters-zip-btn"
               disabled={downloadingZipKey !== null}
               onClick={() => handleDownloadZip('all-clusters')}
-              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-md text-xs font-bold shadow-xs transition-all cursor-pointer ${
+              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
                 downloadingZipKey === 'all-clusters'
-                  ? 'bg-slate-300 text-slate-600 cursor-not-allowed'
-                  : 'bg-emerald-700 hover:bg-emerald-800 text-white active:scale-[0.98]'
+                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                  : 'bg-success-600 hover:bg-success-700 text-white active:scale-[0.98]'
               }`}
             >
               <span className="material-symbols-outlined text-[18px]">
@@ -563,10 +552,10 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             id="download-all-8-days-zip-btn"
             disabled={downloadingZipKey !== null}
             onClick={() => handleDownloadZip('cluster-all-days')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-md text-xs font-bold shadow-xs transition-all cursor-pointer ${
+            className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
               downloadingZipKey === `cluster-${selectedCluster}`
-                ? 'bg-slate-300 text-slate-600 cursor-not-allowed'
-                : 'bg-[#0B3D91] hover:bg-[#082a66] text-white active:scale-[0.98]'
+                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
+                : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
             }`}
           >
             <span className="material-symbols-outlined text-[18px]">
@@ -583,7 +572,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           {activeRole !== 'Super Admin' && (
             <button
               onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-slate-900 hover:bg-black text-white text-xs font-bold rounded-md shadow-xs transition-all active:scale-[0.98] cursor-pointer"
+              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-3.5 py-2 text-xs font-semibold shadow-theme-xs hover:opacity-90 transition active:scale-[0.98] cursor-pointer"
             >
               <span className="material-symbols-outlined text-[18px]">add_photo_alternate</span>
               Upload Photos
@@ -597,7 +586,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           ========================================== */}
       {!showClusterLanding && zipProgress.stage !== 'idle' && (
         <div
-          className={`rounded-md p-4 border transition-all ${
+          className={`rounded-2xl p-4 border transition-all ${
             zipProgress.stage === 'error'
               ? 'bg-rose-50 border-rose-200 text-rose-900'
               : zipProgress.stage === 'completed'
@@ -613,7 +602,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                     ? 'text-rose-600'
                     : zipProgress.stage === 'completed'
                     ? 'text-emerald-600'
-                    : 'text-[#0B3D91] animate-spin'
+                    : 'text-brand-500 animate-spin'
                 }`}
               >
                 {zipProgress.stage === 'error'
@@ -625,7 +614,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               <div>
                 <div className="font-bold text-sm">{zipProgress.message}</div>
                 {zipProgress.zipFilename && (
-                  <div className="text-xs text-slate-600 mt-0.5">
+                  <div className="text-xs text-gray-600 mt-0.5">
                     Saved as <span className="font-mono font-semibold">{zipProgress.zipFilename}</span>
                   </div>
                 )}
@@ -648,7 +637,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           {zipProgress.stage !== 'error' && zipProgress.stage !== 'completed' && (
             <div className="w-full bg-blue-100/80 h-1.5 rounded-full overflow-hidden mt-3">
               <div
-                className="bg-[#0B3D91] h-full transition-all duration-300 rounded-full"
+                className="bg-brand-500 h-full transition-all duration-300 rounded-full"
                 style={{ width: `${zipProgress.progressPercent}%` }}
               />
             </div>
@@ -660,12 +649,12 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           SUPER ADMIN CLUSTER SELECTOR (IF SUPER ADMIN)
           ========================================== */}
       {activeRole === 'Super Admin' && (
-        <div className="bg-slate-900 text-white rounded-md p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
               Super Admin Multi-Cluster View
             </span>
-            <div className="text-sm font-semibold text-slate-100">
+            <div className="text-sm font-semibold text-gray-900 dark:text-white">
               Select Cluster to Inspect or Download:
             </div>
           </div>
@@ -674,10 +663,10 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               <button
                 key={cName}
                 onClick={() => setSelectedCluster(cName)}
-                className={`px-3 py-1.5 rounded-md text-xs font-bold transition-colors cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                   selectedCluster.toLowerCase() === cName.toLowerCase()
-                    ? 'bg-[#FF7A00] text-white shadow-xs'
-                    : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    ? 'bg-brand-500 text-white shadow-theme-xs'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
                 }`}
               >
                 {cName} Cluster
@@ -689,9 +678,8 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
 
       {showClusterLanding && (
         <section className="space-y-4">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Session Photos - Clusters</h2>
-            <p className="text-xs text-slate-500 mt-1">Select a cluster to view its Day 1 to Day 8 photo albums.</p>
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">Session Photos - Clusters</h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {photoClusters.map((cluster) => {
@@ -702,42 +690,36 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                   key={cluster.id}
                   type="button"
                   onClick={() => { setSelectedCluster(cluster.id); setSelectedDayTab('all'); }}
-                  className="text-left bg-white border border-slate-200 rounded-md p-5 shadow-xs hover:border-[#0B3D91] hover:shadow-sm transition-all"
+                  className="text-left rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs hover:border-brand-500 hover:shadow-theme-sm transition-all dark:border-gray-800 dark:bg-white/[0.03]"
                 >
                   <div className="flex items-center justify-between gap-3">
-                    <div className="w-10 h-10 rounded-md bg-blue-50 text-[#0B3D91] flex items-center justify-center"><span className="material-symbols-outlined">hub</span></div>
-                    <span className="text-xs font-bold text-[#0B3D91]">View cluster</span>
+                    <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/40 text-brand-500 flex items-center justify-center"><span className="material-symbols-outlined">hub</span></div>
+                    <span className="text-xs font-bold text-brand-500">View cluster</span>
                   </div>
-                  <h3 className="mt-5 text-base font-bold text-slate-900">{cluster.name}</h3>
-                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-slate-100 text-xs">
-                    <span><strong className="block text-slate-900">{days}/8</strong><em className="not-italic text-slate-500">Days</em></span>
-                    <span><strong className="block text-slate-900">{clusterPhotos.length}</strong><em className="not-italic text-slate-500">Photos</em></span>
-                    <span><strong className="block text-slate-900">{new Set(clusterPhotos.map((photo) => photo.panchayatId).filter(Boolean)).size}</strong><em className="not-italic text-slate-500">Panchayats</em></span>
+                  <h3 className="mt-5 text-base font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
+                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-xs">
+                    <span><strong className="block text-gray-900 dark:text-white">{days}/8</strong><em className="not-italic text-gray-500">Days</em></span>
+                    <span><strong className="block text-gray-900 dark:text-white">{clusterPhotos.length}</strong><em className="not-italic text-gray-500">Photos</em></span>
+                    <span><strong className="block text-gray-900 dark:text-white">{new Set(clusterPhotos.map((photo) => photo.panchayatId).filter(Boolean)).size}</strong><em className="not-italic text-gray-500">Panchayats</em></span>
                   </div>
                 </button>
               );
             })}
           </div>
-          {photoClusters.length === 0 && <div className="py-14 text-center bg-white border border-slate-200 rounded-md text-sm text-slate-500">No session photo clusters found in MySQL.</div>}
+          {photoClusters.length === 0 && <div className="py-14 text-center bg-white border border-gray-200 rounded-2xl text-sm text-gray-500">No session photo clusters found in MySQL.</div>}
         </section>
       )}
 
       {/* ==========================================
-          SECTION 1: DAY 1 TO DAY 8 CARDS
-          (Each with [View Photos], [Upload Photos], [Download ZIP])
+          SECTION 1: DAY 1 TO DAY 8 ALBUMS
           ========================================== */}
-      <div className={showClusterLanding ? 'hidden' : ''}>
-        <div className="flex items-center justify-between mb-3.5">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">
-              Daily Session Albums ({selectedCluster})
-            </h2>
-            <p className="text-xs text-slate-500">
-              Download ZIP archives for each individual day or explore photo gallery.
-            </p>
-          </div>
-          <span className="text-xs font-semibold text-slate-500">
-            Total Photos: <strong className="text-slate-900">{photos.length}</strong>
+      <div className={showClusterLanding ? 'hidden' : 'space-y-4'}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-bold text-gray-900 dark:text-white">
+            Daily Session Albums ({selectedCluster})
+          </h2>
+          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+            Total Photos: <strong className="text-gray-900 dark:text-white">{photos.length}</strong>
           </span>
         </div>
 
@@ -749,32 +731,29 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             return (
               <div
                 key={daySummary.dayNumber}
-                className="bg-white border border-slate-200 rounded-md p-4 shadow-xs hover:border-[#0B3D91]/40 transition-all flex flex-col justify-between"
+                className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs hover:border-brand-500/40 transition-all flex flex-col justify-between dark:border-gray-800 dark:bg-white/[0.03]"
               >
                 <div>
-                  {/* Card Header */}
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="w-8 h-8 rounded-md bg-[#0B3D91]/10 text-[#0B3D91] flex items-center justify-center font-bold text-xs">
-                        D{daySummary.dayNumber}
+                  {/* Card Header with Proper Gap between Day Label and Date */}
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex flex-col">
+                      <button
+                        type="button"
+                        onClick={() => { setExpandedDay(expandedDay === daySummary.dayNumber ? null : daySummary.dayNumber); setSelectedDayTab(daySummary.dayNumber); }}
+                        className="font-bold text-sm text-gray-900 dark:text-white text-left hover:text-brand-500 transition-colors"
+                      >
+                        {daySummary.dayLabel}
+                      </button>
+                      <span className="text-[11px] text-gray-400 font-medium">
+                        {daySummary.date}
                       </span>
-                      <div>
-                        <button
-                          type="button"
-                          onClick={() => { setExpandedDay(expandedDay === daySummary.dayNumber ? null : daySummary.dayNumber); setSelectedDayTab(daySummary.dayNumber); }}
-                          className="font-bold text-sm text-slate-900 text-left hover:text-[#0B3D91]"
-                        >
-                          {daySummary.dayLabel}
-                        </button>
-                        <span className="text-[11px] text-slate-500">{daySummary.date}</span>
-                      </div>
                     </div>
 
                     <span
-                      className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                         daySummary.photosCount > 0
-                          ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          : 'bg-slate-100 text-slate-500'
+                          ? 'bg-success-50 text-success-700 border border-success-200 dark:bg-success-950/40 dark:text-success-400'
+                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                       }`}
                     >
                       {daySummary.photosCount} Photos
@@ -788,7 +767,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                         <div
                           key={p.id || pIdx}
                           onClick={() => setSelectedPhoto(p)}
-                          className="aspect-square rounded-md overflow-hidden bg-slate-100 border border-slate-200 cursor-pointer hover:opacity-85 transition-opacity"
+                          className="aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer hover:opacity-85 transition-opacity dark:border-gray-800"
                         >
                           <img
                             src={p.fileUrl}
@@ -799,20 +778,20 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                         </div>
                       ))
                     ) : (
-                      <div className="col-span-4 py-4 text-center text-xs text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-200">
+                      <div className="col-span-4 py-4 text-center text-xs text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
                         No photos yet for this day
                       </div>
                     )}
                   </div>
 
-                  <div className="text-[11px] text-slate-500 mb-3 flex items-center justify-between">
+                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex items-center justify-between font-medium">
                     <span>Coverage: {daySummary.panchayatCoverage} Panchayats</span>
                     <span>Target: {daySummary.targetCount}</span>
                   </div>
                 </div>
 
                 {/* Card Action Buttons */}
-                <div className="pt-2.5 border-t border-slate-100 flex flex-col gap-1.5">
+                <div className="pt-2.5 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-1.5">
                   <div className="grid grid-cols-2 gap-1.5">
                     <button
                       onClick={() => {
@@ -821,7 +800,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                         const element = document.getElementById('gallery-section');
                         element?.scrollIntoView({ behavior: 'smooth' });
                       }}
-                      className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                      className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[14px]">grid_view</span>
                       View
@@ -830,7 +809,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                     {activeRole !== 'Super Admin' && (
                       <button
                         onClick={() => handleOpenUploadForDay(daySummary.dayNumber)}
-                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-md text-xs font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                        className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
                       >
                         <span className="material-symbols-outlined text-[14px]">upload</span>
                         Upload
@@ -843,12 +822,12 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                     id={`download-day-${daySummary.dayNumber}-zip-btn`}
                     disabled={downloadingZipKey !== null || daySummary.photosCount === 0}
                     onClick={() => handleDownloadZip('day', daySummary.dayNumber)}
-                    className={`w-full py-1.5 px-3 rounded-md text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-all cursor-pointer ${
+                    className={`w-full py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
                       daySummary.photosCount === 0
-                        ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
                         : isDayDownloading
-                        ? 'bg-blue-100 text-[#0B3D91] cursor-wait'
-                        : 'bg-[#0B3D91] hover:bg-[#082a66] text-white active:scale-[0.98]'
+                        ? 'bg-brand-100 text-brand-700 cursor-wait'
+                        : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
                     }`}
                   >
                     <span className="material-symbols-outlined text-[16px]">
@@ -862,18 +841,18 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                   </button>
 
                   {expandedDay === daySummary.dayNumber && (
-                    <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
                       <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Day {daySummary.dayNumber} photo list</span>
-                        <button type="button" onClick={() => setExpandedDay(null)} className="text-[11px] font-semibold text-slate-500 hover:text-slate-900">Close</button>
+                        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Day {daySummary.dayNumber} photo list</span>
+                        <button type="button" onClick={() => setExpandedDay(null)} className="text-[11px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">Close</button>
                       </div>
                       {daySummary.featuredPhotos.length === 0 ? (
-                        <div className="rounded-md bg-slate-50 border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500">No photos or folders are available for this day.</div>
+                        <div className="rounded-xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 px-3 py-3 text-xs text-gray-500">No photos or folders are available for this day.</div>
                       ) : (
                         daySummary.featuredPhotos.map((photo) => (
-                          <div key={photo.id} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 border border-slate-200 px-2.5 py-2">
-                            <div className="min-w-0"><div className="text-xs font-semibold text-slate-800 truncate">{photo.originalFilename}</div><div className="text-[10px] text-slate-500 truncate">{photo.caption || photo.sessionTitle}</div></div>
-                            <a href={photo.fileUrl} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 rounded bg-[#0B3D91] text-white text-[10px] font-bold">View</a>
+                          <div key={photo.id} className="flex items-center justify-between gap-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-2.5 py-2">
+                            <div className="min-w-0"><div className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{photo.originalFilename}</div><div className="text-[10px] text-gray-400 truncate">{photo.caption || photo.sessionTitle}</div></div>
+                            <a href={photo.fileUrl} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 rounded-lg bg-brand-500 text-white text-[10px] font-semibold">View</a>
                           </div>
                         ))
                       )}
@@ -887,31 +866,30 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       </div>
 
       {/* ==========================================
-          SECTION 2: FILTER PANEL & SEARCH
+          SECTION 2: PHOTO GALLERY
           ========================================== */}
-      <div id="gallery-section" className={`${showClusterLanding ? 'hidden ' : ''}bg-white border border-slate-200 rounded-md p-4 shadow-xs space-y-3.5`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+      <div id="gallery-section" className={`${showClusterLanding ? 'hidden ' : ''}space-y-4 pt-2`}>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
-            <h2 className="font-bold text-slate-900 text-sm">Session Photos Gallery &amp; Filters</h2>
-            <p className="text-xs text-slate-500">Filter photographs by Day, Panchayat, and Village center.</p>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">Photo Gallery</h2>
           </div>
 
           {/* Filtered ZIP Download CTA */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500 font-medium">
-              Showing <strong className="text-slate-900">{filteredPhotos.length}</strong> photos
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
+              Showing <strong className="text-gray-900 dark:text-white">{filteredPhotos.length}</strong> photos
             </span>
 
             <button
               id="download-filtered-zip-btn"
               disabled={downloadingZipKey !== null || filteredPhotos.length === 0}
               onClick={() => handleDownloadZip('filtered')}
-              className={`px-3 py-1.5 rounded-md text-xs font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ${
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
                 filteredPhotos.length === 0
-                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
                   : downloadingZipKey === 'filtered'
-                  ? 'bg-slate-200 text-slate-600'
-                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                  ? 'bg-gray-200 text-gray-600'
+                  : 'bg-success-600 hover:bg-success-700 text-white'
               }`}
             >
               <span className="material-symbols-outlined text-[16px]">
@@ -955,42 +933,50 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         {/* Filter Selectors Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
               Panchayat
             </label>
-            <select
-              value={selectedPanchayat}
-              onChange={(e) => {
-                setSelectedPanchayat(e.target.value);
+            <Select
+              value={selectedPanchayat || "all"}
+              onValueChange={(val) => {
+                setSelectedPanchayat(val);
                 setSelectedVillage('all');
               }}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
             >
-              <option value="all">All Panchayats</option>
-              {panchayats.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Panchayats" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Panchayats</SelectItem>
+                {panchayats.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
-            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
+            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
               Village Center
             </label>
-            <select
-              value={selectedVillage}
-              onChange={(e) => setSelectedVillage(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedVillage || "all"}
+              onValueChange={(val) => setSelectedVillage(val)}
             >
-              <option value="all">All Villages</option>
-              {currentFilterVillages.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Villages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Villages</SelectItem>
+                {currentFilterVillages.map((v) => (
+                  <SelectItem key={v.id} value={v.name}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="lg:col-span-2">
@@ -998,22 +984,21 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               Search by Topic, Village or Volunteer
             </label>
             <div className="relative">
-              <span className="material-symbols-outlined absolute left-3 top-2 text-[18px] text-slate-400">
-                search
-              </span>
+              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search session title, volunteer name, file..."
-                className="w-full pl-9 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
               />
               {searchQuery && (
                 <button
+                  type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-2 text-xs text-slate-400 hover:text-slate-600"
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 >
-                  clear
+                  <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>
@@ -1166,7 +1151,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           ========================================== */}
       {selectedPhoto && (
         <div
-          className="fixed inset-0 bg-black/90  z-[110] flex items-center justify-center p-4"
+          className="fixed inset-0 bg-gray-950/90 backdrop-blur-sm z-[99999] flex items-center justify-center p-4"
           onClick={() => setSelectedPhoto(null)}
         >
           <div
@@ -1246,7 +1231,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           MODAL 2: UPLOAD MULTIPLE SESSION PHOTOS
           ========================================== */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-slate-900/60  z-[110] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
           <div className="bg-white rounded-md shadow-sm w-full max-w-xl overflow-hidden animate-[fadeIn_0.2s_ease-out]">
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
               <div>
@@ -1274,17 +1259,21 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Session Day *</label>
-                  <select
-                    value={uploadDay}
-                    onChange={(e) => setUploadDay(parseInt(e.target.value, 10))}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md font-semibold focus:outline-none focus:border-[#0B3D91]"
+                  <Select
+                    value={String(uploadDay)}
+                    onValueChange={(val) => setUploadDay(parseInt(val, 10))}
                   >
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                      <option key={d} value={d}>
-                        Day {d}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-10 text-xs font-semibold bg-slate-50 border-slate-200">
+                      <SelectValue placeholder="Select Day" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                        <SelectItem key={d} value={String(d)}>
+                          Day {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="sm:col-span-2">
@@ -1304,17 +1293,21 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-slate-700 mb-1">Panchayat *</label>
-                  <select
+                  <Select
                     value={uploadPanchayat}
-                    onChange={(e) => setUploadPanchayat(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+                    onValueChange={(val) => setUploadPanchayat(val)}
                   >
-                    {panchayats.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-10 text-xs bg-slate-50 border-slate-200">
+                      <SelectValue placeholder="Select Panchayat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {panchayats.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
@@ -1434,7 +1427,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           MODAL 3: DELETE PHOTO CONFIRMATION
           ========================================== */}
       {photoToDelete && (
-        <div className="fixed inset-0 bg-slate-900/60  z-[120] flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
           <div className="bg-white rounded-md shadow-sm w-full max-w-sm p-5 text-center space-y-3">
             <span className="material-symbols-outlined text-[38px] text-rose-600">
               warning

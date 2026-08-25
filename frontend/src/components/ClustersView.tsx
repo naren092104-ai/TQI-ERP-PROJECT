@@ -1,21 +1,45 @@
 import React, { useState } from 'react';
+import { 
+  Building2, 
+  MapPin, 
+  Users, 
+  GraduationCap, 
+  Plus, 
+  Search, 
+  ArrowRight, 
+  X, 
+  Phone, 
+  Mail,
+  School,
+  CheckCircle2,
+  AlertCircle,
+  Trash2
+} from 'lucide-react';
 import { Cluster, TabType } from '../types';
+import Badge from './ui/badge';
+import { ActionButton } from './ui/action-button';
 
 interface ClustersViewProps {
   clusters: Cluster[];
+  userRole?: string;
   onNavigate: (tab: TabType, targetId?: string) => void;
   onAddCluster?: (cluster: Partial<Cluster>) => void | Promise<void | boolean>;
+  onDeleteCluster?: (id: string) => void | Promise<void>;
 }
 
 export const ClustersView: React.FC<ClustersViewProps> = ({
   clusters = [],
+  userRole = 'Super Admin',
   onNavigate,
   onAddCluster,
+  onDeleteCluster,
 }) => {
+  const isSuperAdmin = !userRole || userRole === 'Super Admin' || userRole.toLowerCase().includes('super');
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
+  const [clusterToDelete, setClusterToDelete] = useState<Cluster | null>(null);
 
   const [newCollegeName, setNewCollegeName] = useState('');
   const [newClusterDistrict, setNewClusterDistrict] = useState('');
@@ -84,112 +108,114 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   };
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-5">
-      {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white border border-[#c4c6d3]/80 rounded-md p-4 md:p-5 shadow-xs">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-md bg-[#002869] text-white flex items-center justify-center font-bold">
-              <span className="material-symbols-outlined text-[20px]">hub</span>
-            </div>
-            <h1 className="text-xl md:text-2xl font-bold text-[#002869] tracking-tight">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
               Clusters & College Onboarding
             </h1>
-            <span className="bg-[#002869]/10 text-[#002869] text-[11px] font-bold px-2 py-0.5 rounded-full">
-              {clusters.length} Onboarded Colleges
-            </span>
+            <Badge color="primary" size="sm">
+              {clusters.length} Onboarded
+            </Badge>
           </div>
-          <p className="text-xs text-[#747783] mt-1">
-            Centrally manage onboarded partner colleges, district clusters, SPOC coordinators, and regional administrators.
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Manage partner colleges, district hubs, SPOC coordinators, and regional administrators.
           </p>
         </div>
 
         <button
+          type="button"
           onClick={() => {
             setIsAddModalOpen(true);
             setFormError('');
           }}
-          className="bg-[#002869] hover:bg-[#001f52] text-white px-3.5 py-2 rounded-md text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+          className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition shrink-0"
         >
-          <span className="material-symbols-outlined text-[16px]">add_circle</span>
-          Onboard New College
+          <Plus className="h-4 w-4" />
+          <span>Onboard New College</span>
         </button>
       </div>
 
-      {/* Search and Summary KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-white border border-[#c4c6d3]/70 rounded-md p-3.5 shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-blue-50 text-[#002869] flex items-center justify-center">
-            <span className="material-symbols-outlined text-[22px]">school</span>
+      {/* 2. Compact Metric Cards (for count and status) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Onboarded Colleges</span>
+            <School className="h-5 w-5 text-brand-500" />
           </div>
-          <div>
-            <span className="text-[10.5px] text-slate-500 font-semibold block uppercase">Onboarded Colleges</span>
-            <span className="text-lg font-bold text-[#002869]">{clusters.length}</span>
+          <div className="mt-3 flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">{clusters.length}</span>
+            <Badge color="primary" size="sm">Active</Badge>
           </div>
         </div>
 
-        <div className="bg-white border border-[#c4c6d3]/70 rounded-md p-3.5 shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-emerald-50 text-emerald-700 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[22px]">location_city</span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Panchayats</span>
+            <MapPin className="h-5 w-5 text-success-500" />
           </div>
-          <div>
-            <span className="text-[10.5px] text-slate-500 font-semibold block uppercase">Total Panchayats</span>
-            <span className="text-lg font-bold text-emerald-800">
+          <div className="mt-3 flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">
               {clusters.reduce((acc, c) => acc + (c.activePanchayats || 0), 0)}
             </span>
+            <Badge color="success" size="sm">Mapped</Badge>
           </div>
         </div>
 
-        <div className="bg-white border border-[#c4c6d3]/70 rounded-md p-3.5 shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-purple-50 text-purple-700 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[22px]">groups</span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Enrolled Students</span>
+            <GraduationCap className="h-5 w-5 text-theme-purple-500" />
           </div>
-          <div>
-            <span className="text-[10.5px] text-slate-500 font-semibold block uppercase">Enrolled Students</span>
-            <span className="text-lg font-bold text-purple-800">
+          <div className="mt-3 flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">
               {clusters.reduce((acc, c) => acc + (c.totalStudents || 0), 0)}
             </span>
+            <Badge color="info" size="sm">Enrolled</Badge>
           </div>
         </div>
 
-        <div className="bg-white border border-[#c4c6d3]/70 rounded-md p-3.5 shadow-xs flex items-center gap-3">
-          <div className="w-10 h-10 rounded-md bg-amber-50 text-amber-700 flex items-center justify-center">
-            <span className="material-symbols-outlined text-[22px]">volunteer_activism</span>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Active Volunteers</span>
+            <Users className="h-5 w-5 text-warning-500" />
           </div>
-          <div>
-            <span className="text-[10.5px] text-slate-500 font-semibold block uppercase">Active Volunteers</span>
-            <span className="text-lg font-bold text-amber-800">
+          <div className="mt-3 flex items-baseline justify-between">
+            <span className="text-2xl font-bold text-gray-900 dark:text-white">
               {clusters.reduce((acc, c) => acc + (c.totalVolunteers || 0), 0)}
             </span>
+            <Badge color="warning" size="sm">Mentors</Badge>
           </div>
         </div>
       </div>
 
-      {/* Search Input */}
-      <div className="bg-white border border-[#c4c6d3]/80 rounded-md p-3 shadow-xs">
-        <div className="relative w-full max-w-sm">
-          <span className="material-symbols-outlined absolute left-2.5 top-2 text-[18px] text-slate-400">
-            search
-          </span>
+      {/* 3. Cardless Search & Filter Bar */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative w-full max-w-md">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
             placeholder="Search by college, district, or SPOC..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-[#f8fafc] border border-slate-300 rounded-md pl-8 pr-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-[#002869]"
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
           />
         </div>
       </div>
 
-      {/* Cluster Grid Cards */}
+      {/* 4. Cardless Grid List */}
       {filteredClusters.length === 0 ? (
-        <div className="bg-white border border-[#c4c6d3]/80 rounded-md p-8 text-center text-slate-500 space-y-2">
-          <span className="material-symbols-outlined text-4xl text-slate-400">domain_disabled</span>
-          <p className="font-semibold text-sm text-slate-700">No partner colleges onboarded yet.</p>
-          <p className="text-xs text-slate-500">Click "Onboard New College" to register a college and assign its SPOC administrator.</p>
+        <div className="py-16 text-center">
+          <Building2 className="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600" />
+          <h3 className="mt-3 text-base font-semibold text-gray-800 dark:text-white">No partner colleges found</h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {searchTerm ? 'Try adjusting your search terms.' : 'Click "Onboard New College" to register a college and assign its SPOC coordinator.'}
+          </p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredClusters.map((cluster) => {
             const completionRate = Math.round(
               ((cluster.completedSessions || 0) / (cluster.totalSessions || 48)) * 100
@@ -198,84 +224,86 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             return (
               <div
                 key={cluster.id}
-                className="bg-white border border-[#c4c6d3]/80 rounded-md overflow-hidden shadow-xs hover:border-[#002869] transition-all flex flex-col justify-between"
+                className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800 flex flex-col justify-between"
               >
-                <div className="p-4 space-y-3">
-                  {/* Top Badge & Title */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-bold text-[#002869] bg-[#002869]/10 px-2 py-0.5 rounded">
-                          {cluster.code}
-                        </span>
-                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-                          {cluster.status}
-                        </span>
-                      </div>
-                      <h3 className="text-base font-bold text-[#002869] mt-1">{cluster.collegeName || cluster.name}</h3>
-                      <p className="text-xs text-slate-500">{cluster.district}, Tamil Nadu</p>
-                    </div>
-
-                    <div className="w-9 h-9 rounded-md bg-[#002869] text-white flex items-center justify-center font-bold text-xs shrink-0">
-                      {(cluster.collegeName || cluster.name || 'CL').substring(0, 2).toUpperCase()}
+                <div className="space-y-4">
+                  {/* College Info */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1 flex-1 min-w-0">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white truncate group-hover:text-brand-500 transition-colors">
+                        {cluster.collegeName || cluster.name}
+                      </h3>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
+                        <MapPin className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                        <span>{cluster.district}, Tamil Nadu</span>
+                      </p>
                     </div>
                   </div>
 
                   {/* Progress Bar */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px] font-medium">
-                      <span className="text-slate-600">Curriculum Progress</span>
-                      <span className="text-[#002869] font-bold">
-                        {completionRate}% ({cluster.completedSessions || 0}/{cluster.totalSessions || 48} sessions)
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex justify-between text-xs font-medium text-gray-600 dark:text-gray-400">
+                      <span>Curriculum Progress</span>
+                      <span className="font-bold text-brand-500 dark:text-brand-400">
+                        {completionRate}% ({cluster.completedSessions || 0}/{cluster.totalSessions || 48})
                       </span>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                       <div
-                        className="bg-[#002869] h-2 rounded-full transition-all duration-500"
+                        className="h-full rounded-full bg-brand-500 transition-all duration-500"
                         style={{ width: `${completionRate}%` }}
-                      ></div>
+                      />
                     </div>
                   </div>
 
-                  {/* Key Metrics */}
-                  <div className="grid grid-cols-3 gap-2 bg-[#f8fafc] border border-slate-200/80 rounded-md p-2.5 text-center text-xs">
+                  {/* Key Stats Row */}
+                  <div className="grid grid-cols-3 gap-2 rounded-xl bg-gray-50/70 p-2.5 text-center dark:bg-white/[0.02]">
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-medium">Panchayats</span>
-                      <span className="font-bold text-slate-800">{cluster.activePanchayats}</span>
+                      <span className="text-[11px] text-gray-400 font-medium block">Panchayats</span>
+                      <span className="text-sm font-bold text-gray-800 dark:text-white">{cluster.activePanchayats || 0}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-medium">Students</span>
-                      <span className="font-bold text-slate-800">{cluster.totalStudents}</span>
+                      <span className="text-[11px] text-gray-400 font-medium block">Students</span>
+                      <span className="text-sm font-bold text-gray-800 dark:text-white">{cluster.totalStudents || 0}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block font-medium">Volunteers</span>
-                      <span className="font-bold text-slate-800">{cluster.totalVolunteers}</span>
+                      <span className="text-[11px] text-gray-400 font-medium block">Volunteers</span>
+                      <span className="text-sm font-bold text-gray-800 dark:text-white">{cluster.totalVolunteers || 0}</span>
                     </div>
                   </div>
 
-                  {/* SPOC / Admin Coordinator Details */}
-                  <div className="bg-slate-50/70 border border-slate-200/60 rounded p-2.5 space-y-1 text-[11.5px]">
-                    <div className="flex items-center justify-between text-slate-800 font-semibold">
-                      <span className="flex items-center gap-1">
-                        <span className="material-symbols-outlined text-[15px] text-[#002869]">badge</span>
-                        {cluster.spocName || cluster.adminName || 'SPOC Admin'}
-                      </span>
-                      <span className="font-mono text-[10.5px] text-slate-600">{cluster.spocMobile || cluster.adminPhone}</span>
+                  {/* SPOC Details */}
+                  <div className="rounded-xl border border-gray-100 p-3 space-y-1 text-xs dark:border-gray-800/80">
+                    <div className="flex items-center justify-between font-semibold text-gray-800 dark:text-gray-200">
+                      <span className="truncate">{cluster.spocName || cluster.adminName || 'SPOC Admin'}</span>
+                      <span className="text-xs font-mono text-gray-500 dark:text-gray-400 shrink-0">{cluster.spocMobile || cluster.adminPhone}</span>
                     </div>
-                    <div className="text-[11px] text-slate-500 font-mono truncate">
+                    <div className="text-[11px] text-gray-400 truncate font-mono">
                       {cluster.adminEmail}
                     </div>
                   </div>
                 </div>
 
-                {/* Action Button */}
-                <div className="p-3 bg-[#f8fafc] border-t border-slate-200/80 flex items-center justify-end">
+                {/* Footer Action */}
+                <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                  {isSuperAdmin && onDeleteCluster ? (
+                    <button
+                      type="button"
+                      onClick={() => setClusterToDelete(cluster)}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-error-500 hover:text-error-600 hover:bg-error-50 dark:hover:bg-error-500/10 px-2 py-1 rounded-lg transition-colors"
+                      title="Delete Cluster"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      <span>Delete</span>
+                    </button>
+                  ) : <div />}
                   <button
+                    type="button"
                     onClick={() => onNavigate('panchayats', cluster.id)}
-                    className="text-xs font-bold text-[#002869] hover:text-[#001f52] flex items-center gap-1 cursor-pointer transition-colors"
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-500 hover:text-brand-600 dark:text-brand-400 transition-colors"
                   >
-                    View Panchayats & Scope
-                    <span className="material-symbols-outlined text-[14px]">arrow_forward</span>
+                    <span>View Panchayats & Scope</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
                   </button>
                 </div>
               </div>
@@ -286,124 +314,136 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
 
       {/* Onboard New College Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-lg shadow-lg overflow-hidden">
-            <div className="bg-[#002869] text-white p-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-[20px]">school</span>
-                <h3 className="text-base font-bold">Onboard Partner College</h3>
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-y-auto bg-gray-900/75 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                  Onboard Partner College
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  Register institution and provision SPOC cluster admin credentials.
+                </p>
               </div>
               <button
+                type="button"
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-white/80 hover:text-white p-1 rounded-full cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-white transition"
               >
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateCluster} className="p-5 space-y-4 text-xs">
+            <form onSubmit={handleCreateCluster} className="mt-5 space-y-4 text-xs">
               {formError && (
-                <div className="p-2.5 rounded bg-red-50 border border-red-200 text-red-700 text-[11.5px]">
-                  {formError}
+                <div className="rounded-xl border border-error-200 bg-error-50 p-3 text-xs text-error-600 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-400 flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  <span>{formError}</span>
                 </div>
               )}
 
-              {/* College & District */}
               <div className="space-y-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Partner College / Institution Name *</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                    College / Institution Name *
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Government Arts College"
                     value={newCollegeName}
                     onChange={(e) => setNewCollegeName(e.target.value)}
-                    className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">District *</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                    District *
+                  </label>
                   <input
                     type="text"
                     required
                     placeholder="e.g. Dharmapuri"
                     value={newClusterDistrict}
                     onChange={(e) => setNewClusterDistrict(e.target.value)}
-                    className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                 </div>
               </div>
 
-              {/* College SPOC Coordinator */}
-              <div className="pt-3 border-t border-slate-200 space-y-3">
-                <h4 className="font-bold text-[#002869] uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-[15px]">person</span>
-                  College SPOC & Cluster Administrator
+              <div className="pt-3 border-t border-gray-100 dark:border-gray-800 space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-brand-500 dark:text-brand-400">
+                  College SPOC & Regional Administrator
                 </h4>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">SPOC Full Name *</label>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      SPOC Full Name *
+                    </label>
                     <input
                       type="text"
                       required
                       placeholder="e.g. Dr. M. Vignesh"
                       value={newSpocName}
                       onChange={(e) => setNewSpocName(e.target.value)}
-                      className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                      className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                     />
                   </div>
                   <div>
-                    <label className="block font-semibold text-slate-700 mb-1">SPOC Mobile Number *</label>
+                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                      SPOC Mobile Number *
+                    </label>
                     <input
                       type="tel"
                       required
                       placeholder="e.g. +91 98765 43210"
                       value={newSpocMobile}
                       onChange={(e) => setNewSpocMobile(e.target.value)}
-                      className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                      className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">SPOC Official Login Email *</label>
+                  <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                    SPOC Official Email *
+                  </label>
                   <input
                     type="email"
                     required
                     placeholder="e.g. vignesh.m@gac-dpi.edu.in"
                     value={newSpocEmail}
                     onChange={(e) => setNewSpocEmail(e.target.value)}
-                    className="w-full bg-[#f8fafc] border border-slate-300 rounded-md p-2 text-xs focus:outline-none focus:border-[#002869]"
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                 </div>
               </div>
 
-              {/* Notice */}
-              <div className="p-3 bg-blue-50/70 border border-blue-200/80 rounded-md text-[11px] text-blue-900 space-y-1">
-                <p className="font-bold flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[14px]">forward_to_inbox</span>
+              <div className="rounded-xl border border-blue-light-200 bg-blue-light-50/70 p-3 text-xs text-blue-light-900 dark:border-blue-light-900/40 dark:bg-blue-light-500/10 dark:text-blue-light-300">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="h-4 w-4 text-blue-light-500 shrink-0" />
                   Automated Credentials Email
                 </p>
-                <p className="text-blue-800">
-                  The SPOC will be provisioned as the Regional Cluster Admin. A secure temporary password and onboarding instructions will be dispatched to <strong>{newSpocEmail || 'their email'}</strong>.
+                <p className="mt-1 text-[11px] opacity-90">
+                  The SPOC will be provisioned as Regional Cluster Admin. Login credentials will be dispatched to <strong>{newSpocEmail || 'their email'}</strong>.
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2">
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
                 <button
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-3.5 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-semibold cursor-pointer"
+                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-4 py-2 bg-[#002869] hover:bg-[#001f52] text-white rounded-md font-bold transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+                  className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition disabled:opacity-50"
                 >
                   {isSubmitting ? 'Onboarding College...' : 'Onboard College & Send Credentials'}
                 </button>
@@ -412,6 +452,48 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      {clusterToDelete && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-y-auto bg-gray-900/75 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-md rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center gap-3 text-error-500 mb-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-error-50 dark:bg-error-500/10">
+                <Trash2 className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">Delete Cluster</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">This action cannot be undone.</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+              Are you sure you want to permanently delete <strong>{clusterToDelete.collegeName || clusterToDelete.name}</strong> ({clusterToDelete.district})? Associated local operational mapping will be unassigned.
+            </p>
+            <div className="flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setClusterToDelete(null)}
+                className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onDeleteCluster && clusterToDelete) {
+                    await onDeleteCluster(clusterToDelete.id);
+                    setClusterToDelete(null);
+                  }
+                }}
+                className="rounded-xl bg-error-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-error-600 transition"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

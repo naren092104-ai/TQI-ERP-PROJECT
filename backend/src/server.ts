@@ -48,6 +48,56 @@ const serializeUser = (row: any) => ({
   mustChangePassword: Boolean(row.must_change_password),
 });
 
+// ============================================================
+// Phase 4: Session Status Flow Enforcement
+// ============================================================
+// Status flow: SCHEDULED → IN_PROGRESS → SUBMITTED → PENDING_REVIEW
+//              → APPROVED → COMPLETED
+//              → RESUBMISSION_REQUIRED → RESUBMITTED → REVIEW → APPROVED → COMPLETED
+
+const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {
+  'Draft':                   ['Scheduled', 'In Progress'],
+  'Scheduled':               ['In Progress', 'Cancelled'],
+  'In Progress':             ['Submitted'],
+  'Submitted':               ['Pending Review'],
+  'Pending Review':          ['Approved', 'Resubmission Required'],
+  'Approved':                ['Completed'],
+  'Resubmission Required':   ['In Progress'],
+  'Resubmitted':             ['Pending Review'],
+  'Completed':               [],
+  'Cancelled':               ['Scheduled'],
+};
+
+const EDITABLE_STATUSES = new Set([
+  'Draft', 'Scheduled', 'In Progress', 'Resubmission Required',
+]);
+
+const isSessionEditable = async (sessionId: string): Promise<{ editable: boolean; reason?: string }> => {
+  try {
+    const [submissions] = await pool.query<any>(
+      'SELECT status FROM session_submissions WHERE session_id = ? ORDER BY updated_at DESC LIMIT 1',
+      [sessionId]
+    );
+    if (submissions.length === 0) return { editable: true };
+    const status = submissions[0].status;
+    if (EDITABLE_STATUSES.has(status)) return { editable: true };
+    return { editable: false, reason: `Session is in '${status}' status. Editing is disabled.` };
+  } catch {
+    return { editable: true }; // fail-open if table doesn't exist yet
+  }
+};
+
+const autoTransitionToInProgress = async (sessionId: string): Promise<void> => {
+  try {
+    await pool.query<any>(
+      "UPDATE sessions SET session_status = 'In Progress' WHERE id = ? AND session_status IN ('Draft', 'Scheduled')",
+      [sessionId]
+    );
+  } catch {
+    // ignore — session may not exist or may already be in progress
+  }
+};
+
 const createAuthToken = (userRow: any) => {
   const user = serializeUser(userRow);
   const token = jwt.sign(
@@ -1249,16 +1299,49 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       return;
     }
     const clusterId = req.user.clusterId;
+    const sessionId = String(req.body.sessionId || '');
+    // Phase 4: Check if session is editable
+    if (sessionId) {
+      const editCheck = await isSessionEditable(sessionId);
+      if (!editCheck.editable) {
+        res.status(403).json({ success: false, error: editCheck.reason });
+        return;
+      }
+      // Auto-transition session to 'In Progress' on first data entry
+      await autoTransitionToInProgress(sessionId);
+    }
     const id = String(req.body.id || `attendance-${Date.now()}`).trim();
     const totalCount = Number(req.body.totalCount || 0);
     const presentCount = Number(req.body.presentCount || 0);
     const requestedStatus = String(req.body.status || 'Draft');
     const status = requestedStatus === 'Submitted' || requestedStatus === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
 
+    await pool.query('START TRANSACTION');
+
     await pool.query(
       'INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, status, present_count, total_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), day_number = VALUES(day_number), status = VALUES(status), present_count = VALUES(present_count), total_count = VALUES(total_count)',
       [id, String(req.body.sessionId || id), clusterId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), Number(req.body.dayNumber || 1), status, presentCount, totalCount]
     );
+
+    if (Array.isArray(req.body.records)) {
+      await pool.query('DELETE FROM student_attendance WHERE attendance_session_id = ?', [id]);
+      for (const record of req.body.records) {
+        await pool.query(
+          'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, task_status) VALUES (?, ?, ?, ?, ?)',
+          [randomUUID(), id, record.studentId, Boolean(record.present), String(record.taskStatus || 'Completed')]
+        );
+      }
+    }
+
+    if (Array.isArray(req.body.volunteerAttendance)) {
+      await pool.query('DELETE FROM volunteer_attendance WHERE attendance_session_id = ?', [id]);
+      for (const record of req.body.volunteerAttendance) {
+        await pool.query(
+          'INSERT INTO volunteer_attendance (id, attendance_session_id, volunteer_id, present) VALUES (?, ?, ?, ?)',
+          [randomUUID(), id, record.volunteerId, Boolean(record.present)]
+        );
+      }
+    }
 
     if (status === 'SUBMITTED') {
       await pool.query(
@@ -1268,9 +1351,12 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
         [randomUUID(), 'Attendance', id, req.user.name, 'Open', '', id, clusterId, id],
       );
     }
+    
+    await pool.query('COMMIT');
 
     res.json({ success: true, attendanceSession: { id, sessionId: req.body.sessionId || id, clusterId, panchayatId: req.body.panchayatId || '', villageId: req.body.villageId || '', dayNumber: Number(req.body.dayNumber || 1), status: status === 'SUBMITTED' ? 'Submitted' : 'Draft', presentCount, totalCount } });
   } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to save attendance:', error);
     res.status(500).json({ success: false, error: 'Unable to save attendance.' });
   }
@@ -1303,9 +1389,36 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
   try {
     const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
     const id = String(req.body.id || `lesson-${Date.now()}`).trim();
+    // Phase 4: Check if session is editable
+    const lpSessionId = String(req.body.sessionId || '');
+    if (lpSessionId) {
+      const editCheck = await isSessionEditable(lpSessionId);
+      if (!editCheck.editable) {
+        res.status(403).json({ success: false, error: editCheck.reason });
+        return;
+      }
+      await autoTransitionToInProgress(lpSessionId);
+    }
     await pool.query(
-      'INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), status = VALUES(status), created_by = VALUES(created_by)',
-      [id, String(req.body.sessionId || ''), String(req.body.moduleId || 'module-english'), clusterId, String(req.body.panchayatId || ''), String(req.body.title || 'Lesson Plan').trim(), String(req.body.status || 'Draft'), String(req.user.id)]
+      `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, status, created_by) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), materials = VALUES(materials), duration = VALUES(duration), remarks = VALUES(remarks), teaching_method = VALUES(teaching_method), assessment_task = VALUES(assessment_task), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), volunteer_id = VALUES(volunteer_id), status = VALUES(status), created_by = VALUES(created_by)`,
+      [
+        id, String(req.body.sessionId || ''), String(req.body.moduleId || 'module-english'), clusterId, String(req.body.panchayatId || ''), String(req.body.title || 'Lesson Plan').trim(),
+        req.body.topic ? String(req.body.topic) : null,
+        req.body.objective ? String(req.body.objective) : null,
+        req.body.activities ? (typeof req.body.activities === 'string' ? req.body.activities : JSON.stringify(req.body.activities)) : null,
+        req.body.materials ? String(req.body.materials) : null,
+        req.body.duration ? Number(req.body.duration) : null,
+        req.body.remarks ? String(req.body.remarks) : null,
+        req.body.teachingMethod ? String(req.body.teachingMethod) : null,
+        req.body.assessmentTask ? String(req.body.assessmentTask) : null,
+        req.body.targetStandard ? String(req.body.targetStandard) : null,
+        req.body.learningOutcomes ? String(req.body.learningOutcomes) : null,
+        req.body.dayNumber ? Number(req.body.dayNumber) : null,
+        req.body.volunteerId ? String(req.body.volunteerId) : null,
+        String(req.body.status || 'Draft'), String(req.user.id)
+      ]
     );
 
     res.json({ success: true, lessonPlan: { id, title: req.body.title || 'Lesson Plan', clusterId, status: req.body.status || 'Draft' } });
@@ -1342,6 +1455,15 @@ app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Res
   try {
     const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
     const id = String(req.body.id || `finance-${Date.now()}`).trim();
+    // Phase 4: Check if linked session is editable
+    const finSessionId = String(req.body.sessionId || '');
+    if (finSessionId) {
+      const editCheck = await isSessionEditable(finSessionId);
+      if (!editCheck.editable) {
+        res.status(403).json({ success: false, error: editCheck.reason });
+        return;
+      }
+    }
     const amount = Number(req.body.amount || 0);
     const date = String(req.body.date || new Date().toISOString().split('T')[0]);
 
@@ -1539,6 +1661,734 @@ app.post('/api/users/:id/reset-password', requireAuth, async (req: Authenticated
     res.json({ success: true });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Unable to reset password.' });
+  }
+});
+
+// --- NEW ENDPOINTS ADDED IN PHASE 2 (PART 1) ---
+
+// 1. PUT /api/clusters/:id
+app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can update clusters.' }); return; }
+  const { name, college_name, spoc_name, spoc_mobile, district, state } = req.body;
+  try {
+    const [result] = await pool.query<any>(
+      'UPDATE clusters SET name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, state = ? WHERE id = ?',
+      [name, college_name, spoc_name, spoc_mobile, district, state, req.params.id]
+    );
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'UPDATE_CLUSTER', 'CLUSTER', req.params.id, JSON.stringify(req.body)]);
+    res.json({ success: true, data: { id: req.params.id } });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to update cluster.' });
+  }
+});
+
+// 2. DELETE /api/clusters/:id
+app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete clusters.' }); return; }
+  try {
+    const [result] = await pool.query<any>("UPDATE clusters SET status = 'INACTIVE' WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+    await pool.query("UPDATE users SET status = 'INACTIVE' WHERE cluster_id = ? AND role = 'Cluster Admin'", [req.params.id]);
+    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTER', req.params.id, '{}']);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete cluster.' });
+  }
+});
+
+// 3. GET /api/villages
+app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const targetClusterId = req.user.role !== 'Super Admin' ? req.user.clusterId : (req.query.cluster || null);
+  const targetPanchayatId = req.query.panchayat || null;
+  
+  let sql = `
+    SELECT v.*, p.name as panchayat_name 
+    FROM villages v
+    LEFT JOIN panchayats p ON v.panchayat_id = p.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+  
+  if (targetClusterId) {
+    sql += ' AND v.cluster_id = ?';
+    params.push(targetClusterId);
+  }
+  if (targetPanchayatId) {
+    sql += ' AND v.panchayat_id = ?';
+    params.push(targetPanchayatId);
+  }
+  
+  try {
+    const [rows] = await pool.query(sql, params);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to fetch villages.' });
+  }
+});
+
+// 4. POST /api/villages
+app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { id, name, panchayat_id, cluster_id } = req.body;
+  if (!name || !panchayat_id || !cluster_id) {
+    res.status(400).json({ success: false, error: 'Missing required fields.' });
+    return;
+  }
+  try {
+    const finalId = id || crypto.randomUUID();
+    const [result] = await pool.query<any>(
+      `INSERT INTO villages (id, name, panchayat_id, cluster_id) 
+       VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id)`,
+      [finalId, name, panchayat_id, cluster_id]
+    );
+    res.json({ success: true, data: { id: finalId } });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to upsert village.' });
+  }
+});
+
+// 5. DELETE /api/villages/:id
+app.delete('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [result] = await pool.query<any>("DELETE FROM villages WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Village not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete village.' });
+  }
+});
+
+// 6. DELETE /api/panchayats/:id
+app.delete('/api/panchayats/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query("DELETE FROM villages WHERE panchayat_id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("DELETE FROM panchayats WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Panchayat not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete panchayat.' });
+  }
+});
+
+// 7. PUT /api/students/:id
+app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status } = req.body;
+  try {
+    const [result] = await pool.query<any>(
+      'UPDATE students SET name = ?, gender = ?, dob = ?, standard = ?, panchayat_id = ?, village_id = ?, parent_name = ?, phone = ?, status = ? WHERE id = ?',
+      [name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status, req.params.id]
+    );
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
+    res.json({ success: true, data: { id: req.params.id } });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to update student.' });
+  }
+});
+
+// 8. DELETE /api/students/:id
+app.delete('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [result] = await pool.query<any>("UPDATE students SET status = 'inactive' WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete student.' });
+  }
+});
+
+// 9. POST /api/students/bulk
+app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { students, clusterId } = req.body;
+  if (!Array.isArray(students) || !clusterId) {
+    res.status(400).json({ success: false, error: 'Invalid payload.' });
+    return;
+  }
+  let count = 0;
+  try {
+    for (const student of students) {
+      await pool.query(
+        'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [crypto.randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId || null, student.villageId || null, student.parentName, student.phone, 'active']
+      );
+      count++;
+    }
+    res.json({ success: true, count });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to bulk import students.' });
+  }
+});
+
+// 10. PUT /api/volunteers/:id
+app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { name, email, phone, department, role, panchayat_id, village_id, status } = req.body;
+  try {
+    const [result] = await pool.query<any>(
+      'UPDATE volunteers SET name = ?, email = ?, phone = ?, department = ?, role = ?, panchayat_id = ?, village_id = ?, status = ? WHERE id = ?',
+      [name, email, phone, department, role, panchayat_id, village_id, status, req.params.id]
+    );
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
+    res.json({ success: true, data: { id: req.params.id } });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to update volunteer.' });
+  }
+});
+
+// 11. DELETE /api/volunteers/:id
+app.delete('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [result] = await pool.query<any>("UPDATE volunteers SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete volunteer.' });
+  }
+});
+
+// 12. POST /api/volunteers/bulk
+app.post('/api/volunteers/bulk', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const { volunteers, clusterId } = req.body;
+  if (!Array.isArray(volunteers) || !clusterId) {
+    res.status(400).json({ success: false, error: 'Invalid payload.' });
+    return;
+  }
+  let count = 0;
+  try {
+    for (const vol of volunteers) {
+      await pool.query(
+        'INSERT INTO volunteers (id, cluster_id, name, email, phone, department, role, panchayat_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [crypto.randomUUID(), clusterId, vol.name, vol.email, vol.phone, vol.department, vol.role, vol.panchayatId || null, 'Active']
+      );
+      count++;
+    }
+    res.json({ success: true, count });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to bulk import volunteers.' });
+  }
+});
+
+// 13. DELETE /api/sessions/:id
+app.delete('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query("DELETE FROM session_attendance WHERE session_id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("DELETE FROM sessions WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Session not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete session.' });
+  }
+});
+
+// 14. DELETE /api/lesson-plans/:id
+app.delete('/api/lesson-plans/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [result] = await pool.query<any>("DELETE FROM lesson_plans WHERE id = ?", [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Lesson plan not found.' }); return; }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(503).json({ success: false, error: 'Failed to delete lesson plan.' });
+  }
+});
+
+// --- 1. Date Change Requests ---
+app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { sessionId, originalDate, requestedDate, reason } = req.body;
+    const clusterId = req.user.clusterId;
+    const id = `dcr-${randomUUID()}`;
+
+    await pool.query(
+      'INSERT INTO date_change_requests (id, session_id, cluster_id, original_date, requested_date, reason, status, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, sessionId, clusterId, originalDate, requestedDate, reason, 'PENDING', req.user.id]
+    );
+
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Date Change Request', `New date change request for session ${sessionId} from cluster ${clusterId}.`, 'date_change']
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'CREATE_DATE_CHANGE_REQUEST', 'DATE_CHANGES', id, `Requested date change for session ${sessionId}`]
+    );
+
+    res.json({ success: true, request: { id, sessionId, clusterId, originalDate, requestedDate, reason, status: 'PENDING' } });
+  } catch (error) {
+    console.error('Failed to submit date change request:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit request.' });
+  }
+});
+
+app.get('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let sql = 'SELECT * FROM date_change_requests WHERE 1=1';
+    const params: any[] = [];
+
+    if (req.user.role === 'Cluster Admin') {
+      sql += ' AND cluster_id = ?';
+      params.push(req.user.clusterId);
+    }
+
+    sql += ' ORDER BY created_at DESC';
+    const [rows] = await pool.query<any[]>(sql, params);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Failed to fetch date change requests:', error);
+    res.status(503).json({ success: false, error: 'Unable to load data.' });
+  }
+});
+
+app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can review date change requests.' });
+    return;
+  }
+  
+  const { action } = req.params;
+  const { remarks } = req.body;
+  const status = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : null;
+
+  if (!status) {
+    res.status(400).json({ success: false, error: 'Invalid action.' });
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM date_change_requests WHERE id = ?', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Request not found.' });
+      return;
+    }
+    const request = rows[0];
+
+    await pool.query('START TRANSACTION');
+
+    await pool.query(
+      'UPDATE date_change_requests SET status = ?, reviewed_by = ?, review_remarks = ?, reviewed_at = NOW() WHERE id = ?',
+      [status, req.user.id, remarks, req.params.id]
+    );
+
+    if (status === 'APPROVED') {
+      await pool.query('UPDATE sessions SET date = ? WHERE id = ?', [request.requested_date, request.session_id]);
+    }
+
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at, user_id) VALUES (?, ?, ?, ?, 0, NOW(), ?)',
+      [randomUUID(), `Date Change ${status}`, `Your date change request for session ${request.session_id} was ${status.toLowerCase()}.`, 'date_change_reply', request.requested_by]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, request.cluster_id, `REVIEW_DATE_CHANGE_${status}`, 'DATE_CHANGES', req.params.id, remarks]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, status });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to update date change request:', error);
+    res.status(503).json({ success: false, error: 'Unable to process request.' });
+  }
+});
+
+// --- 2. Session Reports ---
+app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let sql = 'SELECT * FROM session_reports WHERE 1=1';
+    const params: any[] = [];
+    if (req.user.role === 'Cluster Admin') {
+      sql += ' AND cluster_id = ?';
+      params.push(req.user.clusterId);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const [rows] = await pool.query<any[]>(sql, params);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Failed to fetch session reports:', error);
+    res.status(503).json({ success: false, error: 'Unable to load data.' });
+  }
+});
+
+app.post('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { id, sessionId, clusterId, dayNumber, sessionSummary, studentCount, attendanceSummary, activities, issues, remarks, status } = req.body;
+    const recordId = id || `report-${randomUUID()}`;
+    const cId = clusterId || req.user.clusterId;
+
+    await pool.query(
+      `INSERT INTO session_reports (id, session_id, cluster_id, day_number, session_summary, student_count, attendance_summary, activities, issues, remarks, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE session_summary = VALUES(session_summary), student_count = VALUES(student_count), attendance_summary = VALUES(attendance_summary), activities = VALUES(activities), issues = VALUES(issues), remarks = VALUES(remarks), status = VALUES(status)`,
+      [recordId, sessionId, cId, dayNumber, sessionSummary, studentCount, attendanceSummary, typeof activities === 'string' ? activities : JSON.stringify(activities), issues, remarks, status || 'Draft', req.user.id]
+    );
+
+    res.json({ success: true, data: { id: recordId } });
+  } catch (error) {
+    console.error('Failed to save session report:', error);
+    res.status(500).json({ success: false, error: 'Unable to save report.' });
+  }
+});
+
+app.delete('/api/session-reports/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query('DELETE FROM session_reports WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete session report:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete report.' });
+  }
+});
+
+// --- 3. Session Submissions ---
+app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { sessionId, clusterId, dayNumber } = req.body;
+    const cId = clusterId || req.user.clusterId;
+    const recordId = `sub-${sessionId}`;
+
+    const [attRows] = await pool.query<any[]>('SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != "DRAFT"', [sessionId, dayNumber]);
+    const attendanceComplete = attRows.length > 0;
+
+    const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ?', [sessionId]);
+    const lessonPlanComplete = lpRows.length > 0;
+
+    const [photoRows] = await pool.query<any[]>('SELECT id FROM session_photos WHERE cluster_id = ? AND day_number = ?', [cId, dayNumber]);
+    const photosComplete = photoRows.length > 0;
+
+    const [repRows] = await pool.query<any[]>('SELECT id FROM session_reports WHERE session_id = ?', [sessionId]);
+    const reportComplete = repRows.length > 0;
+
+    const [finRows] = await pool.query<any[]>('SELECT id FROM finance_entries WHERE cluster_id = ?', [cId]);
+    const financeComplete = finRows.length > 0;
+
+    const allComplete = attendanceComplete && lessonPlanComplete && photosComplete && reportComplete && financeComplete;
+
+    if (!allComplete) {
+      const missing = [];
+      if (!attendanceComplete) missing.push('Attendance');
+      if (!lessonPlanComplete) missing.push('Lesson Plan');
+      if (!photosComplete) missing.push('Photos');
+      if (!reportComplete) missing.push('Session Report');
+      if (!financeComplete) missing.push('Finance');
+      res.status(400).json({ success: false, error: 'Missing requirements.', missing });
+      return;
+    }
+
+    await pool.query('START TRANSACTION');
+
+    await pool.query(
+      `INSERT INTO session_submissions (id, session_id, cluster_id, day_number, attendance_complete, lesson_plan_complete, photos_complete, report_complete, finance_complete, status, submitted_at, submitted_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+       ON DUPLICATE KEY UPDATE attendance_complete=VALUES(attendance_complete), lesson_plan_complete=VALUES(lesson_plan_complete), photos_complete=VALUES(photos_complete), report_complete=VALUES(report_complete), finance_complete=VALUES(finance_complete), status=VALUES(status), submitted_at=VALUES(submitted_at), submitted_by=VALUES(submitted_by)`,
+      [recordId, sessionId, cId, dayNumber, attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, 'SUBMITTED', req.user.id]
+    );
+
+    await pool.query('UPDATE sessions SET status = "Submitted" WHERE id = ?', [sessionId]);
+
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Session Submitted', `Session ${sessionId} has been submitted for review.`, 'submission']
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, cId, 'SUBMIT_SESSION', 'SUBMISSIONS', recordId, `Submitted session ${sessionId}`]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, data: { id: recordId, status: 'SUBMITTED' } });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to submit session:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit session.' });
+  }
+});
+
+app.get('/api/session-submissions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let sql = 'SELECT * FROM session_submissions WHERE 1=1';
+    const params: any[] = [];
+    if (req.user.role === 'Cluster Admin') {
+      sql += ' AND cluster_id = ?';
+      params.push(req.user.clusterId);
+    }
+    sql += ' ORDER BY created_at DESC';
+    const [rows] = await pool.query<any[]>(sql, params);
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Failed to fetch session submissions:', error);
+    res.status(503).json({ success: false, error: 'Unable to load data.' });
+  }
+});
+
+app.put('/api/session-submissions/:id/review', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can review submissions.' });
+    return;
+  }
+  
+  const { action, remarks } = req.body;
+  const status = action === 'approve' ? 'APPROVED' : action === 'resubmission' ? 'RESUBMISSION_REQUIRED' : null;
+
+  if (!status) {
+    res.status(400).json({ success: false, error: 'Invalid action.' });
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_submissions WHERE id = ?', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Submission not found.' });
+      return;
+    }
+    const submission = rows[0];
+
+    await pool.query('START TRANSACTION');
+
+    if (status === 'APPROVED') {
+      await pool.query('UPDATE session_submissions SET status = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?', [status, remarks, req.params.id]);
+      await pool.query('UPDATE sessions SET status = "Completed" WHERE id = ?', [submission.session_id]);
+    } else {
+      await pool.query('UPDATE session_submissions SET status = ?, resubmission_reason = ? WHERE id = ?', [status, remarks, req.params.id]);
+    }
+
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at, user_id) VALUES (?, ?, ?, ?, 0, NOW(), ?)',
+      [randomUUID(), `Submission ${status}`, `Session ${submission.session_id} submission was ${status}. Remarks: ${remarks}`, 'review', submission.submitted_by]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, submission.cluster_id, `REVIEW_SUBMISSION_${status}`, 'SUBMISSIONS', req.params.id, remarks]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, status });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to review submission:', error);
+    res.status(503).json({ success: false, error: 'Unable to process review.' });
+  }
+});
+
+app.put('/api/session-submissions/:id/resubmit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_submissions WHERE id = ?', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Submission not found.' });
+      return;
+    }
+    const submission = rows[0];
+
+    const [attRows] = await pool.query<any[]>('SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != "DRAFT"', [submission.session_id, submission.day_number]);
+    const attendanceComplete = attRows.length > 0;
+    const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ?', [submission.session_id]);
+    const lessonPlanComplete = lpRows.length > 0;
+    const [photoRows] = await pool.query<any[]>('SELECT id FROM session_photos WHERE cluster_id = ? AND day_number = ?', [submission.cluster_id, submission.day_number]);
+    const photosComplete = photoRows.length > 0;
+    const [repRows] = await pool.query<any[]>('SELECT id FROM session_reports WHERE session_id = ?', [submission.session_id]);
+    const reportComplete = repRows.length > 0;
+    const [finRows] = await pool.query<any[]>('SELECT id FROM finance_entries WHERE cluster_id = ?', [submission.cluster_id]);
+    const financeComplete = finRows.length > 0;
+
+    const allComplete = attendanceComplete && lessonPlanComplete && photosComplete && reportComplete && financeComplete;
+
+    if (!allComplete) {
+      res.status(400).json({ success: false, error: 'Missing requirements for resubmission.' });
+      return;
+    }
+
+    await pool.query('START TRANSACTION');
+
+    await pool.query(
+      'UPDATE session_submissions SET status = "RESUBMITTED", resubmitted_at = NOW(), attendance_complete=?, lesson_plan_complete=?, photos_complete=?, report_complete=?, finance_complete=? WHERE id = ?',
+      [attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, req.params.id]
+    );
+
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Session Resubmitted', `Session ${submission.session_id} has been resubmitted.`, 'resubmission']
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, submission.cluster_id, 'RESUBMIT_SESSION', 'SUBMISSIONS', req.params.id, 'Resubmitted session']
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, status: 'RESUBMITTED' });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to resubmit session:', error);
+    res.status(503).json({ success: false, error: 'Unable to resubmit.' });
+  }
+});
+
+// --- 4. Modules CRUD ---
+app.post('/api/modules', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { moduleNumber, moduleName, topic, description, academicYear, dayNumber } = req.body;
+    const id = `mod-${randomUUID()}`;
+
+    await pool.query(
+      'INSERT INTO modules (id, code, name, description, is_active, academic_year, day_number) VALUES (?, ?, ?, ?, 1, ?, ?)',
+      [id, moduleNumber, moduleName || topic, description, academicYear, dayNumber]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, 'CREATE_MODULE', 'MODULES', id, `Created module ${moduleName}`]
+    );
+
+    res.json({ success: true, module: { id } });
+  } catch (error) {
+    console.error('Failed to create module:', error);
+    res.status(500).json({ success: false, error: 'Unable to create module.' });
+  }
+});
+
+app.put('/api/modules/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { moduleNumber, moduleName, topic, description, academicYear, dayNumber } = req.body;
+    await pool.query(
+      'UPDATE modules SET code = ?, name = ?, description = ?, academic_year = ?, day_number = ? WHERE id = ?',
+      [moduleNumber, moduleName || topic, description, academicYear, dayNumber, req.params.id]
+    );
+
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, 'UPDATE_MODULE', 'MODULES', req.params.id, `Updated module ${req.params.id}`]
+    );
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to update module:', error);
+    res.status(500).json({ success: false, error: 'Unable to update module.' });
+  }
+});
+
+app.delete('/api/modules/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query('UPDATE modules SET is_active = 0 WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete module:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete module.' });
+  }
+});
+
+const moduleUploadMiddleware = multer({ 
+  storage: multer.diskStorage({ 
+    destination: (req, file, cb) => { 
+      const dir = path.join(UPLOADS_DIR, 'modules'); 
+      fs.mkdirSync(dir, { recursive: true }); 
+      cb(null, dir); 
+    }, 
+    filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname)) 
+  }) 
+});
+
+app.post('/api/modules/:id/resources', requireAuth, moduleUploadMiddleware.single('file'), async (req: AuthenticatedRequest & { file?: Express.Multer.File }, res: Response) => {
+  try {
+    if (!req.file) {
+      res.status(400).json({ success: false, error: 'No file uploaded.' });
+      return;
+    }
+    const resourceId = `res-${randomUUID()}`;
+    const filePath = path.join(UPLOADS_DIR, 'modules', req.file.filename);
+    const fileUrl = `/api/modules/${req.params.id}/resources/${resourceId}/download`;
+
+    await pool.query(
+      'INSERT INTO module_resources (id, module_id, file_path, file_url, original_filename, mime_type, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [resourceId, req.params.id, filePath, fileUrl, req.file.originalname, req.file.mimetype, req.file.size]
+    );
+
+    res.json({ success: true, resource: { id: resourceId, url: fileUrl } });
+  } catch (error) {
+    console.error('Failed to upload module resource:', error);
+    res.status(500).json({ success: false, error: 'Unable to upload resource.' });
+  }
+});
+
+app.get('/api/modules/:id/resources/:resourceId/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [rows] = await pool.query<any[]>('SELECT file_path, original_filename FROM module_resources WHERE id = ?', [req.params.resourceId]);
+    if (!rows.length || !fs.existsSync(rows[0].file_path)) {
+      res.status(404).json({ success: false, error: 'Resource not found.' });
+      return;
+    }
+    res.download(rows[0].file_path, rows[0].original_filename);
+  } catch (error) {
+    console.error('Failed to download module resource:', error);
+    res.status(500).json({ success: false, error: 'Unable to download resource.' });
+  }
+});
+
+// --- 5. Academic Years ---
+app.get('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM academic_years ORDER BY start_date DESC');
+    res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Failed to fetch academic years:', error);
+    res.status(503).json({ success: false, error: 'Unable to load data.' });
+  }
+});
+
+app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, startDate, endDate, isActive } = req.body;
+    const id = `ay-${randomUUID()}`;
+
+    await pool.query('START TRANSACTION');
+    if (isActive) {
+      await pool.query('UPDATE academic_years SET is_active = 0');
+    }
+
+    await pool.query(
+      'INSERT INTO academic_years (id, name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?)',
+      [id, name, startDate, endDate, Boolean(isActive)]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, data: { id } });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to create academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to create.' });
+  }
+});
+
+app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { name, startDate, endDate, isActive } = req.body;
+
+    await pool.query('START TRANSACTION');
+    if (isActive) {
+      await pool.query('UPDATE academic_years SET is_active = 0');
+    }
+
+    await pool.query(
+      'UPDATE academic_years SET name = ?, start_date = ?, end_date = ?, is_active = ? WHERE id = ?',
+      [name, startDate, endDate, Boolean(isActive), req.params.id]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to update academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to update.' });
+  }
+});
+
+app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    await pool.query('DELETE FROM academic_years WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete.' });
   }
 });
 

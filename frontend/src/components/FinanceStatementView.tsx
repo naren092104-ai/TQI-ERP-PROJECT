@@ -4,6 +4,13 @@ import { TabType, FinanceEntry, FinanceDraft, RouteDraftItem, FoodDraftItem } fr
 import { TqiLogo } from './TqiLogo';
 import { generateAndDownloadStatementPDF } from '../utils/pdfGenerator';
 import { checkImageClarity, extractRouteAndDetailsFromText } from '../utils/billParser';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface StatementItem {
   id: string;
@@ -1077,7 +1084,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto pb-16">
+    <div className="w-full space-y-6 pb-16">
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-[160] bg-[#001947] text-white px-4 py-2.5 rounded-md shadow-sm flex items-center gap-2 text-[13px] font-semibold border border-[#dae2ff]/40 animate-[slideUp_0.2s_ease-out]">
@@ -1100,20 +1107,27 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           {/* Select Statement Session */}
           <div className="flex items-center gap-2">
             <span className="text-[12px] font-bold text-[#434652]">Session Sheet:</span>
-            <select
+            <Select
               value={selectedViewKey}
-              onChange={(e) => setSelectedViewKey(e.target.value)}
-              className="bg-[#faf8ff] border border-[#c4c6d3] rounded-md px-3 py-1.5 text-[12.5px] font-bold text-[#002869] outline-none cursor-pointer focus:border-[#002869]"
+              onValueChange={(val) => setSelectedViewKey(val)}
             >
-              {drafts.map((d) => (
-                <option key={d.id} value={d.id}>
-                  📄 [Draft] {d.title} ({d.sessionDay}) - ₹{d.totalAmount.toLocaleString()}
-                </option>
-              ))}
-              <option value="all-approved">📊 Combined Approved Statement (Cluster)</option>
-              <option value="Day 1">📅 Day 1 Statement</option>
-              <option value="Day 2">📅 Day 2 Statement</option>
-            </select>
+              <SelectTrigger id="finance-session-sheet-select" className="w-56 h-8 text-xs font-bold text-[#002869] border-[#c4c6d3] bg-[#faf8ff]">
+                <SelectValue placeholder="Select Session Sheet" />
+              </SelectTrigger>
+              <SelectContent>
+                {drafts.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    [Draft] {d.title} ({d.sessionDay}) - &#8377;{d.totalAmount.toLocaleString()}
+                  </SelectItem>
+                ))}
+                <SelectItem value="all-approved">Combined Approved Statement (Cluster)</SelectItem>
+                {Array.from({ length: 8 }, (_, i) => `Day ${i + 1}`).map((day) => (
+                  <SelectItem key={day} value={day}>
+                    {day} Statement
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
@@ -1332,8 +1346,104 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             </h2>
           </div>
 
-          {/* Main Expense Table */}
-          <div className="border border-[#c4c6d3] overflow-x-auto rounded-md">
+          {/* Main Expense Table (Mobile Cards View) */}
+          <div className="block md:hidden space-y-3 print:hidden">
+            {tableItems.map((item) => (
+              <div
+                key={item.id}
+                className="p-3.5 rounded-xl border border-[#c4c6d3] bg-[#faf8ff]/50 space-y-2"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-mono text-[#747783]">#{item.sNo}</span>
+                    <span className="inline-block px-2 py-0.5 rounded text-[10.5px] font-bold bg-[#dae2ff] text-[#002869]">
+                      {item.category}
+                    </span>
+                  </div>
+                  <span className="font-mono text-xs font-bold text-[#002869]">
+                    ₹{item.total.toLocaleString()}
+                  </span>
+                </div>
+
+                <div>
+                  <p className="text-xs font-bold text-[#1a1b21]">
+                    {item.description}
+                  </p>
+                  {item.count && item.countAmount && (
+                    <p className="text-[11px] text-[#555555] mt-0.5 font-mono">
+                      Formula: {item.count} × {item.countAmount}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between pt-1.5 border-t border-[#c4c6d3]/60 text-[11px]">
+                  <span className="text-[#555555] truncate max-w-[170px]">
+                    {item.remarks || 'Expense item'}
+                  </span>
+
+                  {item.billUrl ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBillZoom(1);
+                        setBillRotate(0);
+                        setActiveBillViewer({
+                          url: item.billUrl,
+                          title: item.category + ': ' + item.description,
+                          category: item.category,
+                          amount: item.total,
+                          fileName: item.billFileName || (item.category + '_Bill.jpg'),
+                          itemId: item.id,
+                        });
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6f4ea] text-[#137333] border border-[#137333]/30 rounded text-[11px] font-bold cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                      <span>View Bill</span>
+                    </button>
+                  ) : (
+                    <span className="text-[#747783] text-[10.5px]">No receipt</span>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Mobile Category Totals Summary */}
+            <div className="p-3.5 rounded-xl border border-[#dae2ff] bg-[#faf8ff] space-y-1.5 text-xs">
+              <div className="text-[11px] font-bold text-[#002869] uppercase tracking-wider mb-2">Category Subtotals</div>
+              {travelTotal > 0 && (
+                <div className="flex justify-between text-[#434652]">
+                  <span>Travel Total:</span>
+                  <span className="font-mono font-bold text-[#002869]">₹{travelTotal.toLocaleString()}</span>
+                </div>
+              )}
+              {foodTotal > 0 && (
+                <div className="flex justify-between text-[#434652]">
+                  <span>Food Total:</span>
+                  <span className="font-mono font-bold text-[#002869]">₹{foodTotal.toLocaleString()}</span>
+                </div>
+              )}
+              {stationeryTotal > 0 && (
+                <div className="flex justify-between text-[#434652]">
+                  <span>Stationery Total:</span>
+                  <span className="font-mono font-bold text-[#002869]">₹{stationeryTotal.toLocaleString()}</span>
+                </div>
+              )}
+              {otherTotal > 0 && (
+                <div className="flex justify-between text-[#434652]">
+                  <span>Other Total:</span>
+                  <span className="font-mono font-bold text-[#002869]">₹{otherTotal.toLocaleString()}</span>
+                </div>
+              )}
+              <div className="flex justify-between pt-2 border-t border-[#dae2ff] font-bold text-sm text-[#001947]">
+                <span>Grand Total:</span>
+                <span className="font-mono text-base text-[#002869]">₹{grandTotal.toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Main Expense Table (Desktop View) */}
+          <div className="hidden md:block border border-[#c4c6d3] overflow-x-auto rounded-md print:block">
             <table className="w-full text-left text-[12px] border-collapse min-w-[700px]">
               <thead className="bg-[#faf8ff] border-b border-[#c4c6d3] font-bold text-[#000000]">
                 <tr>
@@ -1487,7 +1597,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {activeBillViewer && (
         <div
           onClick={() => setActiveBillViewer(null)}
-          className="fixed inset-0 bg-black/80  z-[200] flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
+          className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -1619,7 +1729,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* EDIT EXPENSE ROW MODAL */}
       {/* ========================================================================= */}
       {editingItem && (
-        <div className="fixed inset-0 bg-black/60  z-[210] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-md max-w-lg w-full overflow-hidden shadow-sm border border-[#c4c6d3] space-y-4 p-6">
             <div className="flex items-center justify-between border-b border-[#c4c6d3] pb-3">
               <h3 className="text-[16px] font-bold text-[#002869] flex items-center gap-1.5">
@@ -1637,21 +1747,25 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             <div className="space-y-3.5 text-[13px]">
               <div>
                 <label className="block text-[11px] font-bold text-[#434652] mb-1">Category</label>
-                <select
+                <Select
                   value={editingItem.category}
-                  onChange={(e) =>
+                  onValueChange={(val) =>
                     setEditingItem({
                       ...editingItem,
-                      category: e.target.value as any,
+                      category: val as any,
                     })
                   }
-                  className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md font-semibold text-[#002869] outline-none"
                 >
-                  <option value="Travel">Travel</option>
-                  <option value="Food">Food</option>
-                  <option value="Stationery">Stationery</option>
-                  <option value="Other">Other</option>
-                </select>
+                  <SelectTrigger className="w-full h-10 text-xs font-semibold text-[#002869] border-[#c4c6d3]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Travel">Travel</SelectItem>
+                    <SelectItem value="Food">Food</SelectItem>
+                    <SelectItem value="Stationery">Stationery</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
@@ -1778,7 +1892,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* ADD EXPENSE ROW MODAL */}
       {/* ========================================================================= */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/60  z-[210] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-md max-w-lg w-full overflow-hidden shadow-sm border border-[#c4c6d3] space-y-4 p-6">
             <div className="flex items-center justify-between border-b border-[#c4c6d3] pb-3">
               <h3 className="text-[16px] font-bold text-[#002869] flex items-center gap-1.5">
@@ -1796,21 +1910,25 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             <div className="space-y-3.5 text-[13px]">
               <div>
                 <label className="block text-[11px] font-bold text-[#434652] mb-1">Category *</label>
-                <select
+                <Select
                   value={newExpenseForm.category}
-                  onChange={(e) =>
+                  onValueChange={(val) =>
                     setNewExpenseForm({
                       ...newExpenseForm,
-                      category: e.target.value as any,
+                      category: val as any,
                     })
                   }
-                  className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md font-semibold text-[#002869] outline-none"
                 >
-                  <option value="Travel">Travel</option>
-                  <option value="Food">Food</option>
-                  <option value="Stationery">Stationery</option>
-                  <option value="Other">Other</option>
-                </select>
+                  <SelectTrigger className="w-full h-10 text-xs font-semibold text-[#002869] border-[#c4c6d3]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Travel">Travel</SelectItem>
+                    <SelectItem value="Food">Food</SelectItem>
+                    <SelectItem value="Stationery">Stationery</SelectItem>
+                    <SelectItem value="Other">Other</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div>
@@ -1949,7 +2067,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* EDIT METADATA MODAL */}
       {/* ========================================================================= */}
       {showEditMetaModal && (
-        <div className="fixed inset-0 bg-black/60  z-[210] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
+        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.15s_ease-out]">
           <div className="bg-white rounded-md max-w-md w-full overflow-hidden shadow-sm border border-[#c4c6d3] space-y-4 p-6">
             <div className="flex items-center justify-between border-b border-[#c4c6d3] pb-3">
               <h3 className="text-[16px] font-bold text-[#002869] flex items-center gap-1.5">
@@ -2064,7 +2182,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {showAllBillsModal && allAttachedBills.length > 0 && (
         <div
           onClick={() => setShowAllBillsModal(false)}
-          className="fixed inset-0 bg-black/80  z-[200] flex items-center justify-center p-4 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
+          className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -2174,7 +2292,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {showFullStatementModal && (
         <div
           onClick={() => setShowFullStatementModal(false)}
-          className="fixed inset-0 bg-black/70  z-[200] flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
+          className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-3 sm:p-6 cursor-pointer animate-[fadeIn_0.15s_ease-out]"
         >
           <div
             onClick={(e) => e.stopPropagation()}

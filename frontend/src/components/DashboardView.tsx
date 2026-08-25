@@ -254,7 +254,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </h4>
             </div>
             <Badge color="success">
-              {completedDaysCount}/8 Days
+              {completedDaysCount}/8 Days ({progressPercent}%)
             </Badge>
           </div>
         </div>
@@ -428,6 +428,123 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           )}
         </div>
 
+        {/* 8-Day Progress by Cluster */}
+        <div className="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5">
+            <div>
+              <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
+                8-Day Curriculum Progress by Cluster
+              </h3>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                Milestone tracking across all 8 academic program days
+              </p>
+            </div>
+            <div className="flex items-center gap-3 text-xs">
+              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Completed
+              </span>
+              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> In Progress
+              </span>
+              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Scheduled
+              </span>
+              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                <span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" /> Pending
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-3.5">
+            {clusters.length > 0 ? clusters.map(cluster => {
+              const clusterSessions = sessions.filter(s => s.clusterId === cluster.id);
+              
+              const daysStatus = Array.from({length: 8}, (_, i) => {
+                const day = i + 1;
+                const daySession = clusterSessions.find(s => s.dayNumber === day);
+                if (daySession && (daySession.status === 'Completed' || daySession.status === 'Approved')) {
+                  return { state: 'Completed', label: daySession.name || `Day ${day}` };
+                } else if (daySession && (daySession.status === 'In Progress' || daySession.status === 'Submitted' || daySession.status === 'Pending Review')) {
+                  return { state: 'In Progress', label: daySession.name || `Day ${day}` };
+                } else if (daySession && daySession.status === 'Scheduled') {
+                  return { state: 'Scheduled', label: daySession.name || `Day ${day}` };
+                }
+                return { state: 'Pending', label: `Day ${day}` };
+              });
+
+              const compCount = daysStatus.filter(s => s.state === 'Completed').length;
+              const inProgCount = daysStatus.filter(s => s.state === 'In Progress').length;
+              const progressPct = Math.round((compCount / 8) * 100);
+
+              return (
+                <div key={cluster.id} className="rounded-xl border border-gray-200/80 bg-gray-50/40 p-4 dark:border-gray-800 dark:bg-white/[0.02] hover:border-brand-300 dark:hover:border-brand-500/30 transition">
+                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                    <div className="w-full lg:w-64 flex-shrink-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm text-gray-900 dark:text-white">{cluster.name}</span>
+                        {cluster.collegeName && (
+                          <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
+                            &middot; {cluster.collegeName}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <div className="flex-1 bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-brand-500 h-full rounded-full transition-all duration-500"
+                            style={{ width: `${progressPct}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-semibold text-brand-600 dark:text-brand-400">
+                          {progressPct}%
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 grid grid-cols-4 sm:grid-cols-8 gap-2">
+                      {daysStatus.map((d, idx) => {
+                        const isDone = d.state === 'Completed';
+                        const isInProg = d.state === 'In Progress';
+                        const isSched = d.state === 'Scheduled';
+
+                        return (
+                          <div
+                            key={idx}
+                            title={`Day ${idx + 1}: ${d.state} (${d.label})`}
+                            className={`group relative flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${
+                              isDone
+                                ? 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-400'
+                                : isInProg
+                                ? 'border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-400 shadow-sm animate-pulse'
+                                : isSched
+                                ? 'border-blue-200 bg-blue-50/80 text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-400'
+                                : 'border-gray-200/60 bg-white dark:border-gray-800 dark:bg-gray-800/40 text-gray-400'
+                            }`}
+                          >
+                            <span className="text-[10px] font-bold uppercase tracking-wider mb-0.5">
+                              Day {idx + 1}
+                            </span>
+                            <div className="flex items-center justify-center h-4">
+                              {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                              {isInProg && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Active</span>}
+                              {isSched && <Calendar className="w-3 h-3 text-blue-600 dark:text-blue-400" />}
+                              {!isDone && !isInProg && !isSched && <span className="text-[10px] text-gray-300 dark:text-gray-600">&bull;</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              );
+            }) : (
+              <div className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl">
+                No clusters onboarded yet. Create a cluster under the Clusters tab to begin tracking 8-day progress.
+              </div>
+            )}
+          </div>
+        </div>
+        
         {/* Panchayats & Village Units Table */}
         <div className="col-span-12 xl:col-span-8 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100 dark:border-gray-800">

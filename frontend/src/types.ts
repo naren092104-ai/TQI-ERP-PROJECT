@@ -21,7 +21,12 @@ export type TabType =
   | 'audit-logs'
   | 'users'
   | 'notifications'
-  | 'settings';
+  | 'settings'
+  | 'date-change-requests'
+  | 'session-submissions'
+  | 'session-reports'
+  | 'user-management'
+  | 'academic-years';
 
 export type UserRole = 'Super Admin' | 'Cluster Admin';
 
@@ -144,7 +149,7 @@ export interface Session {
   villageName: string;
   volunteerId?: string;
   volunteerName: string;
-  status: 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Needs Attention' | 'Draft' | 'Action Req.';
+  status: 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Needs Attention' | 'Draft' | 'Action Req.' | 'Submitted' | 'Pending Review' | 'Approved' | 'Resubmission Required';
   sessionType?: 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation';
   description?: string;
   lessonPlanId?: string;
@@ -280,6 +285,7 @@ export interface SessionPhotoGroup {
 
 export interface FinanceEntry {
   id: string;
+  sessionId?: string;
   date: string;
   description: string;
   category: 'Materials' | 'Travel' | 'Food' | 'Admin' | 'Other';
@@ -616,3 +622,71 @@ export interface DuplicateModuleCheckResult {
   message?: string;
 }
 
+export interface DateChangeRequest {
+  id: string;
+  sessionId: string;
+  clusterId: string;
+  clusterName?: string;
+  dayNumber?: number;
+  originalDate: string;
+  requestedDate: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewedBy?: string;
+  reviewRemarks?: string;
+  reviewedAt?: string;
+  requestedBy: string;
+  requestedByName?: string;
+  createdAt: string;
+}
+
+export interface SessionReport {
+  id: string;
+  sessionId: string;
+  clusterId: string;
+  clusterName?: string;
+  dayNumber?: number;
+  sessionSummary: string;
+  studentCount: number;
+  attendanceSummary: string;
+  activities: string;
+  issues: string;
+  remarks: string;
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED';
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SessionSubmission {
+  id: string;
+  sessionId: string;
+  clusterId: string;
+  clusterName?: string;
+  dayNumber: number;
+  attendanceComplete: boolean;
+  lessonPlanComplete: boolean;
+  photosComplete: boolean;
+  reportComplete: boolean;
+  financeComplete: boolean;
+  status: 'DRAFT' | 'SUBMITTED' | 'PENDING_REVIEW' | 'APPROVED' | 'RESUBMISSION_REQUIRED' | 'RESUBMITTED' | 'COMPLETED';
+  submittedAt?: string;
+  submittedBy?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewRemarks?: string;
+  resubmissionReason?: string;
+  resubmittedAt?: string;
+  createdAt?: string;
+}
+
+export interface AcademicYear {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  isActive: boolean;
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}

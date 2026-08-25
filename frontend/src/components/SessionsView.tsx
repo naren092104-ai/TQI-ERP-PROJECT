@@ -1,5 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { TabType, Session, Panchayat, Volunteer } from '../types';
+import { Badge } from './ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { ActionButton } from './ui/action-button';
+import { Search, X, Calendar, Lock, Trash2 } from 'lucide-react';
 
 interface SessionsViewProps {
   sessions: Session[];
@@ -8,8 +18,10 @@ interface SessionsViewProps {
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
   onAddSession: (newSession: Omit<Session, 'id'>) => void;
   onUpdateSession: (id: string, updated: Partial<Session>) => void;
-  onDeleteSession?: (id: string) => void;
+  onDeleteSession?: (id: string) => Promise<void> | void;
+  onRequestDateChange?: (sessionId: string, originalDate: string, newDate: string, reason: string) => Promise<void>;
   canManageSchedule?: boolean;
+  userRole?: string;
 }
 
 export const SessionsView: React.FC<SessionsViewProps> = ({
@@ -20,8 +32,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   onAddSession,
   onUpdateSession,
   onDeleteSession,
+  onRequestDateChange,
   canManageSchedule = false,
+  userRole = 'Super Admin',
 }) => {
+  const isClusterAdmin = userRole === 'Cluster Admin';
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPanchayat, setSelectedPanchayat] = useState('all');
@@ -37,6 +52,9 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const [isEditMode, setIsEditMode] = useState(false);
   const [activeSessionDetail, setActiveSessionDetail] = useState<Session | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
+  const [dateChangeSession, setDateChangeSession] = useState<Session | null>(null);
+  const [dateChangeReason, setDateChangeReason] = useState('');
+  const [dateChangeNewDate, setDateChangeNewDate] = useState('');
   const [dateDrafts, setDateDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -467,104 +485,107 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   };
 
   return (
-    <div className="page-container space-y-5">
-      {/* Page header */}
-      <div className="page-header flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="page-title">Sessions</h1>
-          <p className="page-subtitle">Plan, manage and track learning sessions.</p>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+              Learning Sessions
+            </h1>
+            <Badge color="primary" size="sm">
+              {filteredSessions.length} Total
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Plan, coordinate, and track village learning modules and attendance across clusters.
+          </p>
         </div>
-        <div className="flex items-center gap-2 self-start">
-          <button onClick={handleExportCSV} className="btn btn-secondary btn-sm">
-            <span className="material-symbols-outlined" style={{ fontSize: 15 }}>file_download</span>
-            Export
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={handleExportCSV}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+          >
+            <span>Export CSV</span>
           </button>
-          {canManageSchedule && (
-            <span className="text-xs text-slate-500">Dates are managed by your cluster</span>
-          )}
+          <button
+            type="button"
+            onClick={handleOpenNewModal}
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+          >
+            <span>Add Session</span>
+          </button>
         </div>
       </div>
 
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="stat-item" style={{ cursor: 'default' }}>
-          <div className="stat-label">Upcoming</div>
-          <div className="stat-value">{upcomingCount}</div>
+      {/* 2. Compact Metric Cards (counts & status only) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Upcoming</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{upcomingCount}</div>
         </div>
-        <div className="stat-item" style={{ cursor: 'default' }}>
-          <div className="stat-label">Scheduled</div>
-          <div className="stat-value">{scheduledCount}</div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-brand-500">Scheduled</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{scheduledCount}</div>
         </div>
-        <div className="stat-item" style={{ cursor: 'default' }}>
-          <div className="stat-label">Completed</div>
-          <div className="stat-value" style={{ color: 'var(--color-success)' }}>{completedCount}</div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-success-500">Completed</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{completedCount}</div>
         </div>
-        <div className="stat-item" style={{ cursor: 'default', background: needsAttentionCount > 0 ? 'var(--color-error-bg)' : undefined, borderColor: needsAttentionCount > 0 ? 'var(--color-error-border)' : undefined }}>
-          <div className="stat-label" style={{ color: needsAttentionCount > 0 ? 'var(--color-error)' : undefined }}>Needs attention</div>
-          <div className="stat-value" style={{ color: needsAttentionCount > 0 ? 'var(--color-error)' : undefined }}>{needsAttentionCount}</div>
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="text-xs font-semibold uppercase tracking-wider text-error-500">Needs Attention</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{needsAttentionCount}</div>
         </div>
       </div>
 
-      {/* NEXT SESSION Spotlight Section (Compact & Actionable) */}
+      {/* NEXT SESSION Spotlight Section */}
       {nextSession && (
-        <div className="card p-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="flex items-start gap-3.5">
-              <div className="w-10 h-10 rounded-md bg-[#0B3D91]/10 text-[#0B3D91] flex items-center justify-center shrink-0 mt-0.5">
-                <span className="material-symbols-outlined text-[22px]">event</span>
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-500 bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-lg">
+                  Next Session
+                </span>
+                {renderStatusBadge(nextSession.status)}
               </div>
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    Next Session
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                {getSessionTitle(nextSession)}
+                {nextSession.code && (
+                  <span className="ml-2 font-mono text-xs font-normal text-gray-400">
+                    ({nextSession.code})
                   </span>
-                  {renderStatusBadge(nextSession.status)}
-                </div>
-                <h3 className="text-base font-bold text-slate-900 leading-tight">
-                  {getSessionTitle(nextSession)}
-                  {nextSession.code && (
-                    <span className="ml-2 text-xs font-semibold text-slate-500 font-mono">
-                      ({nextSession.code})
-                    </span>
-                  )}
-                </h3>
-                <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-slate-600">
-                  <span className="flex items-center gap-1 font-medium text-slate-800">
-                    <span className="material-symbols-outlined text-[14px] text-slate-400">schedule</span>
-                    {nextSession.date} · {nextSession.time}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="text-slate-400">Panchayat:</span>
-                    <strong className="text-slate-700">{nextSession.panchayatName}</strong>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="text-slate-400">Village:</span>
-                    <strong className="text-slate-700">{nextSession.villageName}</strong>
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <span className="text-slate-400">Volunteer:</span>
-                    <strong className="text-[#0B3D91] font-semibold">{getSessionVolunteer(nextSession)}</strong>
-                  </span>
-                </div>
+                )}
+              </h3>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 font-medium">
+                <span>{nextSession.date} &middot; {nextSession.time}</span>
+                <span>Panchayat: <strong className="text-gray-800 dark:text-gray-200">{nextSession.panchayatName}</strong></span>
+                <span>Village: <strong className="text-gray-800 dark:text-gray-200">{nextSession.villageName}</strong></span>
+                <span>Volunteer: <strong className="text-brand-500">{getSessionVolunteer(nextSession)}</strong></span>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 pt-2 lg:pt-0 border-slate-100">
+            <div className="flex items-center gap-2 shrink-0">
               <button
+                type="button"
                 onClick={() => setActiveSessionDetail(nextSession)}
-                className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
+                className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
               >
-                View Session
+                View
               </button>
               <button
+                type="button"
                 onClick={() => onNavigate('lesson-plan', nextSession.lessonPlanId || nextSession.id)}
-                className="px-3 py-1.5 bg-white border border-slate-300 text-[#0B3D91] hover:bg-blue-50 text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
+                className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-900/40 dark:bg-brand-500/10 dark:text-brand-400 transition"
               >
                 Lesson Plan
               </button>
               <button
+                type="button"
                 onClick={() => onNavigate('attendance', nextSession.id)}
-                className="px-3 py-1.5 bg-[#FF7A00] hover:bg-[#e06c00] text-white text-xs font-semibold rounded-md shadow-2xs transition-colors cursor-pointer"
+                className="rounded-xl bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
               >
                 Attendance
               </button>
@@ -573,153 +594,175 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         </div>
       )}
 
-      {/* SEARCH + FILTER PANEL */}
-      <div className="bg-white border border-slate-200 rounded-md p-3.5 shadow-xs space-y-3">
-        {/* Primary Filter Row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+      {/* 3. Cardless Search + Filter Row */}
+      <div className="space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           {/* Search bar */}
           <div className="relative">
-            <span className="material-symbols-outlined text-[18px] text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2">
-              search
-            </span>
+            <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Search session, module, village or volunteer..."
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91] transition-colors"
+              className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
             />
             {searchTerm && (
               <button
+                type="button"
                 onClick={() => setSearchTerm('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
-                <span className="material-symbols-outlined text-[14px]">close</span>
+                <X className="h-3.5 w-3.5" />
               </button>
             )}
           </div>
 
           {/* Panchayat filter */}
           <div>
-            <select
-              value={selectedPanchayat}
-              onChange={(e) => {
-                setSelectedPanchayat(e.target.value);
+            <Select
+              value={selectedPanchayat || "all"}
+              onValueChange={(val) => {
+                setSelectedPanchayat(val);
                 setSelectedVillage('all');
               }}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
             >
-              <option value="all">All Panchayats</option>
-              {panchayats.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Panchayats" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Panchayats</SelectItem>
+                {panchayats.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Village filter */}
           <div>
-            <select
-              value={selectedVillage}
-              onChange={(e) => setSelectedVillage(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedVillage || "all"}
+              onValueChange={(val) => setSelectedVillage(val)}
             >
-              <option value="all">All Villages</option>
-              {currentFilterVillages.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Villages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Villages</SelectItem>
+                {currentFilterVillages.map((v) => (
+                  <SelectItem key={v.id} value={v.name}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Status Filter + More Filters Toggle */}
           <div className="flex items-center gap-2">
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="flex-1 px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:bg-white focus:outline-none focus:border-[#0B3D91]"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Scheduled">Scheduled</option>
-              <option value="In Progress">In Progress</option>
-              <option value="Completed">Completed</option>
-              <option value="Needs Attention">Needs Attention</option>
-              <option value="Draft">Draft</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
+            <div className="flex-1">
+              <Select
+                value={selectedStatus || "all"}
+                onValueChange={(val) => setSelectedStatus(val)}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="Scheduled">Scheduled</SelectItem>
+                  <SelectItem value="In Progress">In Progress</SelectItem>
+                  <SelectItem value="Completed">Completed</SelectItem>
+                  <SelectItem value="Needs Attention">Needs Attention</SelectItem>
+                  <SelectItem value="Draft">Draft</SelectItem>
+                  <SelectItem value="Cancelled">Cancelled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
             <button
+              type="button"
               onClick={() => setShowMoreFilters(!showMoreFilters)}
-              className={`px-2.5 py-1.5 text-xs font-medium border rounded-md transition-colors flex items-center gap-1 cursor-pointer shrink-0 ${
+              className={`rounded-xl border px-3 py-2 text-xs font-semibold transition shadow-theme-xs flex items-center gap-1 shrink-0 ${
                 showMoreFilters || selectedModule !== 'all' || selectedVolunteer !== 'all' || filterDate
-                  ? 'bg-blue-50 border-[#0B3D91] text-[#0B3D91]'
-                  : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                  ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400'
+                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300'
               }`}
             >
-              <span className="material-symbols-outlined text-[16px]">tune</span>
-              <span>Filters</span>
+              <span className="material-symbols-outlined text-[15px]">tune</span>
+              <span>Filter</span>
             </button>
           </div>
         </div>
 
         {/* Secondary Expandable Filters */}
         {showMoreFilters && (
-          <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 items-center">
+          <div className="pt-3 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-center">
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
                 Module
               </label>
-              <select
+              <Select
                 value={selectedModule}
-                onChange={(e) => setSelectedModule(e.target.value)}
-                className="w-full px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+                onValueChange={(val) => setSelectedModule(val)}
               >
-                <option value="all">All Modules</option>
-                <option value="Spoken English">Spoken English</option>
-                <option value="Basic Math">Basic Math</option>
-                <option value="Life Skills">Life Skills</option>
-                <option value="Digital Literacy">Digital Literacy</option>
-                <option value="Science">Science</option>
-                <option value="Financial Literacy">Financial Literacy</option>
-              </select>
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectValue placeholder="All Modules" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Modules</SelectItem>
+                  <SelectItem value="Spoken English">Spoken English</SelectItem>
+                  <SelectItem value="Basic Math">Basic Math</SelectItem>
+                  <SelectItem value="Life Skills">Life Skills</SelectItem>
+                  <SelectItem value="Digital Literacy">Digital Literacy</SelectItem>
+                  <SelectItem value="Science">Science</SelectItem>
+                  <SelectItem value="Financial Literacy">Financial Literacy</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
                 Volunteer
               </label>
-              <select
+              <Select
                 value={selectedVolunteer}
-                onChange={(e) => setSelectedVolunteer(e.target.value)}
-                className="w-full px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+                onValueChange={(val) => setSelectedVolunteer(val)}
               >
-                <option value="all">All Volunteers</option>
-                {volunteers.map((v) => (
-                  <option key={v.id} value={v.name}>
-                    {v.name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger className="w-full h-8 text-xs">
+                  <SelectValue placeholder="All Volunteers" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Volunteers</SelectItem>
+                  {volunteers.map((v) => (
+                    <SelectItem key={v.id} value={v.name}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
-              <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
                 Date
               </label>
               <input
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="w-full px-2.5 py-1 text-xs bg-white border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
               />
             </div>
 
-            <div className="flex items-end justify-end gap-2 pt-3">
+            <div className="flex items-end justify-end pt-5">
               <button
+                type="button"
                 onClick={handleClearFilters}
-                className="px-3 py-1 text-xs font-semibold text-slate-600 hover:text-slate-900 border border-slate-200 hover:bg-slate-50 rounded-md transition-colors cursor-pointer"
+                className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
               >
                 Clear Filters
               </button>
@@ -728,198 +771,171 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         )}
       </div>
 
-      {/* SESSION TABLE */}
-      <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
+      {/* 4. Cardless TailAdmin Session Table */}
+      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-2.5 px-3.5">Date &amp; Time</th>
-                <th className="py-2.5 px-3.5">Session Topic &amp; Module</th>
-                <th className="py-2.5 px-3.5">Panchayat &amp; Village</th>
-                <th className="py-2.5 px-3.5">Assigned Volunteer</th>
-                <th className="py-2.5 px-3.5">Status</th>
-                <th className="py-2.5 px-3.5 text-right">Actions</th>
+          <table className="w-full text-left border-collapse">
+            <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
+              <tr>
+                <th className="px-5 py-3.5">Date &amp; Time</th>
+                <th className="px-5 py-3.5">Session Topic &amp; Module</th>
+                <th className="px-5 py-3.5">Panchayat &amp; Village</th>
+                <th className="px-5 py-3.5">Volunteer</th>
+                <th className="px-5 py-3.5">Status</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
               {filteredSessions.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-500">
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <span className="material-symbols-outlined text-[32px] text-slate-300">
-                        event_busy
-                      </span>
-                      <p className="font-semibold text-sm text-slate-700">No sessions found</p>
-                      <p className="text-xs text-slate-500 max-w-sm">
-                        No sessions match your filter criteria. Try adjusting search or clearing filters.
-                      </p>
-                      <button
-                        onClick={handleClearFilters}
-                        className="mt-1 px-3 py-1 text-xs font-semibold text-[#0B3D91] bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
-                      >
-                        Reset All Filters
-                      </button>
-                    </div>
+                  <td colSpan={6} className="py-12 text-center text-gray-400">
+                    No sessions match your filter criteria.
                   </td>
                 </tr>
               ) : (
-                filteredSessions.map((session) => {
-                  const isCompleted = session.status === 'Completed';
+                filteredSessions.map((session) => (
+                  <tr
+                    key={session.id}
+                    className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors group"
+                  >
+                    {/* Date & Time */}
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      <div className="font-bold text-gray-900 dark:text-white">{session.date}</div>
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        {session.time}
+                      </div>
+                    </td>
 
-                  return (
-                    <tr
-                      key={session.id}
-                      className="hover:bg-slate-50/80 transition-colors group"
-                    >
-                      {/* Date & Time */}
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="text-[10px] font-bold uppercase tracking-wider text-[#0B3D91] mb-1">{session.clusterName}</div>
-                        <div className="font-bold text-slate-900">{session.date}</div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <span className="material-symbols-outlined text-[13px]">schedule</span>
-                          {session.time}
-                        </div>
-                      </td>
+                    {/* Topic & Module */}
+                    <td className="px-5 py-3.5">
+                      <div className="font-bold text-gray-900 dark:text-white group-hover:text-brand-500 transition-colors">
+                        {getSessionTitle(session)}
+                      </div>
+                      <div className="text-[11px] text-gray-400 mt-0.5">
+                        <span className="font-mono text-gray-500 dark:text-gray-300">
+                          {session.code || session.moduleId || 'M-103'}
+                        </span>
+                        <span> &middot; {getSessionModule(session)}</span>
+                      </div>
+                    </td>
 
-                      {/* Topic & Module */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-semibold text-slate-900 group-hover:text-[#0B3D91] transition-colors">
-                          {getSessionTitle(session)}
-                        </div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1.5 mt-0.5">
-                          <span className="font-mono text-slate-600 bg-slate-100 px-1 py-0.2 rounded text-[10px]">
-                            {session.code || session.moduleId || 'M-103'}
-                          </span>
-                          <span>•</span>
-                          <span>{getSessionModule(session)}</span>
-                        </div>
-                      </td>
+                    {/* Panchayat & Village */}
+                    <td className="px-5 py-3.5">
+                      <div className="font-semibold text-gray-800 dark:text-gray-200">{session.panchayatName}</div>
+                      <div className="text-[11px] text-gray-400">{session.villageName}</div>
+                    </td>
 
-                      {/* Panchayat & Village */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-medium text-slate-800">{session.panchayatName}</div>
-                        <div className="text-[11px] text-slate-500">{session.villageName}</div>
-                      </td>
-
-                      {/* Volunteer */}
-                      <td className="py-3 px-3.5">
-                        {session.volunteerName && session.volunteerName !== 'Unassigned' ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-6 h-6 rounded-full bg-[#0B3D91]/10 text-[#0B3D91] text-[10px] font-bold flex items-center justify-center">
-                              {session.volunteerName.charAt(0)}
-                            </div>
-                            <span className="font-medium text-slate-900">{session.volunteerName}</span>
+                    {/* Volunteer */}
+                    <td className="px-5 py-3.5">
+                      {session.volunteerName && session.volunteerName !== 'Unassigned' ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-full bg-brand-50 text-brand-500 text-[10px] font-bold flex items-center justify-center dark:bg-brand-500/10 dark:text-brand-400">
+                            {session.volunteerName.charAt(0)}
                           </div>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">
-                            <span className="material-symbols-outlined text-[12px]">person_off</span>
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Status */}
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        {renderStatusBadge(session.status)}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
-                          {canManageSchedule && (
-                            <div className="inline-flex items-center gap-1 mr-1">
-                              <input
-                                type="date"
-                                aria-label={`Date for ${getSessionTitle(session)}`}
-                                value={dateDrafts[session.id] || ''}
-                                onChange={(event) => setDateDrafts((current) => ({ ...current, [session.id]: event.target.value }))}
-                                className="px-2 py-1 text-xs border border-slate-300 rounded-md"
-                              />
-                              <button
-                                onClick={() => {
-                                  const date = dateDrafts[session.id] || '';
-                                  onUpdateSession(session.id, { date, status: date ? (session.status === 'Completed' ? 'Completed' : 'Scheduled') : 'Draft' });
-                                }}
-                                className="px-2 py-1 bg-[#0B3D91] text-white rounded-md text-xs font-semibold"
-                              >
-                                Save
-                              </button>
-                              {session.status !== 'Completed' && (
-                                <button
-                                  disabled={!dateDrafts[session.id]}
-                                  onClick={() => onUpdateSession(session.id, { date: dateDrafts[session.id] || '', status: 'Completed' })}
-                                  className="px-2 py-1 bg-emerald-600 disabled:bg-slate-300 text-white rounded-md text-xs font-semibold"
-                                >
-                                  Complete
-                                </button>
-                              )}
-                            </div>
-                          )}
-                          {/* View */}
-                          <button
-                            onClick={() => setActiveSessionDetail(session)}
-                            className="px-2 py-1 text-slate-600 hover:text-[#0B3D91] hover:bg-slate-100 rounded text-xs font-semibold transition-colors cursor-pointer"
-                            title="View Session Details"
-                          >
-                            View
-                          </button>
-
-                          {/* Lesson Plan */}
-                          <button
-                            onClick={() => onNavigate('lesson-plan', session.lessonPlanId || session.id)}
-                            className="px-2 py-1 text-blue-700 hover:bg-blue-50 rounded text-xs font-semibold transition-colors cursor-pointer"
-                            title="Open Lesson Plan"
-                          >
-                            Plan
-                          </button>
-
-                          {/* Attendance */}
-                          <button
-                            onClick={() => onNavigate('attendance', session.id)}
-                            className="px-2 py-1 text-[#FF7A00] hover:bg-orange-50 rounded text-xs font-semibold transition-colors cursor-pointer"
-                            title="Mark or View Attendance"
-                          >
-                            Attendance
-                          </button>
-
-                          {/* Photos (for completed sessions) */}
-                          {isCompleted && (
-                            <button
-                              onClick={() => onNavigate('session-photos', session.id)}
-                              className="px-2 py-1 text-emerald-700 hover:bg-emerald-50 rounded text-xs font-semibold transition-colors cursor-pointer"
-                              title="View Session Photos"
-                            >
-                              Photos
-                            </button>
-                          )}
-
-                          {/* Edit (only if not completed / locked) */}
-                          {!isCompleted && canManageSchedule && (
-                            <button
-                              onClick={() => handleOpenEditModal(session)}
-                              className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
-                              title="Edit Session"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">edit</span>
-                            </button>
-                          )}
-
-                          {/* Delete (only if not completed) */}
-                          {!isCompleted && canManageSchedule && onDeleteSession && (
-                            <button
-                              onClick={() => setSessionToDelete(session)}
-                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                              title="Delete Session"
-                            >
-                              <span className="material-symbols-outlined text-[16px]">delete</span>
-                            </button>
-                          )}
+                          <span className="font-medium text-gray-900 dark:text-white">{session.volunteerName}</span>
                         </div>
-                      </td>
-                    </tr>
-                  );
-                })
+                      ) : (
+                        <Badge color="light" size="sm">
+                          Unassigned
+                        </Badge>
+                      )}
+                    </td>
+
+                    {/* Status */}
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      <Badge
+                        color={
+                          session.status === 'Completed'
+                            ? 'success'
+                            : session.status === 'In Progress'
+                            ? 'warning'
+                            : session.status === 'Needs Attention'
+                            ? 'error'
+                            : 'primary'
+                        }
+                        size="sm"
+                      >
+                        {session.status}
+                      </Badge>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-5 py-3.5 text-right whitespace-nowrap">
+                      <div className="inline-flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setActiveSessionDetail(session)}
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
+                          title="View Session"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">visibility</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('lesson-plan', session.lessonPlanId || session.id)}
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
+                          title="Lesson Plan"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">menu_book</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onNavigate('attendance', session.id)}
+                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
+                          title="Attendance"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
+                        </button>
+
+                        {isClusterAdmin && onRequestDateChange && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDateChangeSession(session);
+                              setDateChangeNewDate(session.date || '');
+                              setDateChangeReason('');
+                            }}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
+                            title="Request Date Change"
+                          >
+                            <Calendar className="h-4 w-4" />
+                          </button>
+                        )}
+
+                        {['Submitted', 'Pending Review', 'Approved', 'Completed'].includes(session.status) ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="rounded-lg p-1.5 text-gray-300 dark:text-gray-600 cursor-not-allowed"
+                            title="Session submitted - editing disabled"
+                          >
+                            <Lock className="h-4 w-4" />
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(session)}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
+                            title="Edit"
+                          >
+                            <span className="material-symbols-outlined text-[16px]">edit</span>
+                          </button>
+                        )}
+
+                        {onDeleteSession && (
+                          <button
+                            type="button"
+                            onClick={() => setSessionToDelete(session)}
+                            className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition cursor-pointer"
+                            title="Delete"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -928,7 +944,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
       {/* CREATE / EDIT SESSION MODAL (Clean Drawer / Modal) */}
       {isNewModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40  overflow-y-auto">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-2xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
             {/* Modal Header */}
             <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 rounded-t-xl">
@@ -972,15 +988,13 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                     <p className="text-[11px] text-rose-600 mt-1">{formErrors.name}</p>
                   )}
                 </div>
-
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Curriculum Module
                   </label>
-                  <select
+                  <Select
                     value={formData.module}
-                    onChange={(e) => {
-                      const mod = e.target.value;
+                    onValueChange={(mod) => {
                       let modId = 'M-103';
                       if (mod === 'Basic Math') modId = 'M-301';
                       if (mod === 'Life Skills') modId = 'M-102';
@@ -989,15 +1003,19 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                       if (mod === 'Financial Literacy') modId = 'F-101';
                       setFormData({ ...formData, module: mod, moduleId: modId });
                     }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    <option value="Spoken English">Spoken English (M-103)</option>
-                    <option value="Basic Math">Basic Math (M-301)</option>
-                    <option value="Life Skills">Life Skills (M-102)</option>
-                    <option value="Digital Literacy">Digital Literacy (D-004)</option>
-                    <option value="Science">Science (S-201)</option>
-                    <option value="Financial Literacy">Financial Literacy (F-101)</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Module" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Spoken English">Spoken English (M-103)</SelectItem>
+                      <SelectItem value="Basic Math">Basic Math (M-301)</SelectItem>
+                      <SelectItem value="Life Skills">Life Skills (M-102)</SelectItem>
+                      <SelectItem value="Digital Literacy">Digital Literacy (D-004)</SelectItem>
+                      <SelectItem value="Science">Science (S-201)</SelectItem>
+                      <SelectItem value="Financial Literacy">Financial Literacy (F-101)</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1025,85 +1043,86 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Day of Week
                   </label>
-                  <select
+                  <Select
                     value={formData.day}
-                    onChange={(e) => setFormData({ ...formData, day: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    onValueChange={(val) => setFormData({ ...formData, day: val })}
                   >
-                    <option value="Saturday">Saturday</option>
-                    <option value="Sunday">Sunday</option>
-                    <option value="Monday">Monday</option>
-                    <option value="Tuesday">Tuesday</option>
-                    <option value="Wednesday">Wednesday</option>
-                    <option value="Thursday">Thursday</option>
-                    <option value="Friday">Friday</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Day" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Saturday">Saturday</SelectItem>
+                      <SelectItem value="Sunday">Sunday</SelectItem>
+                      <SelectItem value="Monday">Monday</SelectItem>
+                      <SelectItem value="Tuesday">Tuesday</SelectItem>
+                      <SelectItem value="Wednesday">Wednesday</SelectItem>
+                      <SelectItem value="Thursday">Thursday</SelectItem>
+                      <SelectItem value="Friday">Friday</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Time Window
+                    Time Slot
                   </label>
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={formData.time}
-                      onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                      placeholder="10:00 AM"
-                      className="w-1/2 px-2.5 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                    />
-                    <span className="text-slate-400 font-bold">-</span>
-                    <input
-                      type="text"
-                      value={formData.endTime}
-                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
-                      placeholder="11:30 AM"
-                      className="w-1/2 px-2.5 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    placeholder="e.g. 10:00 AM - 12:30 PM"
+                    value={formData.time}
+                    onChange={(e) => setFormData({ ...formData, time: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                  />
                 </div>
               </div>
 
-              {/* Row 3: Hierarchy (Panchayat & Village) */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 bg-slate-50/70 p-3 rounded-md border border-slate-200">
+              {/* Row 3: Panchayat & Village */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Panchayat <span className="text-rose-500">*</span>
+                    Panchayat Cluster Hub <span className="text-rose-500">*</span>
                   </label>
-                  <select
+                  <Select
                     value={formData.panchayatId}
-                    onChange={(e) => handlePanchayatSelectChange(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                    onValueChange={(val) => handlePanchayatSelectChange(val)}
                   >
-                    {panchayats.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Select Panchayat" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {panchayats.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Village / Learning Center <span className="text-rose-500">*</span>
                   </label>
-                  <select
+                  <Select
                     value={formData.villageName}
-                    onChange={(e) => {
-                      setFormData({ ...formData, villageName: e.target.value });
+                    onValueChange={(val) => {
+                      setFormData({ ...formData, villageName: val });
                       if (formErrors.villageName) setFormErrors({ ...formErrors, villageName: '' });
                     }}
-                    className={`w-full px-3 py-2 bg-white border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
-                      formErrors.villageName ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}
                   >
-                    <option value="">Select Village Center</option>
-                    {modalVillages.map((v) => (
-                      <option key={v.id} value={v.name}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={`w-full h-9 text-xs ${
+                      formErrors.villageName ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
+                    }`}>
+                      <SelectValue placeholder="Select Village Center" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {modalVillages.map((v) => (
+                        <SelectItem key={v.id} value={v.name}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {formErrors.villageName && (
                     <p className="text-[11px] text-rose-600 mt-1">{formErrors.villageName}</p>
                   )}
@@ -1116,23 +1135,27 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Assigned Volunteer <span className="text-rose-500">*</span>
                   </label>
-                  <select
+                  <Select
                     value={formData.volunteerId || (formData.volunteerName === 'Unassigned' ? 'unassigned' : '')}
-                    onChange={(e) => {
-                      handleVolunteerSelectChange(e.target.value);
+                    onValueChange={(val) => {
+                      handleVolunteerSelectChange(val);
                       if (formErrors.volunteer) setFormErrors({ ...formErrors, volunteer: '' });
                     }}
-                    className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
-                      formErrors.volunteer ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}
                   >
-                    <option value="unassigned">-- Unassigned (Needs Attention) --</option>
-                    {volunteers.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name} ({v.department?.split(' ')[0] || 'Mentor'})
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className={`w-full h-9 text-xs ${
+                      formErrors.volunteer ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
+                    }`}>
+                      <SelectValue placeholder="Select Volunteer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="unassigned">-- Unassigned (Needs Attention) --</SelectItem>
+                      {volunteers.map((v) => (
+                        <SelectItem key={v.id} value={v.id}>
+                          {v.name} ({v.department?.split(' ')[0] || 'Mentor'})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {formErrors.volunteer && (
                     <p className="text-[11px] text-rose-600 mt-1">{formErrors.volunteer}</p>
                   )}
@@ -1142,40 +1165,48 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Session Type
                   </label>
-                  <select
+                  <Select
                     value={formData.sessionType}
-                    onChange={(e) =>
+                    onValueChange={(val) =>
                       setFormData({
                         ...formData,
-                        sessionType: e.target.value as 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation',
+                        sessionType: val as 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation',
                       })
                     }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    <option value="Academic">Academic Core</option>
-                    <option value="Life Skills">Life Skills &amp; Habits</option>
-                    <option value="Assessment">Assessment &amp; Review</option>
-                    <option value="Orientation">Orientation &amp; Games</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Session Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Academic">Academic Core</SelectItem>
+                      <SelectItem value="Life Skills">Life Skills &amp; Habits</SelectItem>
+                      <SelectItem value="Assessment">Assessment &amp; Review</SelectItem>
+                      <SelectItem value="Orientation">Orientation &amp; Games</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
                     Initial Status
                   </label>
-                  <select
+                  <Select
                     value={formData.status}
-                    onChange={(e) =>
-                      setFormData({ ...formData, status: e.target.value as Session['status'] })
+                    onValueChange={(val) =>
+                      setFormData({ ...formData, status: val as Session['status'] })
                     }
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                   >
-                    <option value="Scheduled">Scheduled</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Needs Attention">Needs Attention</option>
-                    <option value="Draft">Draft</option>
-                  </select>
+                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Scheduled">Scheduled</SelectItem>
+                      <SelectItem value="In Progress">In Progress</SelectItem>
+                      <SelectItem value="Completed">Completed</SelectItem>
+                      <SelectItem value="Needs Attention">Needs Attention</SelectItem>
+                      <SelectItem value="Draft">Draft</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1227,7 +1258,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
       {/* SESSION DETAIL MODAL / DRAWER */}
       {activeSessionDetail && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/40  overflow-y-auto">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-3xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
             {/* Detail Header */}
             <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/70 rounded-t-xl flex items-start justify-between gap-4">
@@ -1476,7 +1507,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
       {/* DELETE CONFIRMATION MODAL */}
       {sessionToDelete && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 ">
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm">
           <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-md w-full p-5 space-y-4">
             <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center">
               <span className="material-symbols-outlined text-[22px]">delete_forever</span>
@@ -1502,6 +1533,81 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-md shadow-xs"
               >
                 Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* REQUEST DATE CHANGE MODAL */}
+      {dateChangeSession && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm">
+          <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-md w-full p-5 space-y-4">
+            <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+              <Calendar className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Request Date Change</h3>
+              <p className="text-xs text-slate-600 mt-1">
+                Submit a date change request for &quot;{getSessionTitle(dateChangeSession)}&quot;.
+              </p>
+            </div>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Current Date</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={dateChangeSession.date}
+                  className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-md text-xs text-slate-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">New Date</label>
+                <input
+                  type="date"
+                  value={dateChangeNewDate}
+                  onChange={(e) => setDateChangeNewDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for change</label>
+                <textarea
+                  rows={3}
+                  value={dateChangeReason}
+                  onChange={(e) => setDateChangeReason(e.target.value)}
+                  placeholder="Explain why the date needs to be changed..."
+                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
+                />
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDateChangeSession(null)}
+                className="px-3.5 py-1.5 border border-slate-300 text-slate-700 text-xs font-semibold rounded-md hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (onRequestDateChange && dateChangeNewDate && dateChangeReason) {
+                    await onRequestDateChange(
+                      dateChangeSession.id,
+                      dateChangeSession.date || '',
+                      dateChangeNewDate,
+                      dateChangeReason
+                    );
+                    setDateChangeSession(null);
+                  } else {
+                    alert('Please provide a new date and a reason.');
+                  }
+                }}
+                className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs cursor-pointer"
+              >
+                Submit Request
               </button>
             </div>
           </div>

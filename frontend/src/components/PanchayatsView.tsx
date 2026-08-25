@@ -1,5 +1,26 @@
 import React, { useState, useMemo } from 'react';
+import { 
+  Plus, 
+  Search, 
+  MapPin, 
+  Home, 
+  GraduationCap, 
+  Users, 
+  X,
+  ExternalLink,
+  ChevronRight
+} from 'lucide-react';
 import { TabType, Panchayat } from '../types';
+import Badge from './ui/badge';
+import { Table, TableHeader, TableBody, TableRow, TableCell } from './ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { ActionButton } from './ui/action-button';
 
 interface PanchayatsViewProps {
   panchayats: Panchayat[];
@@ -12,12 +33,6 @@ interface PanchayatsViewProps {
   }) => void;
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
 }
-
-const STATUS_BADGE: Record<string, string> = {
-  'On Track':            'badge-success',
-  'Correction Required': 'badge-warning',
-  'Action Needed':       'badge-error',
-};
 
 export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
   panchayats,
@@ -65,219 +80,285 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
     setShowAdd(false);
   };
 
+  const getStatusBadge = (status: string) => {
+    switch (status) {
+      case 'On Track':
+        return <Badge color="success" size="sm">On Track</Badge>;
+      case 'Correction Required':
+        return <Badge color="warning" size="sm">Correction Required</Badge>;
+      case 'Action Needed':
+        return <Badge color="error" size="sm">Action Needed</Badge>;
+      default:
+        return <Badge color="light" size="sm">{status}</Badge>;
+    }
+  };
+
   return (
-    <div className="page-container space-y-5">
-      {/* Page header */}
-      <div className="page-header flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="page-title">Panchayats</h1>
-          <p className="page-subtitle">
-            {panchayats.length} panchayat hubs · {totalVillages} villages · {totalStudents} students
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+              Panchayats & Village Clusters
+            </h1>
+            <Badge color="primary" size="sm">
+              {panchayats.length} Panchayats
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {panchayats.length} panchayat hubs &middot; {totalVillages} active villages &middot; {totalStudents} enrolled students
           </p>
         </div>
-        <button onClick={() => setShowAdd(true)} className="btn btn-primary self-start">
-          <span className="material-symbols-outlined" style={{ fontSize: 16 }}>add</span>
-          Add panchayat
+
+        <button
+          type="button"
+          onClick={() => setShowAdd(true)}
+          className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition shrink-0"
+        >
+          <Plus className="h-4 w-4" />
+          <span>Add Panchayat</span>
         </button>
       </div>
 
-      {/* Summary stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Panchayats', value: panchayats.length },
-          { label: 'Villages', value: totalVillages },
-          { label: 'Students', value: totalStudents },
-          { label: 'Volunteers', value: totalVols },
-        ].map((s) => (
-          <div key={s.label} className="stat-item">
-            <div className="stat-label">{s.label}</div>
-            <div className="stat-value">{s.value}</div>
+      {/* 2. Compact Metric Cards (counts & status only) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Panchayats</span>
+            <MapPin className="h-4 w-4 text-brand-500" />
           </div>
-        ))}
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{panchayats.length}</div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Villages</span>
+            <Home className="h-4 w-4 text-success-500" />
+          </div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalVillages}</div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Students</span>
+            <GraduationCap className="h-4 w-4 text-theme-purple-500" />
+          </div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalStudents}</div>
+        </div>
+
+        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Volunteers</span>
+            <Users className="h-4 w-4 text-warning-500" />
+          </div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalVols}</div>
+        </div>
       </div>
 
-      {/* Filters */}
-      <div className="card p-3">
-        <div className="filter-toolbar">
-          <div className="relative flex-1" style={{ minWidth: 200, maxWidth: 340 }}>
-            <span
-              className="material-symbols-outlined absolute top-1/2 -translate-y-1/2"
-              style={{ left: 10, fontSize: 16, color: 'var(--color-text-muted)', pointerEvents: 'none' }}
-            >
-              search
-            </span>
-            <input
-              type="text"
-              placeholder="Search panchayats or villages..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="field-input"
-              style={{ paddingLeft: 34 }}
-            />
-          </div>
+      {/* 3. Cardless Search & Filter Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="relative w-full max-w-sm">
+          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search panchayats or villages..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+          />
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
           {(['All', 'On Track', 'Correction Required', 'Action Needed'] as const).map((s) => (
             <button
               key={s}
+              type="button"
               onClick={() => setStatusFilter(s)}
-              className="btn btn-sm"
-              style={{
-                background: statusFilter === s ? 'var(--color-brand)' : 'var(--color-surface)',
-                color: statusFilter === s ? '#fff' : 'var(--color-text-secondary)',
-                border: `1px solid ${statusFilter === s ? 'var(--color-brand)' : 'var(--color-border)'}`,
-              }}
+              className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                statusFilter === s
+                  ? 'bg-brand-500 text-white shadow-theme-xs'
+                  : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700 dark:hover:bg-gray-700'
+              }`}
             >
               {s}
             </button>
           ))}
-          <span className="text-xs ml-auto" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto sm:ml-2">
             {filtered.length} of {panchayats.length}
           </span>
         </div>
       </div>
 
-      {/* Table */}
+      {/* 4. Cardless Modern Table */}
       {filtered.length === 0 ? (
-        <div className="card">
-          <div className="empty-state">
-            <div className="empty-state-icon">
-              <span className="material-symbols-outlined" style={{ fontSize: 20 }}>location_city</span>
-            </div>
-            <div className="empty-state-title">No panchayats found</div>
-            <div className="empty-state-body">
-              {search ? 'Try a different search term.' : 'Add a panchayat to get started.'}
-            </div>
-            {!search && (
-              <button onClick={() => setShowAdd(true)} className="btn btn-primary mt-2">Add panchayat</button>
-            )}
-          </div>
+        <div className="py-16 text-center">
+          <MapPin className="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600" />
+          <h3 className="mt-3 text-base font-semibold text-gray-800 dark:text-white">No panchayats found</h3>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {search ? 'Try adjusting your search query.' : 'Add your first panchayat to get started.'}
+          </p>
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="tqi-table">
-              <thead>
-                <tr>
-                  <th>Panchayat</th>
-                  <th>Status</th>
-                  <th>Villages</th>
-                  <th>Students</th>
-                  <th>Volunteers</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => (
-                  <tr key={p.id}>
-                    <td>
+        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableCell isHeader className="w-[300px]">Panchayat</TableCell>
+                <TableCell isHeader>Status</TableCell>
+                <TableCell isHeader>Villages</TableCell>
+                <TableCell isHeader>Students</TableCell>
+                <TableCell isHeader>Volunteers</TableCell>
+                <TableCell isHeader className="text-right">Actions</TableCell>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filtered.map((p) => (
+                <TableRow key={p.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
+                  <TableCell>
+                    <button
+                      type="button"
+                      onClick={() => onSelectPanchayat(p.id)}
+                      className="text-sm font-semibold text-gray-900 hover:text-brand-500 dark:text-white dark:hover:text-brand-400 text-left transition-colors cursor-pointer"
+                    >
+                      {p.name}
+                    </button>
+                    <div className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      {p.villages.slice(0, 3).map((v) => v.name).join(', ')}
+                      {p.villages.length > 3 && ` +${p.villages.length - 3} more`}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {getStatusBadge(p.status)}
+                  </TableCell>
+                  <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
+                    {p.villagesCount || p.villages.length}
+                  </TableCell>
+                  <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
+                    {p.activeStudents}
+                  </TableCell>
+                  <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
+                    {p.volunteersCount}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
                       <button
-                        onClick={() => onSelectPanchayat(p.id)}
-                        className="text-sm font-semibold text-left cursor-pointer"
-                        style={{ color: 'var(--color-brand)', background: 'none', border: 'none', padding: 0 }}
+                        type="button"
+                        onClick={() => onNavigate('students', p.id)}
+                        className="rounded-lg px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white transition"
                       >
-                        {p.name}
+                        Students
                       </button>
-                      <div className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                        {p.villages.slice(0, 3).map((v) => v.name).join(', ')}
-                        {p.villages.length > 3 && ` +${p.villages.length - 3}`}
-                      </div>
-                    </td>
-                    <td>
-                      <span className={`badge ${STATUS_BADGE[p.status] || 'badge-neutral'}`}>
-                        {p.status}
-                      </span>
-                    </td>
-                    <td style={{ color: 'var(--color-text-secondary)' }}>{p.villagesCount || p.villages.length}</td>
-                    <td style={{ color: 'var(--color-text-secondary)' }}>{p.activeStudents}</td>
-                    <td style={{ color: 'var(--color-text-secondary)' }}>{p.volunteersCount}</td>
-                    <td style={{ textAlign: 'right' }}>
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => onNavigate('students', p.id)}
-                          className="btn btn-ghost btn-sm"
-                          title="View students"
-                        >
-                          Students
-                        </button>
-                        <button
-                          onClick={() => onSelectPanchayat(p.id)}
-                          className="btn btn-secondary btn-sm"
-                        >
-                          Open
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <button
+                        type="button"
+                        onClick={() => onSelectPanchayat(p.id)}
+                        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-500 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20 transition"
+                      >
+                        <span>Open</span>
+                        <ChevronRight className="h-3 w-3" />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       )}
 
       {/* Add Panchayat Modal */}
       {showAdd && (
-        <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span className="modal-title">Add panchayat</span>
-              <button onClick={() => setShowAdd(false)} className="btn btn-ghost btn-icon">
-                <span className="material-symbols-outlined" style={{ fontSize: 18 }}>close</span>
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-y-auto bg-gray-900/75 p-4 backdrop-blur-sm">
+          <div className="relative w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+                Add New Panchayat
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowAdd(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-white transition"
+              >
+                <X className="h-4 w-4" />
               </button>
             </div>
-            <form onSubmit={handleSave}>
-              <div className="modal-body space-y-4">
-                <div>
-                  <label className="field-label" htmlFor="pan-name">Panchayat name *</label>
-                  <input
-                    id="pan-name"
-                    type="text"
-                    required
-                    placeholder="e.g., Vedakkattamaduvu"
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
-                    className="field-input"
-                  />
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="pan-block">Block</label>
-                  <input
-                    id="pan-block"
-                    type="text"
-                    value={form.block}
-                    onChange={(e) => setForm({ ...form, block: e.target.value })}
-                    className="field-input"
-                  />
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="pan-status">Status</label>
-                  <select
-                    id="pan-status"
-                    value={form.status}
-                    onChange={(e) => setForm({ ...form, status: e.target.value as typeof form.status })}
-                    className="field-select"
-                  >
-                    <option>On Track</option>
-                    <option>Correction Required</option>
-                    <option>Action Needed</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="field-label" htmlFor="pan-villages">
-                    Initial villages <span style={{ fontWeight: 400, color: 'var(--color-text-muted)' }}>(comma separated)</span>
-                  </label>
-                  <input
-                    id="pan-villages"
-                    type="text"
-                    placeholder="e.g., Ammapettai, Pudur"
-                    value={form.villages}
-                    onChange={(e) => setForm({ ...form, villages: e.target.value })}
-                    className="field-input"
-                  />
-                </div>
+
+            <form onSubmit={handleSave} className="mt-5 space-y-4 text-xs">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-name">
+                  Panchayat Name *
+                </label>
+                <input
+                  id="pan-name"
+                  type="text"
+                  required
+                  placeholder="e.g. Vedakkattamaduvu"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                />
               </div>
-              <div className="modal-footer">
-                <button type="button" onClick={() => setShowAdd(false)} className="btn btn-ghost">Cancel</button>
-                <button type="submit" className="btn btn-primary">Save panchayat</button>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-block">
+                  Block
+                </label>
+                <input
+                  id="pan-block"
+                  type="text"
+                  value={form.block}
+                  onChange={(e) => setForm({ ...form, block: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-status">
+                  Operational Status
+                </label>
+                <Select
+                  value={form.status}
+                  onValueChange={(val: any) => setForm({ ...form, status: val })}
+                >
+                  <SelectTrigger className="h-10 text-xs">
+                    <SelectValue placeholder="Select Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="On Track">On Track</SelectItem>
+                    <SelectItem value="Correction Required">Correction Required</SelectItem>
+                    <SelectItem value="Action Needed">Action Needed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-villages">
+                  Initial Villages (comma separated)
+                </label>
+                <input
+                  id="pan-villages"
+                  type="text"
+                  placeholder="e.g. Ammapettai, Pudur, Kottai"
+                  value={form.villages}
+                  onChange={(e) => setForm({ ...form, villages: e.target.value })}
+                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                />
+              </div>
+
+              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowAdd(false)}
+                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+                >
+                  Save Panchayat
+                </button>
               </div>
             </form>
           </div>

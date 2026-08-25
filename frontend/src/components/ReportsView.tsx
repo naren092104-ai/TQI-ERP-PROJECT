@@ -1,5 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { TabType, Session, LessonPlan, Panchayat, Volunteer, Student } from '../types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface ReportsViewProps {
   sessions: Session[];
@@ -242,40 +249,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   };
 
   return (
-    <div className="space-y-5 max-w-7xl mx-auto pb-12 font-sans">
-      {/* Top Header & Breadcrumb */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/80 pb-4">
+    <div className="w-full space-y-6">
+      {/* 1. Cardless Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mb-1">
-            <button
-              onClick={() => onNavigate('dashboard')}
-              className="hover:text-[#0B3D91] transition-colors cursor-pointer"
-            >
-              Dashboard
-            </button>
-            <span className="text-slate-400">/</span>
-            <span className="text-[#0B3D91] font-semibold">Reports</span>
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Reports</h1>
-          <p className="text-xs sm:text-sm text-slate-600 mt-0.5">
-            Generate, filter and export operational and academic reports.
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
+            Operational &amp; Academic Reports
+          </h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Generate, filter, visualize, and export attendance, sessions, and curriculum reports.
           </p>
         </div>
 
-        <div className="flex items-center gap-2 self-start sm:self-auto">
+        <div className="flex items-center gap-2.5 self-start sm:self-auto">
           <button
+            type="button"
             onClick={handlePrintReport}
-            className="inline-flex items-center gap-1.5 px-3 py-2 border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
           >
-            <span className="material-symbols-outlined text-[16px] text-slate-500">print</span>
-            Print / PDF
+            <span>Print / PDF</span>
           </button>
           <button
+            type="button"
             onClick={handleExportCSV}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-all active:scale-[0.98] cursor-pointer"
+            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
           >
-            <span className="material-symbols-outlined text-[16px]">file_download</span>
-            Export Excel / CSV
+            <span>Export CSV</span>
           </button>
         </div>
       </div>
@@ -385,77 +384,93 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         {/* Filter Inputs Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
               Panchayat
             </label>
-            <select
-              value={selectedPanchayat}
-              onChange={(e) => {
-                setSelectedPanchayat(e.target.value);
+            <Select
+              value={selectedPanchayat || "all"}
+              onValueChange={(val) => {
+                setSelectedPanchayat(val);
                 setSelectedVillage('all');
               }}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
             >
-              <option value="all">All Panchayats</option>
-              {panchayats.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Panchayats" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Panchayats</SelectItem>
+                {panchayats.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
               Village Center
             </label>
-            <select
-              value={selectedVillage}
-              onChange={(e) => setSelectedVillage(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedVillage || "all"}
+              onValueChange={(val) => setSelectedVillage(val)}
             >
-              <option value="all">All Villages</option>
-              {currentFilterVillages.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Villages" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Villages</SelectItem>
+                {currentFilterVillages.map((v) => (
+                  <SelectItem key={v.id} value={v.name}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
               Volunteer
             </label>
-            <select
-              value={selectedVolunteer}
-              onChange={(e) => setSelectedVolunteer(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedVolunteer || "all"}
+              onValueChange={(val) => setSelectedVolunteer(val)}
             >
-              <option value="all">All Volunteers</option>
-              {volunteers.map((v) => (
-                <option key={v.id} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Volunteers" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Volunteers</SelectItem>
+                {volunteers.map((v) => (
+                  <SelectItem key={v.id} value={v.name}>
+                    {v.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
               Status Filter
             </label>
-            <select
-              value={selectedStatus}
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+            <Select
+              value={selectedStatus || "all"}
+              onValueChange={(val) => setSelectedStatus(val)}
             >
-              <option value="all">All Statuses</option>
-              <option value="Completed">Completed</option>
-              <option value="Scheduled">Scheduled</option>
-              <option value="Approved">Approved</option>
-              <option value="Correction Requested">Correction Requested</option>
-            </select>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue placeholder="All Statuses" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Statuses</SelectItem>
+                <SelectItem value="Completed">Completed</SelectItem>
+                <SelectItem value="Scheduled">Scheduled</SelectItem>
+                <SelectItem value="Approved">Approved</SelectItem>
+                <SelectItem value="Correction Requested">Correction Requested</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div>

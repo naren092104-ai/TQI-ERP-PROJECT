@@ -1,6 +1,32 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { BillScannerModal, BillAttachment } from './BillScannerModal';
 import { FinanceEntry, FinanceDraft } from '../types';
+import {
+  X,
+  Save,
+  Send,
+  Plus,
+  Trash2,
+  Upload,
+  Camera,
+  Car,
+  Utensils,
+  BookOpen,
+  Sparkles,
+  FileSpreadsheet,
+  CheckCircle2,
+  ReceiptIndianRupee,
+  Calendar,
+  Building2,
+} from 'lucide-react';
+import { ActionButton } from './ui/action-button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface RouteItem {
   id: string;
@@ -64,7 +90,7 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     expectedAmount: number;
   } | null>(null);
 
-  // 1. Travel State - Defaults to clean empty fields for new expenses
+  // 1. Travel State
   const [routes, setRoutes] = useState<RouteItem[]>(
     initialDraft?.routes || [
       {
@@ -79,7 +105,7 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     ]
   );
 
-  // 2. Food State - Defaults to 0 for new expenses
+  // 2. Food State
   const [food, setFood] = useState<FoodState>(
     initialDraft?.food || {
       breakfast: { amount: 0, remarks: '', bill: null },
@@ -89,7 +115,7 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     }
   );
 
-  // 3. Stationery State - Defaults to 0 for new expenses
+  // 3. Stationery State
   const [stationery, setStationery] = useState<{
     amount: number;
     remarks: string;
@@ -102,7 +128,7 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     }
   );
 
-  // 4. Other State - Defaults to 0 for new expenses
+  // 4. Other State
   const [otherItems, setOtherItems] = useState<OtherItem[]>(
     initialDraft?.otherItems || [
       {
@@ -125,7 +151,6 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
       if (initialDraft.stationery) setStationery(initialDraft.stationery);
       if (initialDraft.otherItems) setOtherItems(initialDraft.otherItems);
     } else {
-      // Clear all fields when creating a new expense session
       setSessionDay('Day 1');
       setRoutes([
         {
@@ -295,14 +320,12 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         prev.map((r) => {
           if (r.id === id) {
             let updated = { ...r, bill };
-            // Auto-write origin and destination if detected from ticket
             if (bill.origin && (!r.from || r.from === '')) {
               updated.from = bill.origin;
             }
             if (bill.destination && (!r.to || r.to === '')) {
               updated.to = bill.destination;
             }
-            // Auto-fill volunteers and perPerson
             if (bill.detectedAmount && bill.detectedAmount > 0) {
               if (updated.volunteers > 0) {
                 updated.perPerson = Math.round(bill.detectedAmount / updated.volunteers);
@@ -516,109 +539,102 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 bg-[#001947]/50  z-[100] flex items-center justify-center p-2 sm:p-4 animate-[fadeIn_0.15s_ease-out]">
-        <div className="bg-white rounded-md shadow-sm w-full max-w-4xl max-h-[92vh] overflow-hidden flex flex-col border border-[#c4c6d3]/80">
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center p-0 sm:p-4 md:p-6 bg-gray-900/75 backdrop-blur-sm animate-in fade-in-0 duration-200">
+        <div className="relative w-full h-full sm:h-auto sm:max-h-[94vh] sm:max-w-4xl flex flex-col rounded-none sm:rounded-2xl border-0 sm:border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
           {/* Top Modal Header */}
-          <div className="px-6 py-4 border-b border-[#c4c6d3] bg-white flex items-center justify-between">
-            <h2 className="text-[17px] font-bold text-[#1a1b21]">New Finance Entry —</h2>
+          <div className="px-4 sm:px-6 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-500 dark:bg-brand-500/10 dark:text-brand-400 shrink-0">
+                <ReceiptIndianRupee className="h-5 w-5" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white leading-tight">
+                  New Finance Entry
+                </h2>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  {clusterName} &middot; {sessionDay}
+                </p>
+              </div>
+            </div>
+
             <button
+              type="button"
               onClick={onClose}
-              className="text-[#747783] hover:text-[#1a1b21] hover:bg-[#f4f3fb] p-1.5 rounded-full transition-colors cursor-pointer"
+              className="flex h-9 w-9 items-center justify-center rounded-xl text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200 transition-colors cursor-pointer"
             >
-              <span className="material-symbols-outlined text-[20px]">close</span>
+              <X className="h-5 w-5" />
             </button>
           </div>
 
-          {/* Top Metadata Bar (Cluster, College, SPOC, Financer) */}
-          <div className="px-6 py-3 bg-[#faf8ff] border-b border-[#c4c6d3]/70 grid grid-cols-2 md:grid-cols-4 gap-4 text-[12px]">
-            <div>
-              <span className="text-[10px] font-bold text-[#747783] uppercase tracking-wider block">
-                CLUSTER
-              </span>
-              <span className="font-bold text-[#002869]">{clusterName}</span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-[#747783] uppercase tracking-wider block">
-                COLLEGE
-              </span>
-              <span className="font-bold text-[#1a1b21] truncate block" title={collegeName}>
-                {collegeName}
-              </span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-[#747783] uppercase tracking-wider block">
-                SPOC
-              </span>
-              <span className="font-bold text-[#1a1b21]">{spocName}</span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-[#747783] uppercase tracking-wider block">
-                FINANCER
-              </span>
-              <span className="font-bold text-[#1a1b21]">{financerName}</span>
-            </div>
-          </div>
-
           {/* Session Day & Date Selector Row */}
-          <div className="px-6 py-3.5 bg-white border-b border-[#c4c6d3]/60 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="px-4 sm:px-6 py-3 bg-gray-50/70 dark:bg-white/[0.02] border-b border-gray-100 dark:border-gray-800 grid grid-cols-2 gap-3 shrink-0">
             <div>
-              <label className="block text-[12px] font-bold text-[#434652] mb-1">
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                 Session Day *
               </label>
-              <select
-                value={sessionDay}
-                onChange={(e) => setSessionDay(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] font-medium text-[#1a1b21] focus:outline-none focus:border-[#002869] cursor-pointer"
-              >
-                <option value="Day 1">Day 1</option>
-                <option value="Day 2">Day 2</option>
-                <option value="Day 3">Day 3</option>
-                <option value="Day 4">Day 4</option>
-                <option value="Day 5">Day 5</option>
-                <option value="Day 6">Day 6</option>
-              </select>
+              <Select value={sessionDay} onValueChange={(val) => setSessionDay(val)}>
+                <SelectTrigger className="h-10 sm:h-9 text-xs">
+                  <SelectValue placeholder="Select Day" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Day 1">Day 1</SelectItem>
+                  <SelectItem value="Day 2">Day 2</SelectItem>
+                  <SelectItem value="Day 3">Day 3</SelectItem>
+                  <SelectItem value="Day 4">Day 4</SelectItem>
+                  <SelectItem value="Day 5">Day 5</SelectItem>
+                  <SelectItem value="Day 6">Day 6</SelectItem>
+                  <SelectItem value="Day 7">Day 7</SelectItem>
+                  <SelectItem value="Day 8">Day 8</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
 
             <div>
-              <label className="block text-[12px] font-bold text-[#434652] mb-1">
-                Date *
+              <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                Session Date *
               </label>
               <input
                 type="date"
                 value={sessionDate}
                 onChange={(e) => setSessionDate(e.target.value)}
-                className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] font-medium text-[#1a1b21] focus:outline-none focus:border-[#002869]"
+                className="w-full h-10 sm:h-9 px-3 bg-white dark:bg-gray-800 border border-gray-300 rounded-xl text-xs font-medium text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
               />
             </div>
           </div>
 
-          {/* Navigation Category Tabs */}
-          <div className="flex border-b border-[#c4c6d3] bg-white px-6 overflow-x-auto">
-            {(['Travel', 'Food', 'Stationery', 'Other', 'Preview'] as const).map((tab) => {
-              const isActive = activeTab === tab;
-              let tabTotal = 0;
-              if (tab === 'Travel') tabTotal = travelTotal;
-              if (tab === 'Food') tabTotal = foodTotal;
-              if (tab === 'Stationery') tabTotal = stationeryTotal;
-              if (tab === 'Other') tabTotal = otherTotal;
+          {/* Category Tabs Pill Bar (Mobile Horizontal Swipe) */}
+          <div className="flex border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-3 sm:px-6 overflow-x-auto no-scrollbar gap-1.5 py-2.5 shrink-0">
+            {(
+              [
+                { id: 'Travel', label: 'Travel', icon: Car, total: travelTotal },
+                { id: 'Food', label: 'Food', icon: Utensils, total: foodTotal },
+                { id: 'Stationery', label: 'Stationery', icon: BookOpen, total: stationeryTotal },
+                { id: 'Other', label: 'Other', icon: Sparkles, total: otherTotal },
+                { id: 'Preview', label: 'Preview Sheet', icon: FileSpreadsheet, total: 0 },
+              ] as const
+            ).map((tab) => {
+              const isActive = activeTab === tab.id;
+              const TabIcon = tab.icon;
 
               return (
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`py-3 px-3.5 sm:px-5 text-[13px] font-bold border-b-2 transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`py-2 px-3 text-xs font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 whitespace-nowrap ${
                     isActive
-                      ? 'border-[#002869] text-[#002869]'
-                      : 'border-transparent text-[#747783] hover:text-[#1a1b21]'
+                      ? 'bg-brand-500 text-white shadow-theme-xs'
+                      : 'bg-gray-100/70 text-gray-700 hover:bg-gray-100 dark:bg-white/5 dark:text-gray-300 dark:hover:bg-white/10'
                   }`}
                 >
-                  {tab === 'Preview' && (
-                    <span className="material-symbols-outlined text-[16px]">visibility</span>
-                  )}
-                  <span>{tab === 'Preview' ? 'Format Preview (TQI Sheet)' : tab}</span>
-                  {tabTotal > 0 && tab !== 'Preview' && (
-                    <span className="text-[11px] font-mono font-semibold bg-[#dae2ff] text-[#001947] px-1.5 py-0.5 rounded">
-                      ₹{tabTotal}
+                  <TabIcon className="h-4 w-4 shrink-0" />
+                  <span>{tab.label}</span>
+                  {tab.total > 0 && tab.id !== 'Preview' && (
+                    <span
+                      className={`text-[10.5px] font-mono font-bold px-1.5 py-0.2 rounded-md ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-brand-500 text-white'
+                      }`}
+                    >
+                      ₹{tab.total.toLocaleString()}
                     </span>
                   )}
                 </button>
@@ -626,75 +642,84 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             })}
           </div>
 
-          {/* Modal Tab Content Area */}
-          <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-white">
+          {/* Modal Tab Content Area with Smooth Scroll */}
+          <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 bg-gray-50/50 dark:bg-gray-950/30 custom-scrollbar">
             {/* 1. TRAVEL TAB */}
             {activeTab === 'Travel' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[20px] text-[#002869]">directions_car</span>
-                    <h3 className="text-[15px] font-bold text-[#002869]">Travel</h3>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Volunteer Travel Routes</h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Add all bus, train, or fuel trips taken for this session.</p>
                   </div>
                   <button
+                    type="button"
                     onClick={handleAddRoute}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] text-[12px] font-bold rounded-md hover:bg-[#f4f3fb] transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400 text-xs font-semibold rounded-xl border border-brand-200 dark:border-brand-500/20 transition cursor-pointer"
                   >
-                    <span className="material-symbols-outlined text-[16px]">add</span>
-                    Add Route
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Route</span>
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   {routes.map((route, idx) => {
                     const rowTotal = (route.volunteers || 0) * (route.perPerson || 0);
-                    const billAttached = route.bill;
-                    const amountMismatch =
-                      billAttached?.detectedAmount !== undefined &&
-                      billAttached.detectedAmount > 0 &&
-                      billAttached.detectedAmount !== rowTotal;
 
                     return (
                       <div
                         key={route.id}
-                        className="p-4 sm:p-5 border border-[#c4c6d3]/80 rounded-md bg-white shadow-xs space-y-3"
+                        className="p-4 sm:p-5 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-theme-xs space-y-3"
                       >
-                        {/* Route Grid: From, To, Volunteers, Per Person, Total */}
-                        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 items-end">
+                        <div className="flex items-center justify-between pb-2 border-b border-gray-100 dark:border-gray-800">
+                          <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                            Route #{idx + 1}
+                          </span>
+                          <span className="text-xs font-mono font-bold text-brand-500 bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-lg">
+                            Total: ₹{rowTotal.toLocaleString()}
+                          </span>
+                        </div>
+
+                        {/* Origin & Destination (2-col or stacked on small mobile) */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                           <div>
-                            <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                              From
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                              From (Origin) *
                             </label>
                             <input
                               type="text"
-                              placeholder="e.g. KSR"
+                              placeholder="e.g. KSR College"
                               value={route.from}
                               onChange={(e) => handleUpdateRoute(route.id, 'from', e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                              className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                             />
                           </div>
 
                           <div>
-                            <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                              To
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                              To (Destination) *
                             </label>
                             <input
                               type="text"
-                              placeholder="e.g. Salem"
+                              placeholder="e.g. Dharmapuri Village"
                               value={route.to}
                               onChange={(e) => handleUpdateRoute(route.id, 'to', e.target.value)}
-                              className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                              className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                             />
                           </div>
+                        </div>
 
+                        {/* Volunteers & Per Person Cost */}
+                        <div className="grid grid-cols-2 gap-2.5">
                           <div>
-                            <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                              Volunteers
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                              Volunteers Count
                             </label>
                             <input
                               type="number"
                               min="0"
-                              value={route.volunteers}
+                              value={route.volunteers || ''}
+                              placeholder="0"
                               onChange={(e) =>
                                 handleUpdateRoute(
                                   route.id,
@@ -702,18 +727,19 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                                   parseInt(e.target.value) || 0
                                 )
                               }
-                              className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                              className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                             />
                           </div>
 
                           <div>
-                            <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                              Per Person (₹)
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                              Cost Per Person (₹)
                             </label>
                             <input
                               type="number"
                               min="0"
-                              value={route.perPerson}
+                              value={route.perPerson || ''}
+                              placeholder="0"
                               onChange={(e) =>
                                 handleUpdateRoute(
                                   route.id,
@@ -721,40 +747,30 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                                   parseFloat(e.target.value) || 0
                                 )
                               }
-                              className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                              className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                             />
-                          </div>
-
-                          <div className="col-span-2 sm:col-span-1">
-                            <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                              Total
-                            </label>
-                            <div className="px-3 py-2 bg-[#f4f3fb] border border-[#c4c6d3]/60 rounded-md text-[14px] font-mono font-bold text-[#002869]">
-                              ₹{rowTotal}
-                            </div>
                           </div>
                         </div>
 
-                        {/* Remarks Row */}
+                        {/* Remarks */}
                         <div>
-                          <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                            Remarks
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                            Remarks / Ticket Details
                           </label>
                           <input
                             type="text"
-                            placeholder="Optional"
+                            placeholder="e.g. Bus fare ticket #1284"
                             value={route.remarks}
                             onChange={(e) => handleUpdateRoute(route.id, 'remarks', e.target.value)}
-                            className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                            className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                           />
                         </div>
 
-                        {/* Bill Attachment Details & Actions */}
-                        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            {/* Upload Bill Button */}
-                            <label className="flex items-center gap-1.5 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] rounded-md text-[12px] font-bold hover:bg-[#f4f3fb] transition-colors cursor-pointer">
-                              <span className="material-symbols-outlined text-[16px]">upload</span>
+                        {/* Bill Actions */}
+                        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-gray-100 dark:border-gray-800">
+                          <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                            <label className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-white/5 dark:hover:bg-white/10 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-semibold transition cursor-pointer">
+                              <Upload className="h-3.5 w-3.5" />
                               <span>Upload Bill</span>
                               <input
                                 type="file"
@@ -766,69 +782,50 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                               />
                             </label>
 
-                            {/* Scan Bill Button (Orange Highlight) */}
                             <button
+                              type="button"
                               onClick={() =>
                                 setScannerTarget({
                                   type: 'travel',
                                   id: route.id,
-                                  label: `Travel: ${route.from || 'Route'} → ${route.to || 'Destination'}`,
+                                  label: `Travel: ${route.from || 'Route'} to ${route.to || 'Destination'}`,
                                   expectedAmount: rowTotal,
                                 })
                               }
-                              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-white rounded-md text-[12px] font-bold hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
+                              className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
                             >
-                              <span className="material-symbols-outlined text-[16px]">photo_camera</span>
-                              <span>Scan Bill</span>
+                              <Camera className="h-3.5 w-3.5" />
+                              <span>Scan OCR Bill</span>
                             </button>
+                          </div>
 
-                            {/* Attached Bill Status Badge */}
-                            {billAttached && (
-                              <div className="flex items-center gap-2 px-2.5 py-1 bg-[#e6f4ea] border border-[#137333]/30 rounded-md text-[11px] font-bold text-[#137333]">
-                                <span className="material-symbols-outlined text-[16px]">receipt_long</span>
-                                <span className="truncate max-w-[140px]">{billAttached.fileName}</span>
-                                {billAttached.detectedAmount !== undefined && (
-                                  <span className="font-mono">(₹{billAttached.detectedAmount})</span>
-                                )}
+                          <div className="flex items-center justify-between w-full sm:w-auto gap-2">
+                            {route.bill && (
+                              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span className="truncate max-w-[120px]">{route.bill.fileName}</span>
                                 <button
+                                  type="button"
                                   onClick={() => handleUpdateRoute(route.id, 'bill', null)}
-                                  className="text-[#ba1a1a] hover:bg-[#ffdad6] p-0.5 rounded"
-                                  title="Remove Bill"
+                                  className="text-error-500 hover:bg-error-50 p-0.5 rounded ml-1 cursor-pointer"
                                 >
-                                  <span className="material-symbols-outlined text-[14px]">close</span>
+                                  <X className="h-3 w-3" />
                                 </button>
                               </div>
                             )}
-                          </div>
 
-                          {/* Remove Route */}
-                          <button
-                            onClick={() => handleRemoveRoute(route.id)}
-                            className="flex items-center gap-1 text-[#ba1a1a] hover:text-[#93000a] text-[12px] font-bold hover:underline cursor-pointer"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">delete</span>
-                            Remove
-                          </button>
+                            {routes.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveRoute(route.id)}
+                                className="flex items-center gap-1 text-xs font-semibold text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-500/10 px-2.5 py-1.5 rounded-xl transition cursor-pointer ml-auto"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>Remove</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
-
-                        {/* Amount Matching Warning if difference */}
-                        {amountMismatch && (
-                          <div className="p-2.5 bg-[#fff7f2] border border-[#ffdbc8] rounded-md text-[11px] text-[#592600] flex items-center justify-between gap-2">
-                            <span className="flex items-center gap-1">
-                              <span className="material-symbols-outlined text-[15px] text-[#fb7800]">warning</span>
-                              Bill photo shows ₹{billAttached.detectedAmount}, but route total is ₹{rowTotal}.
-                            </span>
-                            <button
-                              onClick={() => {
-                                handleUpdateRoute(route.id, 'volunteers', 1);
-                                handleUpdateRoute(route.id, 'perPerson', billAttached.detectedAmount || 0);
-                              }}
-                              className="text-[10px] font-bold bg-[#fb7800] text-white px-2 py-0.5 rounded cursor-pointer"
-                            >
-                              Sync to Bill (₹{billAttached.detectedAmount})
-                            </button>
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -839,100 +836,121 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             {/* 2. FOOD TAB */}
             {activeTab === 'Food' && (
               <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[20px] text-[#002869]">restaurant</span>
-                  <h3 className="text-[15px] font-bold text-[#002869]">Food</h3>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white">Volunteer & Team Meals</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Record food and refreshments provided during session execution.</p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {(['breakfast', 'lunch', 'dinner', 'refreshments'] as const).map((mealKey) => {
-                    const mealItem = food[mealKey];
-                    const mealTitles: Record<keyof FoodState, string> = {
-                      breakfast: 'Breakfast',
-                      lunch: 'Lunch',
-                      dinner: 'Dinner',
-                      refreshments: 'Refreshments',
-                    };
-                    const title = mealTitles[mealKey];
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(
+                    [
+                      { key: 'breakfast', title: 'Breakfast' },
+                      { key: 'lunch', title: 'Lunch' },
+                      { key: 'dinner', title: 'Dinner' },
+                      { key: 'refreshments', title: 'Refreshments & Tea' },
+                    ] as const
+                  ).map(({ key, title }) => {
+                    const mealItem = food[key];
 
                     return (
                       <div
-                        key={mealKey}
-                        className="p-4 border border-[#c4c6d3]/80 rounded-md bg-white shadow-xs space-y-3"
+                        key={key}
+                        className="p-4 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-theme-xs space-y-3"
                       >
-                        <h4 className="text-[14px] font-bold text-[#1a1b21]">{title}</h4>
+                        <div className="flex items-center justify-between pb-1.5 border-b border-gray-100 dark:border-gray-800">
+                          <h4 className="text-xs font-bold text-gray-900 dark:text-white">{title}</h4>
+                          <span className="text-xs font-mono font-bold text-brand-500">
+                            ₹{(mealItem.amount || 0).toLocaleString()}
+                          </span>
+                        </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-[#434652] mb-1">
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                             Amount (₹)
                           </label>
                           <input
                             type="number"
                             min="0"
-                            value={mealItem.amount}
+                            value={mealItem.amount || ''}
+                            placeholder="0"
                             onChange={(e) =>
                               setFood((prev) => ({
                                 ...prev,
-                                [mealKey]: {
-                                  ...prev[mealKey],
+                                [key]: {
+                                  ...prev[key],
                                   amount: parseFloat(e.target.value) || 0,
                                 },
                               }))
                             }
-                            className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] font-bold text-[#002869] focus:outline-none focus:border-[#002869]"
+                            className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                           />
                         </div>
 
-                        {/* Bill Actions */}
-                        <div className="flex flex-wrap items-center gap-2 pt-1">
-                          <label className="flex items-center gap-1.5 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] rounded-md text-[12px] font-bold hover:bg-[#f4f3fb] transition-colors cursor-pointer">
-                            <span className="material-symbols-outlined text-[16px]">upload</span>
-                            <span>Upload Bill</span>
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                            Remarks / Details
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. 15 meal packets"
+                            value={mealItem.remarks}
+                            onChange={(e) =>
+                              setFood((prev) => ({
+                                ...prev,
+                                [key]: { ...prev[key], remarks: e.target.value },
+                              }))
+                            }
+                            className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
+                          />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-100 dark:border-gray-800">
+                          <label className="flex-1 flex items-center justify-center gap-1.5 px-2.5 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-semibold cursor-pointer">
+                            <Upload className="h-3.5 w-3.5" />
+                            <span>Upload</span>
                             <input
                               type="file"
                               accept="image/*,application/pdf"
                               className="hidden"
                               onChange={(e) =>
-                                handleDirectFileUpload(
-                                  e,
-                                  'food',
-                                  undefined,
-                                  mealKey,
-                                  mealItem.amount
-                                )
+                                handleDirectFileUpload(e, 'food', undefined, key, mealItem.amount)
                               }
                             />
                           </label>
 
                           <button
+                            type="button"
                             onClick={() =>
                               setScannerTarget({
                                 type: 'food',
-                                foodKey: mealKey,
+                                foodKey: key,
                                 label: `Food: ${title}`,
                                 expectedAmount: mealItem.amount,
                               })
                             }
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-white rounded-md text-[12px] font-bold hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
+                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
                           >
-                            <span className="material-symbols-outlined text-[16px]">photo_camera</span>
+                            <Camera className="h-3.5 w-3.5" />
                             <span>Scan Bill</span>
                           </button>
 
                           {mealItem.bill && (
-                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] border border-[#137333]/30 rounded-md text-[11px] font-bold text-[#137333]">
-                              <span className="material-symbols-outlined text-[16px]">verified</span>
-                              <span className="truncate max-w-[100px]">{mealItem.bill.fileName}</span>
+                            <div className="w-full flex items-center justify-between px-2 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                              <div className="flex items-center gap-1 truncate">
+                                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                                <span className="truncate">{mealItem.bill.fileName}</span>
+                              </div>
                               <button
+                                type="button"
                                 onClick={() =>
                                   setFood((prev) => ({
                                     ...prev,
-                                    [mealKey]: { ...prev[mealKey], bill: null },
+                                    [key]: { ...prev[key], bill: null },
                                   }))
                                 }
-                                className="text-[#ba1a1a] hover:bg-[#ffdad6] p-0.5 rounded"
+                                className="text-error-500 hover:bg-error-50 p-0.5 rounded cursor-pointer shrink-0 ml-1"
                               >
-                                <span className="material-symbols-outlined text-[12px]">close</span>
+                                <X className="h-3 w-3" />
                               </button>
                             </div>
                           )}
@@ -947,37 +965,38 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             {/* 3. STATIONERY TAB */}
             {activeTab === 'Stationery' && (
               <div className="space-y-4">
-                <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-[20px] text-[#002869]">edit_note</span>
-                  <h3 className="text-[15px] font-bold text-[#002869]">Stationery</h3>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white">Classroom Stationery</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Materials, pens, chart papers, activity worksheets, student notebooks.</p>
                 </div>
 
-                <div className="p-5 border border-[#c4c6d3]/80 rounded-md bg-white shadow-xs space-y-4 max-w-lg">
+                <div className="p-4 sm:p-5 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-theme-xs space-y-3.5 max-w-xl">
                   <div>
-                    <label className="block text-[11px] font-bold text-[#434652] mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                       Amount (₹)
                     </label>
                     <input
                       type="number"
                       min="0"
-                      value={stationery.amount}
+                      value={stationery.amount || ''}
+                      placeholder="0"
                       onChange={(e) =>
                         setStationery((prev) => ({
                           ...prev,
                           amount: parseFloat(e.target.value) || 0,
                         }))
                       }
-                      className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[14px] font-bold text-[#002869] focus:outline-none focus:border-[#002869]"
+                      className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-sm font-bold text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-bold text-[#434652] mb-1">
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                       Remarks / Description
                     </label>
                     <input
                       type="text"
-                      placeholder="e.g. Chart papers, pens, notebooks"
+                      placeholder="e.g. Chart papers, sketch pens, student activity sheets"
                       value={stationery.remarks}
                       onChange={(e) =>
                         setStationery((prev) => ({
@@ -985,31 +1004,26 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                           remarks: e.target.value,
                         }))
                       }
-                      className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                      className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                     />
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    <label className="flex items-center gap-1.5 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] rounded-md text-[12px] font-bold hover:bg-[#f4f3fb] transition-colors cursor-pointer">
-                      <span className="material-symbols-outlined text-[16px]">upload</span>
+                  <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-gray-100 dark:border-gray-800">
+                    <label className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-semibold cursor-pointer">
+                      <Upload className="h-3.5 w-3.5" />
                       <span>Upload Bill</span>
                       <input
                         type="file"
                         accept="image/*,application/pdf"
                         className="hidden"
                         onChange={(e) =>
-                          handleDirectFileUpload(
-                            e,
-                            'stationery',
-                            undefined,
-                            undefined,
-                            stationery.amount
-                          )
+                          handleDirectFileUpload(e, 'stationery', undefined, undefined, stationery.amount)
                         }
                       />
                     </label>
 
                     <button
+                      type="button"
                       onClick={() =>
                         setScannerTarget({
                           type: 'stationery',
@@ -1017,21 +1031,24 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                           expectedAmount: stationery.amount,
                         })
                       }
-                      className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-white rounded-md text-[12px] font-bold hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
+                      className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
                     >
-                      <span className="material-symbols-outlined text-[16px]">photo_camera</span>
+                      <Camera className="h-3.5 w-3.5" />
                       <span>Scan Bill</span>
                     </button>
 
                     {stationery.bill && (
-                      <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] border border-[#137333]/30 rounded-md text-[11px] font-bold text-[#137333]">
-                        <span className="material-symbols-outlined text-[16px]">verified</span>
-                        <span className="truncate max-w-[120px]">{stationery.bill.fileName}</span>
+                      <div className="w-full flex items-center justify-between px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                        <div className="flex items-center gap-1.5 truncate">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate">{stationery.bill.fileName}</span>
+                        </div>
                         <button
+                          type="button"
                           onClick={() => setStationery((prev) => ({ ...prev, bill: null }))}
-                          className="text-[#ba1a1a] hover:bg-[#ffdad6] p-0.5 rounded"
+                          className="text-error-500 hover:bg-error-50 p-0.5 rounded cursor-pointer shrink-0 ml-1"
                         >
-                          <span className="material-symbols-outlined text-[12px]">close</span>
+                          <X className="h-3 w-3" />
                         </button>
                       </div>
                     )}
@@ -1044,49 +1061,51 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             {activeTab === 'Other' && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-[20px] text-[#002869]">category</span>
-                    <h3 className="text-[15px] font-bold text-[#002869]">Other</h3>
+                  <div>
+                    <h3 className="text-sm font-bold text-gray-900 dark:text-white">Other Expenses</h3>
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400">Banners, mic/sound rental, stage setups, or incidentals.</p>
                   </div>
                   <button
+                    type="button"
                     onClick={handleAddOther}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] text-[12px] font-bold rounded-md hover:bg-[#f4f3fb] transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-brand-50 hover:bg-brand-100 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400 text-xs font-semibold rounded-xl border border-brand-200 dark:border-brand-500/20 transition cursor-pointer"
                   >
-                    <span className="material-symbols-outlined text-[16px]">add</span>
-                    Add Other
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add Expense</span>
                   </button>
                 </div>
 
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {otherItems.map((item) => (
                     <div
                       key={item.id}
-                      className="p-4 sm:p-5 border border-[#c4c6d3]/80 rounded-md bg-white shadow-xs space-y-3"
+                      className="p-4 sm:p-5 border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-gray-900 shadow-theme-xs space-y-3"
                     >
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div>
-                          <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                            Description
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                            Description *
                           </label>
                           <input
                             type="text"
-                            placeholder="e.g. Banner, Stage setup, Audio rental"
+                            placeholder="e.g. Flex Banner for Event"
                             value={item.description}
                             onChange={(e) =>
                               handleUpdateOther(item.id, 'description', e.target.value)
                             }
-                            className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
+                            className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                           />
                         </div>
 
                         <div>
-                          <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                            Amount (₹)
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
+                            Amount (₹) *
                           </label>
                           <input
                             type="number"
                             min="0"
-                            value={item.amount}
+                            value={item.amount || ''}
+                            placeholder="0"
                             onChange={(e) =>
                               handleUpdateOther(
                                 item.id,
@@ -1094,81 +1113,69 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                                 parseFloat(e.target.value) || 0
                               )
                             }
-                            className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] font-bold text-[#002869] focus:outline-none focus:border-[#002869]"
+                            className="w-full h-10 sm:h-9 px-3 bg-transparent border border-gray-300 rounded-xl text-xs font-bold text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
                           />
                         </div>
                       </div>
 
-                      <div>
-                        <label className="block text-[11px] font-bold text-[#434652] mb-1">
-                          Remarks
-                        </label>
-                        <input
-                          type="text"
-                          placeholder="Optional"
-                          value={item.remarks}
-                          onChange={(e) => handleUpdateOther(item.id, 'remarks', e.target.value)}
-                          className="w-full px-3 py-2 bg-white border border-[#c4c6d3] rounded-md text-[13px] focus:outline-none focus:border-[#002869]"
-                        />
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <label className="flex items-center gap-1.5 px-3 py-1.5 border border-[#c4c6d3] hover:border-[#002869] text-[#002869] rounded-md text-[12px] font-bold hover:bg-[#f4f3fb] transition-colors cursor-pointer">
-                            <span className="material-symbols-outlined text-[16px]">upload</span>
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-gray-100 dark:border-gray-800">
+                        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                          <label className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-2 bg-gray-50 hover:bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 rounded-xl text-xs font-semibold cursor-pointer">
+                            <Upload className="h-3.5 w-3.5" />
                             <span>Upload Bill</span>
                             <input
                               type="file"
                               accept="image/*,application/pdf"
                               className="hidden"
                               onChange={(e) =>
-                                handleDirectFileUpload(
-                                  e,
-                                  'other',
-                                  item.id,
-                                  undefined,
-                                  item.amount
-                                )
+                                handleDirectFileUpload(e, 'other', item.id, undefined, item.amount)
                               }
                             />
                           </label>
 
                           <button
+                            type="button"
                             onClick={() =>
                               setScannerTarget({
                                 type: 'other',
                                 id: item.id,
-                                label: `Other: ${item.description || 'Item'}`,
+                                label: `Other: ${item.description || 'Expense'}`,
                                 expectedAmount: item.amount,
                               })
                             }
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-[#fb7800] text-white rounded-md text-[12px] font-bold hover:bg-[#fb7800]/90 transition-all shadow-xs cursor-pointer"
+                            className="flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3.5 py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
                           >
-                            <span className="material-symbols-outlined text-[16px]">photo_camera</span>
+                            <Camera className="h-3.5 w-3.5" />
                             <span>Scan Bill</span>
                           </button>
+                        </div>
 
+                        <div className="flex items-center justify-between w-full sm:w-auto gap-2">
                           {item.bill && (
-                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] border border-[#137333]/30 rounded-md text-[11px] font-bold text-[#137333]">
-                              <span className="material-symbols-outlined text-[16px]">verified</span>
+                            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/40 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                              <CheckCircle2 className="h-3.5 w-3.5" />
                               <span className="truncate max-w-[120px]">{item.bill.fileName}</span>
                               <button
+                                type="button"
                                 onClick={() => handleUpdateOther(item.id, 'bill', null)}
-                                className="text-[#ba1a1a] hover:bg-[#ffdad6] p-0.5 rounded"
+                                className="text-error-500 hover:bg-error-50 p-0.5 rounded cursor-pointer ml-1"
                               >
-                                <span className="material-symbols-outlined text-[12px]">close</span>
+                                <X className="h-3 w-3" />
                               </button>
                             </div>
                           )}
-                        </div>
 
-                        <button
-                          onClick={() => handleRemoveOther(item.id)}
-                          className="flex items-center gap-1 text-[#ba1a1a] hover:text-[#93000a] text-[12px] font-bold hover:underline cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">delete</span>
-                          Remove
-                        </button>
+                          {otherItems.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveOther(item.id)}
+                              className="flex items-center gap-1 text-xs font-semibold text-error-600 dark:text-error-400 hover:bg-error-50 dark:hover:bg-error-500/10 px-2.5 py-1.5 rounded-xl transition cursor-pointer ml-auto"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span>Remove</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -1176,177 +1183,391 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
               </div>
             )}
 
-            {/* 5. PREVIEW TAB (Live TQI Statement Preview) */}
+            {/* 5. FORMAT PREVIEW TAB */}
             {activeTab === 'Preview' && (
               <div className="space-y-4">
-                <div className="bg-[#faf8ff] p-3 rounded-md border border-[#c4c6d3] flex items-center justify-between text-[12px]">
-                  <span className="font-bold text-[#002869] flex items-center gap-1.5">
-                    <span className="material-symbols-outlined text-[18px]">verified</span>
-                    Live TQI Statement Preview — {sessionDay}
-                  </span>
-                  <span className="text-[11px] font-bold text-[#592600] bg-[#ffdbc8] px-2 py-0.5 rounded">
-                    Draft Preview
-                  </span>
+                <div>
+                  <h3 className="text-sm font-bold text-gray-900 dark:text-white">TQI Finance Voucher Summary</h3>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Preview generated expense sheet before official submission.</p>
                 </div>
 
-                {/* Formatted Mini Sheet */}
-                <div className="border border-[#c4c6d3] rounded-md overflow-hidden bg-white text-[12px]">
-                  {/* Meta Bar */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 divide-x divide-y sm:divide-y-0 divide-[#c4c6d3] bg-[#faf8ff] border-b border-[#c4c6d3]">
-                    <div className="p-2">
-                      <span className="text-[9px] font-bold text-[#747783] uppercase block">COLLEGE</span>
-                      <span className="font-bold text-[#000000] truncate block">{collegeName}</span>
+                {/* MOBILE PREVIEW SUMMARY CARDS (Visible on mobile screens < 768px) */}
+                <div className="block md:hidden space-y-3">
+                  {/* Session Overview Banner */}
+                  <div className="p-4 rounded-2xl bg-brand-50/70 dark:bg-brand-500/10 border border-brand-200 dark:border-brand-500/20 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-brand-600 dark:text-brand-400 block">
+                        {sessionDay} &middot; {sessionDate}
+                      </span>
+                      <span className="text-xs font-bold text-gray-900 dark:text-white">
+                        {clusterName}
+                      </span>
                     </div>
-                    <div className="p-2">
-                      <span className="text-[9px] font-bold text-[#747783] uppercase block">CLUSTER</span>
-                      <span className="font-bold text-[#000000]">{clusterName}</span>
-                    </div>
-                    <div className="p-2">
-                      <span className="text-[9px] font-bold text-[#747783] uppercase block">SESSION / DAY</span>
-                      <span className="font-bold text-[#000000]">{sessionDay}</span>
-                    </div>
-                    <div className="p-2">
-                      <span className="text-[9px] font-bold text-[#747783] uppercase block">DATE</span>
-                      <span className="font-bold text-[#000000]">{sessionDate}</span>
+                    <div className="text-right">
+                      <span className="text-[10px] text-gray-500 dark:text-gray-400 block">Total Voucher</span>
+                      <span className="font-mono text-base font-bold text-brand-600 dark:text-brand-400">
+                        ₹{grandTotal.toLocaleString()}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Table */}
+                  {/* Travel Item Cards */}
+                  {routes.map((r, idx) => {
+                    const total = (r.volunteers || 0) * (r.perPerson || 0);
+                    return (
+                      <div key={r.id} className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-mono text-gray-400">#{idx + 1}</span>
+                            <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-brand-50 text-brand-600 dark:bg-brand-500/15 dark:text-brand-400">
+                              Travel
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs font-bold text-brand-600 dark:text-brand-400">
+                            ₹{total.toLocaleString()}
+                          </span>
+                        </div>
+
+                        <div>
+                          <p className="text-xs font-bold text-gray-900 dark:text-white">
+                            {r.from || 'Origin'} → {r.to || 'Destination'}
+                          </p>
+                          {r.volunteers && r.perPerson ? (
+                            <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
+                              Formula: {r.volunteers} vols × ₹{r.perPerson}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                          <span className="text-gray-500 dark:text-gray-400 truncate max-w-[170px]">{r.remarks || 'Volunteer travel'}</span>
+                          {r.bill ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                              <CheckCircle2 className="h-3 w-3" /> Attached
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-[10.5px]">No bill</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Food Item Cards */}
+                  {food.breakfast.amount > 0 && (
+                    <div className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono text-gray-400">#{routes.length + 1}</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                            Food
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                          ₹{food.breakfast.amount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">
+                        Breakfast {food.breakfast.remarks ? `(${food.breakfast.remarks})` : ''}
+                      </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Breakfast meals</span>
+                        {food.breakfast.bill ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="h-3 w-3" /> Attached
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10.5px]">No bill</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {food.lunch.amount > 0 && (
+                    <div className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono text-gray-400">#{routes.length + 2}</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                            Food
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                          ₹{food.lunch.amount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">
+                        Lunch {food.lunch.remarks ? `(${food.lunch.remarks})` : ''}
+                      </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Lunch meals</span>
+                        {food.lunch.bill ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="h-3 w-3" /> Attached
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10.5px]">No bill</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {food.dinner.amount > 0 && (
+                    <div className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono text-gray-400">#{routes.length + 3}</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                            Food
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                          ₹{food.dinner.amount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">
+                        Dinner {food.dinner.remarks ? `(${food.dinner.remarks})` : ''}
+                      </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Dinner meals</span>
+                        {food.dinner.bill ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="h-3 w-3" /> Attached
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10.5px]">No bill</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {food.refreshments.amount > 0 && (
+                    <div className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono text-gray-400">#{routes.length + 4}</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-amber-50 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                            Food
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                          ₹{food.refreshments.amount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">
+                        Refreshments & Tea {food.refreshments.remarks ? `(${food.refreshments.remarks})` : ''}
+                      </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Snacks & Tea</span>
+                        {food.refreshments.bill ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="h-3 w-3" /> Attached
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10.5px]">No bill</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stationery Item Card */}
+                  {stationery.amount > 0 && (
+                    <div className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-mono text-gray-400">#{routes.length + 5}</span>
+                          <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400">
+                            Stationery
+                          </span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                          ₹{stationery.amount.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-xs font-bold text-gray-900 dark:text-white">
+                        {stationery.remarks || 'Classroom Materials & Notebooks'}
+                      </p>
+                      <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                        <span className="text-gray-500 dark:text-gray-400">Student kits</span>
+                        {stationery.bill ? (
+                          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                            <CheckCircle2 className="h-3 w-3" /> Attached
+                          </span>
+                        ) : (
+                          <span className="text-gray-400 text-[10.5px]">No bill</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Other Item Cards */}
+                  {otherItems.map((item, oIdx) => {
+                    if (!item.amount && !item.description) return null;
+                    return (
+                      <div key={item.id} className="p-3.5 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 shadow-theme-xs space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-[11px] font-mono text-gray-400">#{routes.length + 6 + oIdx}</span>
+                            <span className="inline-block px-2 py-0.5 rounded-md text-[10.5px] font-bold bg-purple-50 text-purple-700 dark:bg-purple-500/15 dark:text-purple-400">
+                              Other
+                            </span>
+                          </div>
+                          <span className="font-mono text-xs font-bold text-gray-900 dark:text-white">
+                            ₹{item.amount.toLocaleString()}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-gray-900 dark:text-white">
+                          {item.description || 'Miscellaneous'}
+                        </p>
+                        <div className="flex items-center justify-between pt-1.5 border-t border-gray-100 dark:border-gray-800 text-[11px]">
+                          <span className="text-gray-500 dark:text-gray-400 truncate max-w-[170px]">{item.remarks || 'Other expense'}</span>
+                          {item.bill ? (
+                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                              <CheckCircle2 className="h-3 w-3" /> Attached
+                            </span>
+                          ) : (
+                            <span className="text-gray-400 text-[10.5px]">No bill</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* DESKTOP PREVIEW TABLE (Visible on desktop >= 768px) */}
+                <div className="hidden md:block overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 shadow-theme-xs">
                   <div className="overflow-x-auto">
-                    <table className="w-full text-left text-[11.5px] border-collapse">
-                      <thead className="bg-[#faf8ff] border-b border-[#c4c6d3] font-bold text-[#000000]">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-gray-50 dark:bg-white/[0.02] border-b border-gray-200 dark:border-gray-800 font-semibold text-gray-600 dark:text-gray-300">
                         <tr>
-                          <th className="p-2 border-r border-[#c4c6d3] w-10">S.No</th>
-                          <th className="p-2 border-r border-[#c4c6d3] w-20">Category</th>
-                          <th className="p-2 border-r border-[#c4c6d3]">Description</th>
-                          <th className="p-2 border-r border-[#c4c6d3] text-center w-16">Count</th>
-                          <th className="p-2 border-r border-[#c4c6d3] text-center w-20">Count×Amt</th>
-                          <th className="p-2 border-r border-[#c4c6d3] text-right w-20">Total</th>
-                          <th className="p-2 text-center w-16">Bill</th>
+                          <th className="p-3 w-12 text-center">#</th>
+                          <th className="p-3">Category</th>
+                          <th className="p-3">Description</th>
+                          <th className="p-3 text-center">Count</th>
+                          <th className="p-3 text-center">Formula</th>
+                          <th className="p-3 text-right">Total</th>
+                          <th className="p-3 text-center">Bill</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-[#c4c6d3]">
-                        {/* Routes */}
+                      <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                        {/* Travel Routes */}
                         {routes.map((r, idx) => {
                           const total = (r.volunteers || 0) * (r.perPerson || 0);
                           return (
-                            <tr key={r.id} className="hover:bg-[#faf8ff]">
-                              <td className="p-2 border-r border-[#c4c6d3] font-mono">{idx + 1}</td>
-                              <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#002869]">Travel</td>
-                              <td className="p-2 border-r border-[#c4c6d3]">
+                            <tr key={r.id} className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                              <td className="p-3 text-center text-gray-400 font-mono">{idx + 1}</td>
+                              <td className="p-3 font-semibold text-brand-500">Travel</td>
+                              <td className="p-3 text-gray-800 dark:text-gray-200">
                                 {r.from || 'Origin'} → {r.to || 'Destination'}
                               </td>
-                              <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">{r.volunteers || '—'}</td>
-                              <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">
-                                {r.volunteers && r.perPerson ? `${r.volunteers}×${r.perPerson}` : '—'}
+                              <td className="p-3 text-center font-mono text-gray-600 dark:text-gray-400">{r.volunteers || '—'}</td>
+                              <td className="p-3 text-center font-mono text-gray-600 dark:text-gray-400">
+                                {r.volunteers && r.perPerson ? `${r.volunteers}×₹${r.perPerson}` : '—'}
                               </td>
-                              <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                              <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                                 ₹{total.toLocaleString()}
                               </td>
-                              <td className="p-2 text-center">
+                              <td className="p-3 text-center">
                                 {r.bill ? (
-                                  <span className="text-[#137333] font-bold text-[10px]">Attached</span>
+                                  <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold text-[11px]">
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Attached
+                                  </span>
                                 ) : (
-                                  <span className="text-[#747783]">—</span>
+                                  <span className="text-gray-400 text-xs">—</span>
                                 )}
                               </td>
                             </tr>
                           );
                         })}
 
-                        {/* Food items */}
+                        {/* Food */}
                         {food.breakfast.amount > 0 && (
-                          <tr className="hover:bg-[#faf8ff]">
-                            <td className="p-2 border-r border-[#c4c6d3] font-mono">{routes.length + 1}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#592600]">Food</td>
-                            <td className="p-2 border-r border-[#c4c6d3]">Breakfast {food.breakfast.remarks ? `(${food.breakfast.remarks})` : ''}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                          <tr className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                            <td className="p-3 text-center text-gray-400 font-mono">{routes.length + 1}</td>
+                            <td className="p-3 font-semibold text-warning-600">Food</td>
+                            <td className="p-3 text-gray-800 dark:text-gray-200">Breakfast {food.breakfast.remarks ? `(${food.breakfast.remarks})` : ''}</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                               ₹{food.breakfast.amount.toLocaleString()}
                             </td>
-                            <td className="p-2 text-center">
-                              {food.breakfast.bill ? <span className="text-[#137333] font-bold text-[10px]">Attached</span> : '—'}
+                            <td className="p-3 text-center">
+                              {food.breakfast.bill ? <span className="text-emerald-600 font-semibold text-[11px]">Attached</span> : '—'}
                             </td>
                           </tr>
                         )}
-
                         {food.lunch.amount > 0 && (
-                          <tr className="hover:bg-[#faf8ff]">
-                            <td className="p-2 border-r border-[#c4c6d3] font-mono">{routes.length + 2}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#592600]">Food</td>
-                            <td className="p-2 border-r border-[#c4c6d3]">Lunch {food.lunch.remarks ? `(${food.lunch.remarks})` : ''}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                          <tr className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                            <td className="p-3 text-center text-gray-400 font-mono">{routes.length + 2}</td>
+                            <td className="p-3 font-semibold text-warning-600">Food</td>
+                            <td className="p-3 text-gray-800 dark:text-gray-200">Lunch {food.lunch.remarks ? `(${food.lunch.remarks})` : ''}</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                               ₹{food.lunch.amount.toLocaleString()}
                             </td>
-                            <td className="p-2 text-center">
-                              {food.lunch.bill ? <span className="text-[#137333] font-bold text-[10px]">Attached</span> : '—'}
+                            <td className="p-3 text-center">
+                              {food.lunch.bill ? <span className="text-emerald-600 font-semibold text-[11px]">Attached</span> : '—'}
                             </td>
                           </tr>
                         )}
-
                         {food.dinner.amount > 0 && (
-                          <tr className="hover:bg-[#faf8ff]">
-                            <td className="p-2 border-r border-[#c4c6d3] font-mono">{routes.length + 3}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#592600]">Food</td>
-                            <td className="p-2 border-r border-[#c4c6d3]">Dinner</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                          <tr className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                            <td className="p-3 text-center text-gray-400 font-mono">{routes.length + 3}</td>
+                            <td className="p-3 font-semibold text-warning-600">Food</td>
+                            <td className="p-3 text-gray-800 dark:text-gray-200">Dinner</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                               ₹{food.dinner.amount.toLocaleString()}
                             </td>
-                            <td className="p-2 text-center">
-                              {food.dinner.bill ? <span className="text-[#137333] font-bold text-[10px]">Attached</span> : '—'}
+                            <td className="p-3 text-center">
+                              {food.dinner.bill ? <span className="text-emerald-600 font-semibold text-[11px]">Attached</span> : '—'}
                             </td>
                           </tr>
                         )}
-
                         {food.refreshments.amount > 0 && (
-                          <tr className="hover:bg-[#faf8ff]">
-                            <td className="p-2 border-r border-[#c4c6d3] font-mono">{routes.length + 4}</td>
-                            <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#592600]">Food</td>
-                            <td className="p-2 border-r border-[#c4c6d3]">Refreshments & Tea</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                          <tr className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                            <td className="p-3 text-center text-gray-400 font-mono">{routes.length + 4}</td>
+                            <td className="p-3 font-semibold text-warning-600">Food</td>
+                            <td className="p-3 text-gray-800 dark:text-gray-200">Refreshments & Tea</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                               ₹{food.refreshments.amount.toLocaleString()}
                             </td>
-                            <td className="p-2 text-center">
-                              {food.refreshments.bill ? <span className="text-[#137333] font-bold text-[10px]">Attached</span> : '—'}
+                            <td className="p-3 text-center">
+                              {food.refreshments.bill ? <span className="text-emerald-600 font-semibold text-[11px]">Attached</span> : '—'}
                             </td>
                           </tr>
                         )}
 
                         {/* Stationery */}
                         {stationery.amount > 0 && (
-                          <tr className="hover:bg-[#faf8ff]">
-                            <td className="p-2 border-r border-[#c4c6d3] font-mono">
-                              {routes.length + 5}
-                            </td>
-                            <td className="p-2 border-r border-[#c4c6d3] font-semibold text-[#002869]">Stationery</td>
-                            <td className="p-2 border-r border-[#c4c6d3]">Materials & Notebooks</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-center font-mono">—</td>
-                            <td className="p-2 border-r border-[#c4c6d3] text-right font-mono font-medium">
+                          <tr className="hover:bg-gray-50/60 dark:hover:bg-white/[0.02]">
+                            <td className="p-3 text-center text-gray-400 font-mono">{routes.length + 5}</td>
+                            <td className="p-3 font-semibold text-brand-500">Stationery</td>
+                            <td className="p-3 text-gray-800 dark:text-gray-200">{stationery.remarks || 'Classroom Materials'}</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-center text-gray-400 font-mono">—</td>
+                            <td className="p-3 text-right font-mono font-bold text-gray-900 dark:text-white">
                               ₹{stationery.amount.toLocaleString()}
                             </td>
-                            <td className="p-2 text-center">
-                              {stationery.bill ? <span className="text-[#137333] font-bold text-[10px]">Attached</span> : '—'}
+                            <td className="p-3 text-center">
+                              {stationery.bill ? <span className="text-emerald-600 font-semibold text-[11px]">Attached</span> : '—'}
                             </td>
                           </tr>
                         )}
 
                         {/* Grand Total Strip */}
-                        <tr className="bg-[#dae2ff] font-extrabold text-[#001947]">
-                          <td colSpan={5} className="p-2 border-r border-[#c4c6d3] text-right text-[12px]">
+                        <tr className="bg-brand-50/70 dark:bg-brand-500/10 font-bold text-gray-900 dark:text-white">
+                          <td colSpan={5} className="p-3 text-right text-xs">
                             Grand Total ({sessionDay})
                           </td>
-                          <td className="p-2 border-r border-[#c4c6d3] text-right font-mono text-[13px]">
+                          <td className="p-3 text-right font-mono text-sm text-brand-600 dark:text-brand-400">
                             ₹{grandTotal.toLocaleString()}
                           </td>
-                          <td className="p-2 bg-[#dae2ff]"></td>
+                          <td className="p-3"></td>
                         </tr>
                       </tbody>
                     </table>
@@ -1356,33 +1577,31 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             )}
           </div>
 
-          {/* Grand Total Strip & Footer Action Buttons */}
-          <div className="px-6 py-3.5 bg-[#f4f3fb] border-t border-[#c4c6d3] flex flex-col sm:flex-row items-center justify-between gap-3">
-            <div className="text-[15px] font-bold text-[#002869]">
-              Grand Total :{' '}
-              <span className="font-mono text-[18px] text-[#002869]">₹{grandTotal.toLocaleString()}</span>
+          {/* Grand Total Strip & Mobile Sticky Bottom Actions */}
+          <div className="px-4 sm:px-6 py-3 bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
+            <div className="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white w-full sm:w-auto justify-between sm:justify-start">
+              <span className="text-xs text-gray-500 dark:text-gray-400">Grand Total:</span>
+              <span className="font-mono text-base sm:text-lg font-bold text-brand-500 bg-brand-50 dark:bg-brand-500/15 px-2.5 py-1 rounded-xl">
+                ₹{grandTotal.toLocaleString()}
+              </span>
             </div>
 
-            <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
               <button
-                onClick={onClose}
-                className="px-4 py-2 border border-[#c4c6d3] bg-white text-[#434652] hover:bg-[#faf8ff] rounded-md text-[13px] font-bold transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
+                type="button"
                 onClick={() => handleSubmit(true)}
-                className="px-4 py-2 border border-[#002869] text-[#002869] bg-white hover:bg-[#f4f3fb] rounded-md text-[13px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 border border-brand-500/40 text-brand-600 bg-brand-50/50 hover:bg-brand-50 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20 transition-colors cursor-pointer shadow-theme-xs"
               >
-                <span className="material-symbols-outlined text-[18px]">save</span>
-                Save Draft
+                <Save className="h-3.5 w-3.5" />
+                <span>Save Draft</span>
               </button>
               <button
+                type="button"
                 onClick={() => handleSubmit(false)}
-                className="px-5 py-2 bg-[#002869] text-white hover:bg-[#002869]/90 rounded-md text-[13px] font-bold flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[18px]">send</span>
-                Submit Finance
+                <Send className="h-3.5 w-3.5" />
+                <span>Submit Finance</span>
               </button>
             </div>
           </div>
@@ -1409,5 +1628,3 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     </>
   );
 };
-
-

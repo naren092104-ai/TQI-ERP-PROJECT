@@ -1,5 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { ApprovalItem, TabType, Cluster } from '../types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
+import { Search, CheckCircle2, AlertCircle, XCircle, Clock, Eye, Check, RefreshCw } from 'lucide-react';
+import { ActionButton } from './ui/action-button';
+import { Badge } from './ui/badge';
 
 interface ApprovalCenterViewProps {
   approvals: ApprovalItem[];
@@ -214,50 +224,60 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-3 py-1">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
           {/* Cluster Filter */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Cluster:</span>
-            <select
-              value={selectedClusterFilter}
-              onChange={(e) => setSelectedClusterFilter(e.target.value)}
-              className="bg-transparent border border-border/60 rounded px-2 py-1 text-xs text-foreground focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Clusters (Tamil Nadu)</option>
-              {clusters.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+            <span className="font-semibold text-xs">Cluster:</span>
+            <div className="w-56">
+              <Select
+                value={selectedClusterFilter || "all"}
+                onValueChange={(val) => setSelectedClusterFilter(val)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="All Clusters" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clusters (Tamil Nadu)</SelectItem>
+                  {clusters.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
           {/* Status Filter */}
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <span>Status:</span>
-            <select
-              value={selectedStatusFilter}
-              onChange={(e) => setSelectedStatusFilter(e.target.value)}
-              className="bg-transparent border border-border/60 rounded px-2 py-1 text-xs text-foreground focus:outline-none cursor-pointer"
-            >
-              <option value="all">All Statuses</option>
-              <option value="Pending">Pending Review</option>
-              <option value="Approved">Approved</option>
-              <option value="Correction Requested">Correction Requested</option>
-              <option value="Rejected">Rejected</option>
-            </select>
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+            <span className="font-semibold text-xs">Status:</span>
+            <div className="w-44">
+              <Select
+                value={selectedStatusFilter || "all"}
+                onValueChange={(val) => setSelectedStatusFilter(val)}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue placeholder="All Statuses" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  <SelectItem value="Pending">Pending Review</SelectItem>
+                  <SelectItem value="Approved">Approved</SelectItem>
+                  <SelectItem value="Correction Requested">Correction Requested</SelectItem>
+                  <SelectItem value="Rejected">Rejected</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
 
         {/* Search Box */}
         <div className="relative min-w-[220px]">
-          <span className="material-symbols-outlined absolute left-2.5 top-1.5 text-[16px] text-muted-foreground">
-            search
-          </span>
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
           <input
             type="text"
             placeholder="Search submissions..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-transparent border border-border/60 rounded pl-8 pr-3 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none"
+            className="w-full rounded-xl border border-gray-200 bg-white pl-8 pr-3 py-1.5 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
           />
         </div>
       </div>
@@ -372,7 +392,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
 
       {/* DETAILED REVIEW & APPROVAL MODAL */}
       {reviewItem && (
-        <div className="fixed inset-0 z-50 bg-black/50  flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[99999] bg-gray-900/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-2xl shadow-sm overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
             <div className="bg-[#002869] text-white p-4 flex items-center justify-between">

@@ -1,0 +1,100 @@
+import fs from 'fs';
+import path from 'path';
+import bcrypt from 'bcryptjs';
+import { pool, initializeDatabase } from '../db/connection.js';
+
+async function runCleanReset() {
+  try {
+    console.log('[CLEAN-RESET] Connecting to database...');
+    await initializeDatabase();
+
+    // 1. Run migrations to ensure all latest tables exist
+    console.log('[CLEAN-RESET] Ensuring all migrations are applied...');
+    const migrationDir = path.resolve(process.cwd(), 'database', 'migrations');
+    if (fs.existsSync(migrationDir)) {
+      const files = fs.readdirSync(migrationDir).filter(f => f.endsWith('.sql')).sort();
+      for (const file of files) {
+        const filePath = path.join(migrationDir, file);
+        const sql = fs.readFileSync(filePath, 'utf8');
+        const statements = sql.split(';').map(s => s.trim()).filter(Boolean);
+        for (const stmt of statements) {
+          try {
+            await pool.query(stmt);
+          } catch (e: any) {
+            // ignore benign duplicate errors
+          }
+        }
+      }
+      console.log(`[CLEAN-RESET] Applied ${files.length} migrations.`);
+    }
+
+    // 2. Truncate ALL tables
+    console.log('[CLEAN-RESET] Disabling foreign keys and truncating all operational tables...');
+    await pool.query('SET FOREIGN_KEY_CHECKS = 0');
+
+    const tables = [
+      'audit_logs',
+      'auth_otps',
+      'student_attendance',
+      'volunteer_attendance',
+      'attendance_sessions',
+      'correction_requests',
+      'approvals',
+      'finance_drafts',
+      'finance_entries',
+      'notifications',
+      'session_photos',
+      'session_reports',
+      'date_change_requests',
+      'session_submissions',
+      'lesson_plans',
+      'sessions',
+      'students',
+      'volunteers',
+      'villages',
+      'panchayats',
+      'clusters',
+      'users',
+      'academic_setup',
+      'academic_years',
+      'module_resources',
+      'modules',
+    ];
+
+    for (const table of tables) {
+      try {
+        await pool.query(`TRUNCATE TABLE \`${table}\``);
+        console.log(`[CLEAN-RESET] Truncated: ${table}`);
+      } catch (err: any) {
+        console.log(`[CLEAN-RESET] Notice on ${table}: ${err.message}`);
+      }
+    }
+
+    await pool.query('SET FOREIGN_KEY_CHECKS = 1');
+
+    // 3. Seed ONLY default Super Admin
+    const passwordHash = await bcrypt.hash('admin123', 10);
+    console.log('[CLEAN-RESET] Seeding ONLY Super Admin...');
+    await pool.query(
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES
+       ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
+       ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
+       ('usr-admin-gmail', 'Super Admin', 'admin@gmail.com', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
+       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), must_change_password = FALSE, status = 'ACTIVE'`,
+      [passwordHash, passwordHash, passwordHash],
+    );
+
+    console.log('\n======================================================');
+    console.log('✅ CLEAN DATABASE RESET COMPLETED');
+    console.log('------------------------------------------------------');
+    console.log('All tables wiped. Only Super Admin preserved.');
+    console.log('Login: admin / admin123 (or admin@tqi.org / admin123)');
+    console.log('======================================================\n');
+    process.exit(0);
+  } catch (error: any) {
+    console.error('❌ Clean reset failed:', error);
+    process.exit(1);
+  }
+}
+
+runCleanReset();
