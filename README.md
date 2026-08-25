@@ -1,70 +1,151 @@
-# TQI Cluster Admin
+# Talent Quest for India (TQI) &middot; Academic ERP
 
-TQI is built with a decoupled architecture featuring a **Vite + React (TypeScript) frontend** (ready for Cloudflare Pages deployment) and an **Express + MySQL REST API backend** (running on Port 5000 with CORS and migration automation).
+A modern, enterprise-grade Enterprise Resource Planning (ERP) platform designed for rural education operations, field mentorship coordination, attendance tracking, and multi-tier governance across Tamil Nadu panchayats and village centres.
 
-## Structure
+---
 
-- `frontend/`: Standalone React/Vite application, Cloudflare Pages build target (`frontend/dist/`).
-- `backend/`: Express REST API server, MySQL connection pool, database migrations runner, and email service.
-- `database/migrations/`: Authoritative MySQL migrations (001 through 011).
-- `storage/uploads/`: Uploaded photos and runtime files.
-- `docs/`: Architecture documentation and system metadata.
+## 🌟 Architecture & Tech Stack
 
-## Environment Configuration
+The platform is engineered with a decoupled, high-performance architecture:
 
-### 1. Root Backend Environment (`.env`)
+- **Frontend**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4, styled using the modern **TailAdmin** design system with full dark/light theme support.
+- **Backend**: Express.js REST API with TypeScript, MySQL 8.x connection pooling, automated database migration engine, and JWT-based authentication with Role-Based Access Control (RBAC).
+- **OCR & Intelligence**: Tesseract.js / Google GenAI for automated receipt & expense verification.
+- **Reporting & Export**: jsPDF, html2canvas, and XLSX for automated PDF & Excel semester reporting.
+
+---
+
+## 📁 Repository Structure
+
+```text
+├── backend/                  # Express REST API Server
+│   ├── src/
+│   │   ├── controllers/      # Route controllers (Auth, Students, Sessions, Finance, etc.)
+│   │   ├── middleware/       # JWT auth & RBAC validation middleware
+│   │   ├── routes/           # REST API routes
+│   │   ├── utils/            # Migration runner, db pool, email service
+│   │   └── server.ts         # Application entry point
+│   ├── tsconfig.json
+│   └── .env.example
+├── frontend/                 # React 19 + TypeScript Client (TailAdmin UI)
+│   ├── src/
+│   │   ├── components/       # UI Views (Dashboard, Attendance, Finance, Approvals, etc.)
+│   │   │   └── ui/           # TailAdmin design system primitives (Card, Badge, Table, Modal)
+│   │   ├── context/          # SidebarContext & ThemeProvider
+│   │   ├── types.ts          # TypeScript domain interfaces
+│   │   └── index.css         # TailAdmin design tokens & Outfit typography
+│   ├── vite.config.ts
+│   └── .env.example
+├── database/
+│   └── migrations/           # Versioned MySQL migration scripts (001_initial_schema.sql, etc.)
+├── storage/
+│   └── uploads/              # Runtime uploads directory (photos, bills, documents)
+├── package.json              # Monorepo root scripts
+└── README.md
+```
+
+---
+
+## ⚙️ Environment Configuration
+
+### 1. Backend Environment Setup (`backend/.env` or root `.env`)
+
+Create a `.env` file in `backend/` or the project root based on `.env.example`:
+
 ```env
+# Server Port
 PORT=5000
+
+# MySQL Database Configuration
 DB_HOST=localhost
 DB_PORT=3306
-DB_NAME=quest
+DB_NAME=TQI_ERP
 DB_USER=root
-DB_PASSWORD=your-mysql-password
-JWT_SECRET=replace-with-a-secret
+DB_PASSWORD=your_mysql_password
+
+# Authentication & Security
+JWT_SECRET=your_secure_jwt_secret_key
 UPLOADS_DIR=storage/uploads
+
+# SMTP Configuration (Optional: Used for Email OTP login)
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=narendhardan@gmail.com
-SMTP_PASS=bzvm qsix ikoe gxti
-SMTP_FROM=narendhardan@gmail.com
+SMTP_USER=your_email@example.com
+SMTP_PASS=your_app_password
+SMTP_FROM=noreply@tqierp.org
 ```
 
-### 2. Frontend Environment (`frontend/.env`)
+### 2. Frontend Environment Setup (`frontend/.env`)
+
 ```env
-# Local development against Port 5000 backend:
+# Local development against backend:
 VITE_API_URL=http://localhost:5000/api
 
-# For Cloudflare Pages production deployment:
-# VITE_API_URL=https://api.your-backend-domain.org/api
+# For production deployment:
+# VITE_API_URL=https://api.yourdomain.org/api
 ```
 
-## Running Locally
+---
+
+## 🚀 Getting Started
+
+### 1. Prerequisites
+- **Node.js**: v18.x or higher
+- **MySQL Server**: v8.0 or higher
+
+### 2. Installation
 
 ```bash
-# 1. Install dependencies
+# Clone the repository
+git clone https://github.com/Mithunp123/TQI_ERP.git
+cd TQI_ERP
+
+# Install dependencies for the entire project
 npm install
-
-# 2. Run both backend (port 5000) and frontend (port 5173) in parallel:
-npm run dev
-
-# Or run separately:
-npm run dev:backend   # Express API server at http://localhost:5000
-npm run dev:frontend  # Vite app at http://localhost:5173
 ```
 
-On server boot, the backend automatically connects to MySQL, creates the database (`quest`) if it does not exist, and executes any pending migrations in `database/migrations/`.
+### 3. Running in Development Mode
 
-## Building & Deploying to Cloudflare Pages
+Run both the backend (Port 5000) and frontend (Port 5173) concurrently:
 
-- **Cloudflare Pages Build Command**: `npm run build:frontend` (or `vite build --config frontend/vite.config.ts`)
-- **Cloudflare Pages Output Directory**: `frontend/dist`
-- **Environment Variable on Cloudflare**: Set `VITE_API_URL` to your production backend API URL.
+```bash
+npm run dev
+```
 
-## Verification Commands
+Or run backend and frontend in separate terminals:
 
-- `npm run lint` checks TypeScript across frontend and backend.
-- `npm run build` compiles both the frontend (`frontend/dist`) and backend (`backend/dist/server.cjs`).
-- `npm start` runs the bundled production backend.
+```bash
+npm run dev:backend   # Express API server at http://localhost:5000
+npm run dev:frontend  # Vite React App at http://localhost:5173
+```
 
+> **Note**: On startup, the backend automatically initializes the MySQL database schema and applies any pending migrations from `database/migrations/`.
 
-# TQI_ERP
+---
+
+## 🛠️ Build & Verification Scripts
+
+| Command | Description |
+| :--- | :--- |
+| `npm run dev` | Runs both backend and frontend concurrently in development mode |
+| `npm run build` | Compiles both frontend (`frontend/dist`) and backend (`backend/dist/server.cjs`) |
+| `npm run build:frontend` | Builds production frontend bundle |
+| `npm run build:backend` | Bundles Node.js backend using esbuild |
+| `npm run lint` | Runs TypeScript typechecks across both frontend and backend |
+| `npm run lint:frontend` | Typechecks frontend source code |
+| `npm run lint:backend` | Typechecks backend source code |
+| `npm start` | Runs the compiled production server (`backend/dist/server.cjs`) |
+
+---
+
+## 🛡️ Security & Access Control
+
+- **Role-Based Access Control (RBAC)**: Supports `Super Admin`, `State Lead`, `Cluster Admin`, `Finance Team`, `Auditor`, and `Volunteer` roles.
+- **JWT Authentication**: Secure stateless tokens with support for both Email OTP and password sign-in.
+- **Data Protection**: Sensitive environment variables are excluded from version control via `.gitignore`.
+
+---
+
+## 📄 License
+
+&copy; 2026 Talent Quest for India Trust. All rights reserved.
