@@ -173,7 +173,7 @@ const runSqlFiles = async () => {
       try {
         await pool.query(statement);
       } catch (error: any) {
-        if (!['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME'].includes(error?.code)) {
+        if (!['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY', 'ER_KEY_COLUMN_DOES_NOT_EXITS', 'ER_DUP_ENTRY'].includes(error?.code)) {
           console.warn(`[DB MIGRATION WARNING] in ${file}:`, error.message);
         }
       }
