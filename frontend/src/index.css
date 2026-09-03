@@ -166,14 +166,93 @@
     0px 8px 16px -6px rgba(14, 17, 24, 0.05);
   --shadow-focus-ring: 0px 0px 0px 4px color-mix(in srgb, var(--color-brand, #1717B8) 12%, transparent);
 
+  /* =========================================================
+     SEMANTIC BRIDGE  —  the single source of truth
+     -----------------------------------------------------------
+     Every `--color-*` name below is an alias onto a semantic
+     token declared in `:root` and overridden in `.dark`.
+
+     This block does two jobs at once:
+       1. It resolves the ~130 `var(--color-*)` references used
+          by the plain-CSS component layer (.card, .btn-*,
+          .badge-*, .tqi-table, .field-input, .modal, .drawer…).
+       2. It generates the matching Tailwind v4 utilities
+          (bg-card, text-foreground, bg-popover, border-input…)
+          so the React primitives and the CSS layer draw from
+          the same palette instead of diverging.
+
+     Because the alias value is itself a `var()`, it resolves in
+     the *consuming element's* context — so anything under `.dark`
+     automatically picks up the dark value. Add a token here and
+     it becomes available to both layers at once; never hardcode
+     a hex in a component again.
+     ========================================================= */
+
+  /* Surfaces */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
-  --color-primary: var(--primary);
-  --color-border: var(--border);
+  --color-surface: var(--surface);
+  --color-surface-white: var(--surface-white);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-tint: var(--surface-tint);
+  --color-popover: var(--card);
+  --color-popover-foreground: var(--card-foreground);
+
+  /* Text */
+  --color-text: var(--text);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-placeholder: var(--text-placeholder);
+  --color-text-on-brand: var(--text-on-brand);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+
+  /* Borders */
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-subtle: var(--border-subtle);
+  --color-input: var(--border-strong);
+  --color-ring: var(--brand);
+
+  /* Brand — navy "q" */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-light: var(--brand-light);
+  --color-brand-xlight: var(--brand-xlight);
+  --color-brand-ring: var(--brand-ring);
+  --color-accent: var(--brand-teal);
+
+  /* Brand accents — teal ring, orange "t" */
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-light: var(--brand-teal-light);
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-orange-light: var(--brand-orange-light);
+  --color-teal-bg: var(--teal-bg);
+  --color-teal-border: var(--teal-border);
+
+  /* Status — success / warning / error / info */
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-success-border: var(--success-border);
+  --color-success-fg: var(--success-fg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-warning-border: var(--warning-border);
+  --color-warning-fg: var(--warning-fg);
+  --color-error: var(--error);
+  --color-error-bg: var(--error-bg);
+  --color-error-border: var(--error-border);
+  --color-destructive: var(--error);
+  --color-destructive-foreground: #ffffff;
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-border: var(--info-border);
+  --color-draft-bg: var(--draft-bg);
+  --color-draft-text: var(--draft-text);
 }
 
 /* ============================================================
@@ -213,6 +292,10 @@
   --brand-xlight: #E5E7F2;
   --brand-ring: color-mix(in srgb, #1717B8 12%, transparent);
   --brand-teal: #008C8C;
+  /* `--accent` is the generic name components reach for when they
+     want "the second brand colour"; it must exist or any
+     color-mix() using it collapses and the whole gradient drops. */
+  --accent: var(--brand-teal);
   --brand-teal-light: #E6F5F5;
   --brand-orange: #FF5500;
   --brand-orange-light: #FFE0CC;
@@ -239,6 +322,15 @@
   --muted: #EEF0F3;
   --muted-foreground: #5F6573;
 
+  /* Admin shell geometry — the sidebar width and the content
+     offset MUST come from the same token, or the two drift apart
+     and leave a dead gap beside the sidebar. */
+  --sidebar-w: 290px;
+  --sidebar-w-collapsed: 82px;
+  /* Matches the height the floating header island was built around
+     (it previously relied on its own inline `64px` fallback). */
+  --header-h: 64px;
+
   /* Radii */
   --radius-xs: 6px;
   --radius-sm: 8px;
@@ -254,6 +346,17 @@
   --shadow-lg: 0 16px 24px -8px rgba(14, 17, 24, 0.10), 0 4px 8px -4px rgba(14, 17, 24, 0.04);
   --shadow-xl: 0 24px 40px -12px rgba(14, 17, 24, 0.14), 0 8px 16px -6px rgba(14, 17, 24, 0.05);
   --shadow-brand: 0 8px 24px -8px color-mix(in srgb, #1717B8 35%, transparent);
+
+  /* Toast — deliberately an inverted surface so it reads as an
+     overlay rather than another card. Flipped under `.dark`. */
+  --toast-bg: #1A1F2A;
+  --toast-fg: #F6F7F9;
+  --toast-success-bg: #103906;
+  --toast-success-fg: #CFEB9C;
+  --toast-error-bg: #4A1610;
+  --toast-error-fg: #FECDCA;
+  --toast-info-bg: #0C0C66;
+  --toast-info-fg: #C5C9E2;
 }
 
 .dark {
@@ -316,6 +419,17 @@
   --shadow-lg: 0 16px 24px -8px rgba(0, 0, 0, 0.55);
   --shadow-xl: 0 24px 40px -12px rgba(0, 0, 0, 0.6);
   --shadow-brand: 0 8px 24px -8px color-mix(in srgb, #5B5BEF 45%, transparent);
+
+  /* In dark mode the inversion runs the other way: the toast lifts
+     off the near-black page instead of sinking into it. */
+  --toast-bg: #E1E4E9;
+  --toast-fg: #0E1118;
+  --toast-success-bg: #CFEB9C;
+  --toast-success-fg: #103906;
+  --toast-error-bg: #FECDCA;
+  --toast-error-fg: #6F2017;
+  --toast-info-bg: #C5C9E2;
+  --toast-info-fg: #0C0C66;
 }
 
 @layer base {
@@ -787,9 +901,10 @@
   background: var(--brand);
 }
 
-/* Soft brand-tinted surface for empty states */
+/* Soft brand-tinted surface for empty states — flat fill, not a fade.
+   A gradient on an empty state reads as a loading shimmer. */
 .tqi-tint {
-  background: linear-gradient(180deg, var(--surface-tint) 0%, transparent 100%);
+  background: var(--surface);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-lg);
   color: var(--text-muted);
@@ -1243,8 +1358,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   align-items: center;
   gap: 0.625rem;
   padding: 0.75rem 1rem;
-  background: #1f2937;
-  color: #f9fafb;
+  background: var(--toast-bg);
+  color: var(--toast-fg);
   border-radius: var(--radius-lg);
   font-size: 0.8125rem;
   font-weight: 500;
@@ -1252,9 +1367,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-
   max-width: 380px;
   animation: toast-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
-.toast-success { background: #052e16; color: #dcfce7; }
-.toast-error   { background: #450a0a; color: #fee2e2; }
-.toast-info    { background: #1e1b4b; color: #e0e7ff; }
+.toast-success { background: var(--toast-success-bg); color: var(--toast-success-fg); }
+.toast-error   { background: var(--toast-error-bg);   color: var(--toast-error-fg); }
+.toast-info    { background: var(--toast-info-bg);    color: var(--toast-info-fg); }
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(10px) scale(0.97); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1546,6 +1661,10 @@ html, body {
   --dur-instant: 120ms;
   --dur-fast: 200ms;
   --dur-base: 320ms;
+  /* `--dur-medium` is what the sidebar, drawer and bottom-sheet
+     transitions ask for; without it those animations had no
+     duration and snapped instantly. */
+  --dur-medium: 480ms;
   --dur-slow: 520ms;
   --dur-cinematic: 800ms;
 }
@@ -2467,6 +2586,24 @@ kbd.tqi-kbd {
   --login-ink: #0d1220;
   --login-muted: #5b6478;
   --login-border: #dfe2ea;
+  --login-field: #ffffff;
+  --login-field-active: #ffffff;
+}
+
+/* The cobalt stage keeps its own colour in both themes — it is a
+   brand surface, always dark-on-dark. The form side, however, is a
+   normal app surface, so its ink/muted/border/field values have to
+   follow the theme or the login card renders near-black text on a
+   near-black card. */
+.dark {
+  --cobalt: #5B6BFF;
+  --cobalt-dark: #4453E6;
+  --cobalt-deep: #2E3ACC;
+  --login-ink: var(--text);
+  --login-muted: var(--text-muted);
+  --login-border: var(--border);
+  --login-field: var(--card);
+  --login-field-active: var(--surface-hover);
 }
 
 .tqi-login-shell {
@@ -2720,7 +2857,7 @@ kbd.tqi-kbd {
   padding: 0 0.875rem;
   font-size: 0.875rem;
   font-weight: 500;
-  background: #fff;
+  background: var(--login-field);
   color: var(--login-ink);
   border: 1px solid var(--login-border);
   border-radius: 10px;
@@ -2839,7 +2976,7 @@ kbd.tqi-kbd {
   gap: 0.35rem;
 }
 .tqi-login-method-btn[data-active="true"] {
-  background: #fff;
+  background: var(--login-field-active);
   color: var(--login-ink);
   box-shadow: 0 1px 2px rgba(14, 17, 24, 0.06), 0 0 0 1px var(--border);
 }
@@ -2870,7 +3007,7 @@ kbd.tqi-kbd {
   line-height: 1.1;
 }
 .tqi-login-role:hover {
-  background: #fff;
+  background: var(--login-field-active);
   color: var(--login-ink);
   border-color: var(--border-strong);
 }

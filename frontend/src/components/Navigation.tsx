@@ -156,7 +156,7 @@ export const Navigation: React.FC<NavigationProps> = ({
       <aside
         className={`fixed top-0 left-0 z-40 flex flex-col h-dvh border-r select-none ${
           isMobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'
-        } ${isCollapsed ? 'lg:w-[82px]' : 'w-[290px] sm:w-[300px]'}`}
+        } ${isCollapsed ? 'lg:w-[var(--sidebar-w-collapsed)]' : 'w-[var(--sidebar-w)]'}`}
         style={{
           background:
             'color-mix(in srgb, var(--card) 92%, transparent)',

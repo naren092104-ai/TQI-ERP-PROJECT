@@ -5,10 +5,7 @@ import {
   ShieldCheck,
   Users,
   GraduationCap,
-  FileText,
   ChevronRight,
-  CheckCircle2,
-  Clock,
 } from './icons';
 import { TabType } from '../../types';
 
@@ -43,14 +40,6 @@ const kindIcon: Record<ActivityKind, React.ComponentType<{ className?: string }>
   session: Users,
 };
 
-const kindAvatarClass: Record<ActivityKind, string> = {
-  attendance: '',
-  finance: 'tqi-avatar-orange',
-  approval: 'tqi-avatar-success',
-  enrolment: 'tqi-avatar-teal',
-  session: '',
-};
-
 const statusChipClass: Record<ActivityItem['status'], string> = {
   success: 'tqi-chip tqi-chip-success',
   pending: 'tqi-chip tqi-chip-warning',
@@ -77,19 +66,14 @@ const initials = (name: string) =>
 export const ActivityFeed: React.FC<ActivityFeedProps> = ({
   items,
   onItemClick,
+  emptyLabel,
   className,
 }) => {
   if (items.length === 0) {
     return (
-      <div className="tqi-empty">
-        <div className="tqi-empty-illustration">
-          <CheckCircle2 className="h-7 w-7" />
-        </div>
-        <p className="tqi-empty-title">You're all caught up</p>
-        <p className="tqi-empty-body">
-          New activity from your team will surface here in real time.
-        </p>
-      </div>
+      <p className="py-8 text-center text-sm text-text-muted">
+        {emptyLabel ?? 'No activity yet.'}
+      </p>
     );
   }
 
@@ -97,7 +81,6 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
     <ul className={`tqi-stagger flex flex-col gap-0.5 ${className ?? ''}`}>
       {items.slice(0, 8).map((item) => {
         const Icon = kindIcon[item.kind];
-        const avatarClass = kindAvatarClass[item.kind];
         return (
           <li key={item.id}>
             <button
@@ -105,7 +88,12 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
               onClick={() => onItemClick?.(item)}
               className="tqi-activity-item w-full text-left"
             >
-              <span className={`tqi-avatar ${avatarClass}`}>
+              {/* Flat muted square, not a per-kind gradient chip. The icon
+                  helps you scan a mixed feed; its colour said nothing. */}
+              <span
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg"
+                style={{ background: 'var(--surface-hover)', color: 'var(--text-muted)' }}
+              >
                 <Icon className="h-4 w-4" />
               </span>
               <div className="tqi-activity-body">
@@ -114,23 +102,12 @@ export const ActivityFeed: React.FC<ActivityFeedProps> = ({
                   <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>
                     {item.actor}
                   </span>
-                  <span>·</span>
-                  <Clock className="h-3 w-3" />
+                  <span>&middot;</span>
                   <span>{item.timestamp}</span>
                 </div>
               </div>
+              {/* Status keeps its colour — this one is real state. */}
               <span className={statusChipClass[item.status]}>
-                <span
-                  className="tqi-chip-dot"
-                  style={{
-                    background:
-                      item.status === 'success'
-                        ? 'var(--success)'
-                        : item.status === 'pending' || item.status === 'warning'
-                        ? 'var(--warning)'
-                        : 'var(--brand)',
-                  }}
-                />
                 {statusLabel[item.status]}
               </span>
               {item.tab && (

@@ -555,34 +555,34 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
         </div>
 
       {/* LESSON PLAN TABLE */}
-      <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-theme-xs overflow-hidden">
         <div className="overflow-x-auto">
           <table className="tqi-table-compact w-full text-left border-collapse text-xs">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                <th className="py-2.5 px-3.5">Date &amp; Module</th>
-                <th className="py-2.5 px-3.5">Topic &amp; Learning Objective</th>
-                <th className="py-2.5 px-3.5">Panchayat &amp; Village</th>
-                <th className="py-2.5 px-3.5">Volunteer</th>
-                <th className="py-2.5 px-3.5">Status</th>
-                <th className="py-2.5 px-3.5 text-right">Actions</th>
+              <tr className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-semibold uppercase tracking-wider text-[11px]">
+                <th className="py-3 px-4">Date &amp; Module</th>
+                <th className="py-3 px-4">Topic &amp; Learning Objective</th>
+                <th className="py-3 px-4">Panchayat &amp; Village</th>
+                <th className="py-3 px-4">Volunteer</th>
+                <th className="py-3 px-4">Status</th>
+                <th className="py-3 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
+            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
               {filteredPlans.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-500">
+                  <td colSpan={6} className="py-12 text-center text-gray-500 dark:text-gray-400">
                     <div className="flex flex-col items-center justify-center gap-2">
-                      <span className="material-symbols-outlined text-[32px] text-slate-300">
+                      <span className="material-symbols-outlined text-[36px] text-gray-300 dark:text-gray-600">
                         menu_book
                       </span>
-                      <p className="font-semibold text-sm text-slate-700">No lesson plans found</p>
-                      <p className="text-xs text-slate-500 max-w-sm">
+                      <p className="font-semibold text-sm text-gray-800 dark:text-gray-200">No lesson plans found</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 max-w-sm">
                         Try adjusting your filters or create a new lesson plan.
                       </p>
                       <button
                         onClick={handleClearFilters}
-                        className="mt-1 px-3 py-1 text-xs font-semibold text-[#0B3D91] bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+                        className="mt-2 px-3.5 py-1.5 text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-brand-950/40 dark:text-brand-400 rounded-xl hover:bg-brand-100 dark:hover:bg-brand-900/40 transition"
                       >
                         Reset Filters
                       </button>
@@ -596,15 +596,15 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                   return (
                     <tr
                       key={plan.id}
-                      className={`hover:bg-slate-50/80 transition-colors group ${
-                        isCorrectionReq ? 'bg-amber-50/30' : ''
+                      className={`hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors group ${
+                        isCorrectionReq ? 'bg-amber-50/30 dark:bg-amber-950/20' : ''
                       }`}
                     >
                       {/* Date & Module */}
-                      <td className="py-3 px-3.5 whitespace-nowrap">
-                        <div className="font-bold text-slate-900">{plan.date || '28 Aug 2026'}</div>
-                        <div className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                          <span className="font-mono text-slate-600 bg-slate-100 px-1 py-0.2 rounded text-[10px]">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
+                        <div className="font-bold text-gray-900 dark:text-white">{plan.date || '28 Aug 2026'}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 flex items-center gap-1 mt-0.5">
+                          <span className="font-mono text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-[10px]">
                             {plan.moduleId || 'M-103'}
                           </span>
                           <span>•</span>
@@ -613,25 +613,25 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                       </td>
 
                       {/* Topic & Objective */}
-                      <td className="py-3 px-3.5 max-w-xs">
-                        <div className="font-semibold text-slate-900 group-hover:text-[#0B3D91] transition-colors">
+                      <td className="py-3.5 px-4 max-w-xs">
+                        <div className="font-semibold text-gray-900 dark:text-white group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors">
                           {getPlanTopic(plan)}
                         </div>
-                        <div className="text-[11px] text-slate-500 line-clamp-1 mt-0.5">
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">
                           {plan.objective || plan.description || 'Core curriculum learning objective'}
                         </div>
                       </td>
 
                       {/* Panchayat & Village */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-medium text-slate-800">{plan.panchayatName || 'Vedakkattamaduvu'}</div>
-                        <div className="text-[11px] text-slate-500">{plan.villageName || 'Ammapettai'}</div>
+                      <td className="py-3.5 px-4">
+                        <div className="font-medium text-gray-800 dark:text-gray-200">{plan.panchayatName || 'Vedakkattamaduvu'}</div>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400">{plan.villageName || 'Ammapettai'}</div>
                       </td>
 
                       {/* Volunteer */}
-                      <td className="py-3 px-3.5">
-                        <div className="font-medium text-slate-900 flex items-center gap-1.5">
-                          <div className="w-5 h-5 rounded-full bg-[#0B3D91]/10 text-[#0B3D91] text-[10px] font-bold flex items-center justify-center">
+                      <td className="py-3.5 px-4">
+                        <div className="font-medium text-gray-900 dark:text-white flex items-center gap-1.5">
+                          <div className="w-6 h-6 rounded-full bg-brand-500/10 text-brand-500 dark:bg-brand-500/20 dark:text-brand-400 text-[10px] font-bold flex items-center justify-center">
                             {(plan.volunteerName || 'B').charAt(0)}
                           </div>
                           <span>{plan.volunteerName || 'Bala'}</span>
@@ -639,16 +639,16 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                       </td>
 
                       {/* Status */}
-                      <td className="py-3 px-3.5 whitespace-nowrap">
+                      <td className="py-3.5 px-4 whitespace-nowrap">
                         {renderStatusBadge(plan.status)}
                       </td>
 
                       {/* Actions */}
-                      <td className="py-3 px-3.5 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end gap-1">
+                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => setActivePlanDetail(plan)}
-                            className="px-2.5 py-1 bg-white border border-slate-300 text-slate-700 hover:text-[#0B3D91] hover:bg-slate-50 rounded text-xs font-semibold shadow-2xs transition-colors cursor-pointer"
+                            className="px-3 py-1.5 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:text-brand-500 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-xl text-xs font-semibold shadow-theme-xs transition cursor-pointer"
                           >
                             View Plan
                           </button>
@@ -657,7 +657,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                           {plan.status === 'Submitted' || plan.status === 'Resubmitted' ? (
                             <button
                               onClick={() => handleApprovePlan(plan.id)}
-                              className="px-2 py-1 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded text-xs font-semibold transition-colors cursor-pointer"
+                              className="px-2.5 py-1.5 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 rounded-xl text-xs font-semibold transition cursor-pointer"
                               title="Approve Lesson Plan"
                             >
                               Approve
@@ -666,7 +666,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
                           <button
                             onClick={() => handleOpenEditModal(plan)}
-                            className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors cursor-pointer"
+                            className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition cursor-pointer"
                             title="Edit Lesson Plan"
                           >
                             <span className="material-symbols-outlined text-[16px]">edit</span>

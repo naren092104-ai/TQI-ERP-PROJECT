@@ -46,6 +46,7 @@ import { SettingsView } from './components/SettingsView';
 import { ModuleLibraryView } from './components/ModuleLibraryView';
 import { AcademicSetupView } from './components/AcademicSetupView';
 import { Header } from './components/Header';
+import { AdminLayout } from './components/layout/AdminLayout';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import DateChangeRequestView from './components/DateChangeRequestView';
 import SessionReportView from './components/SessionReportView';
@@ -1194,9 +1195,21 @@ export default function App() {
   const activeClusterName = currentUserRole === 'Super Admin' ? 'All Clusters (Tamil Nadu)' : (currentClusterObj?.name || 'Dharmapuri Cluster');
 
   return (
-    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-gray-50 dark:bg-gray-950 font-outfit">
-      {/* Navigation (fixed sidebar on desktop, slide-in drawer on mobile) */}
-      <Navigation
+    <AdminLayout
+      sidebarCollapsed={sidebarCollapsed}
+      overlays={
+        <CommandPalette
+          open={paletteOpen}
+          onClose={() => setPaletteOpen(false)}
+          onNavigate={(tab) => {
+            handleNavigate(tab);
+            setPaletteOpen(false);
+          }}
+          currentUserRole={currentUserRole}
+        />
+      }
+      sidebar={
+        <Navigation
         currentTab={currentTab}
         onSelectTab={(tab) => {
           if (tab === 'attendance') setActiveDraftId(undefined);
@@ -1215,15 +1228,9 @@ export default function App() {
         onLogout={handleLogout}
         isMobileOpen={mobileSidebarOpen}
         onCloseMobile={() => setMobileSidebarOpen(false)}
-      />
-
-      {/* Main content with offset for fixed sidebar on desktop */}
-      <div
-        className={`flex-1 flex flex-col min-w-0 transition-all duration-300 ease-in-out ${
-          sidebarCollapsed ? 'lg:ml-[90px]' : 'lg:ml-[290px]'
-        }`}
-      >
-        {/* TailAdmin Top Header */}
+        />
+      }
+      header={
         <Header
           userEmail={currentUser.email}
           userName={currentUser.name}
@@ -1247,10 +1254,9 @@ export default function App() {
             }
           }}
         />
-
-        <main className="flex-1 w-full max-w-full overflow-x-hidden">
-          <div className="w-full p-4 md:p-6 lg:p-8">
-            <ErrorBoundary key={`${currentTab}-${currentUserRole}`}>
+      }
+    >
+      <ErrorBoundary key={`${currentTab}-${currentUserRole}`}>
 
               {currentTab === 'dashboard' && (
                 <DashboardView
@@ -1550,21 +1556,7 @@ export default function App() {
                 />
               )}
             </ErrorBoundary>
-          </div>
-        </main>
-      </div>
-
-      {/* Command palette — overlay above everything */}
-      <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        onNavigate={(tab) => {
-          handleNavigate(tab);
-          setPaletteOpen(false);
-        }}
-        currentUserRole={currentUserRole}
-      />
-    </div>
+    </AdminLayout>
   );
 }
 

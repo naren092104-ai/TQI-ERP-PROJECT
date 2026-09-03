@@ -280,100 +280,100 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       </div>
 
       {/* REPORT TYPE SELECTOR (Clean Tabs) */}
-      <div className="bg-white border border-slate-200 rounded-md p-1.5 shadow-xs flex flex-wrap gap-1">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-1.5 shadow-theme-xs flex flex-wrap gap-1.5">
         <button
           onClick={() => setReportType('session')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
             reportType === 'session'
-              ? 'bg-[#0B3D91] text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              ? 'bg-brand-500 text-white shadow-theme-xs'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
           }`}
         >
-          <span className="material-symbols-outlined text-[16px]">event_note</span>
+          <span className="material-symbols-outlined text-[18px]">event_note</span>
           Session Reports
         </button>
 
         <button
           onClick={() => setReportType('lesson-plan')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
             reportType === 'lesson-plan'
-              ? 'bg-[#0B3D91] text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              ? 'bg-brand-500 text-white shadow-theme-xs'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
           }`}
         >
-          <span className="material-symbols-outlined text-[16px]">menu_book</span>
+          <span className="material-symbols-outlined text-[18px]">menu_book</span>
           Lesson Plan Reports
         </button>
 
         <button
           onClick={() => setReportType('student-attendance')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
             reportType === 'student-attendance'
-              ? 'bg-[#0B3D91] text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              ? 'bg-brand-500 text-white shadow-theme-xs'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
           }`}
         >
-          <span className="material-symbols-outlined text-[16px]">groups</span>
+          <span className="material-symbols-outlined text-[18px]">groups</span>
           Student Attendance
         </button>
 
         <button
           onClick={() => setReportType('volunteer-attendance')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2 rounded-md text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer ${
+          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
             reportType === 'volunteer-attendance'
-              ? 'bg-[#0B3D91] text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              ? 'bg-brand-500 text-white shadow-theme-xs'
+              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
           }`}
         >
-          <span className="material-symbols-outlined text-[16px]">badge</span>
+          <span className="material-symbols-outlined text-[18px]">badge</span>
           Volunteer Attendance
         </button>
       </div>
 
       {/* FILTER & DATE CONTROLS */}
-      <div className="bg-white border border-slate-200 rounded-md p-3.5 shadow-xs space-y-3">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs space-y-4">
         {/* Preset Buttons */}
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-100 dark:border-gray-800 pb-3">
+          <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
             Time Range Preset:
           </span>
           <div className="flex items-center gap-1.5">
             <button
               onClick={() => handlePresetChange('all')}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-xl transition cursor-pointer ${
                 dateRangePreset === 'all'
-                  ? 'bg-slate-800 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-gray-900 text-white dark:bg-brand-500 dark:text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
               }`}
             >
               All Time
             </button>
             <button
               onClick={() => handlePresetChange('this-week')}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-xl transition cursor-pointer ${
                 dateRangePreset === 'this-week'
-                  ? 'bg-slate-800 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-gray-900 text-white dark:bg-brand-500 dark:text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
               }`}
             >
               This Week
             </button>
             <button
               onClick={() => handlePresetChange('this-month')}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-xl transition cursor-pointer ${
                 dateRangePreset === 'this-month'
-                  ? 'bg-slate-800 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-gray-900 text-white dark:bg-brand-500 dark:text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
               }`}
             >
               This Month
             </button>
             <button
               onClick={() => handlePresetChange('last-month')}
-              className={`px-2.5 py-1 text-xs font-medium rounded transition-colors cursor-pointer ${
+              className={`px-3 py-1.5 text-xs font-medium rounded-xl transition cursor-pointer ${
                 dateRangePreset === 'last-month'
-                  ? 'bg-slate-800 text-white'
-                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  ? 'bg-gray-900 text-white dark:bg-brand-500 dark:text-white'
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
               }`}
             >
               Last Month
@@ -382,9 +382,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         </div>
 
         {/* Filter Inputs Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
           <div>
-            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
               Panchayat
             </label>
             <Select
@@ -394,7 +394,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                 setSelectedVillage('all');
               }}
             >
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-9 text-xs rounded-xl border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
                 <SelectValue placeholder="All Panchayats" />
               </SelectTrigger>
               <SelectContent>
@@ -409,14 +409,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
               Village Center
             </label>
             <Select
               value={selectedVillage || "all"}
               onValueChange={(val) => setSelectedVillage(val)}
             >
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-9 text-xs rounded-xl border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
                 <SelectValue placeholder="All Villages" />
               </SelectTrigger>
               <SelectContent>
@@ -431,14 +431,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
               Volunteer
             </label>
             <Select
               value={selectedVolunteer || "all"}
               onValueChange={(val) => setSelectedVolunteer(val)}
             >
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-9 text-xs rounded-xl border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
                 <SelectValue placeholder="All Volunteers" />
               </SelectTrigger>
               <SelectContent>
@@ -453,14 +453,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-gray-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
               Status Filter
             </label>
             <Select
               value={selectedStatus || "all"}
               onValueChange={(val) => setSelectedStatus(val)}
             >
-              <SelectTrigger className="h-8 text-xs">
+              <SelectTrigger className="h-9 text-xs rounded-xl border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 dark:text-white">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
               <SelectContent>
@@ -474,7 +474,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           </div>
 
           <div>
-            <label className="block text-[10px] font-semibold text-slate-500 uppercase mb-0.5">
+            <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
               Search Keyword
             </label>
             <input
@@ -482,7 +482,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               placeholder="Topic, village..."
-              className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
+              className="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500 focus:outline-none focus:border-brand-500 transition"
             />
           </div>
         </div>
@@ -491,25 +491,25 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       {/* REPORT SUMMARY KPI STATS (Relevant to selected report) */}
       {reportType === 'session' && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Filtered Sessions</div>
-            <div className="text-xl font-bold text-slate-900 mt-0.5">{filteredSessions.length}</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Filtered Sessions</div>
+            <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{filteredSessions.length}</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Completed</div>
-            <div className="text-xl font-bold text-emerald-700 mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Completed</div>
+            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
               {filteredSessions.filter((s) => s.status === 'Completed').length}
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Scheduled Active</div>
-            <div className="text-xl font-bold text-blue-700 mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Scheduled Active</div>
+            <div className="text-xl font-bold text-brand-500 dark:text-brand-400 mt-1">
               {filteredSessions.filter((s) => s.status === 'Scheduled').length}
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Total Students Reached</div>
-            <div className="text-xl font-bold text-[#FF7A00] mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Total Students Reached</div>
+            <div className="text-xl font-bold text-warm-500 dark:text-warm-400 mt-1">
               {filteredSessions.reduce((acc, curr) => acc + (curr.attendanceCount || 20), 0)}
             </div>
           </div>
@@ -518,69 +518,69 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
       {reportType === 'student-attendance' && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Village Centers</div>
-            <div className="text-xl font-bold text-slate-900 mt-0.5">{villageAttendanceData.length}</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Village Centers</div>
+            <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{villageAttendanceData.length}</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Total Enrolled</div>
-            <div className="text-xl font-bold text-[#0B3D91] mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Total Enrolled</div>
+            <div className="text-xl font-bold text-brand-500 dark:text-brand-400 mt-1">
               {villageAttendanceData.reduce((acc, curr) => acc + curr.totalRegistered, 0)}
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Average Attendance</div>
-            <div className="text-xl font-bold text-emerald-700 mt-0.5">88.4%</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Average Attendance</div>
+            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">88.4%</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Top Village Center</div>
-            <div className="text-sm font-bold text-slate-800 mt-1">Ammapettai (93%)</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Top Village Center</div>
+            <div className="text-sm font-bold text-gray-800 dark:text-gray-200 mt-1">Ammapettai (93%)</div>
           </div>
         </div>
       )}
 
       {reportType === 'volunteer-attendance' && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Active Volunteers</div>
-            <div className="text-xl font-bold text-slate-900 mt-0.5">{volunteers.length}</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Active Volunteers</div>
+            <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{volunteers.length}</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Total Teaching Hours</div>
-            <div className="text-xl font-bold text-[#0B3D91] mt-0.5">42.5 hrs</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Total Teaching Hours</div>
+            <div className="text-xl font-bold text-brand-500 dark:text-brand-400 mt-1">42.5 hrs</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">On-Time Rate</div>
-            <div className="text-xl font-bold text-emerald-700 mt-0.5">94.8%</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">On-Time Rate</div>
+            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">94.8%</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Avg Sessions / Mentor</div>
-            <div className="text-xl font-bold text-[#FF7A00] mt-0.5">3.2</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Avg Sessions / Mentor</div>
+            <div className="text-xl font-bold text-warm-500 dark:text-warm-400 mt-1">3.2</div>
           </div>
         </div>
       )}
 
       {reportType === 'lesson-plan' && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Total Lesson Plans</div>
-            <div className="text-xl font-bold text-slate-900 mt-0.5">{filteredLessonPlans.length}</div>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Total Lesson Plans</div>
+            <div className="text-xl font-bold text-gray-900 dark:text-white mt-1">{filteredLessonPlans.length}</div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Approved</div>
-            <div className="text-xl font-bold text-emerald-700 mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Approved</div>
+            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
               {filteredLessonPlans.filter((lp) => lp.status === 'Approved' || lp.status === 'Completed').length}
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Under Review</div>
-            <div className="text-xl font-bold text-blue-700 mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Under Review</div>
+            <div className="text-xl font-bold text-brand-500 dark:text-brand-400 mt-1">
               {filteredLessonPlans.filter((lp) => lp.status === 'Submitted' || lp.status === 'Resubmitted').length}
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-md p-3 shadow-xs">
-            <div className="text-[11px] font-semibold text-slate-500 uppercase">Curriculum Hours</div>
-            <div className="text-xl font-bold text-[#FF7A00] mt-0.5">
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-theme-xs">
+            <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase">Curriculum Hours</div>
+            <div className="text-xl font-bold text-warm-500 dark:text-warm-400 mt-1">
               {filteredLessonPlans.length * 1.5} hrs
             </div>
           </div>
@@ -588,18 +588,18 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       )}
 
       {/* REPORT DATA TABLE */}
-      <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-theme-xs overflow-hidden">
         {/* Table Title Bar */}
-        <div className="px-4 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <div className="px-5 py-4 bg-gray-50 dark:bg-gray-800/60 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="font-bold text-xs text-slate-800 uppercase tracking-wider">
+            <span className="font-bold text-xs text-gray-800 dark:text-gray-200 uppercase tracking-wider">
               {reportType === 'session' && 'Session Delivery & Operations Table'}
               {reportType === 'lesson-plan' && 'Curriculum & Lesson Plan Table'}
               {reportType === 'student-attendance' && 'Student Village Center Attendance Table'}
               {reportType === 'volunteer-attendance' && 'Volunteer Mentorship & Attendance Table'}
             </span>
           </div>
-          <span className="text-[11px] text-slate-500">
+          <span className="text-[11px] text-gray-500 dark:text-gray-400">
             Cluster: Dharmapuri • Generated: {new Date().toLocaleDateString('en-GB')}
           </span>
         </div>
@@ -609,36 +609,36 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {reportType === 'session' && (
             <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                  <th className="py-2.5 px-3.5">Date &amp; Code</th>
-                  <th className="py-2.5 px-3.5">Topic &amp; Module</th>
-                  <th className="py-2.5 px-3.5">Panchayat</th>
-                  <th className="py-2.5 px-3.5">Village</th>
-                  <th className="py-2.5 px-3.5">Volunteer</th>
-                  <th className="py-2.5 px-3.5">Status</th>
-                  <th className="py-2.5 px-3.5 text-right">Attendance</th>
+                <tr className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-semibold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4">Date &amp; Code</th>
+                  <th className="py-3 px-4">Topic &amp; Module</th>
+                  <th className="py-3 px-4">Panchayat</th>
+                  <th className="py-3 px-4">Village</th>
+                  <th className="py-3 px-4">Volunteer</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Attendance</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
                 {filteredSessions.map((s) => (
-                  <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      <div className="font-semibold text-slate-900">{s.date}</div>
-                      <div className="font-mono text-[10px] text-slate-500">{s.code || 'M-103'}</div>
+                  <tr key={s.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <div className="font-semibold text-gray-900 dark:text-white">{s.date}</div>
+                      <div className="font-mono text-[10px] text-gray-500 dark:text-gray-400">{s.code || 'M-103'}</div>
                     </td>
-                    <td className="py-2.5 px-3.5">
-                      <div className="font-semibold text-slate-900">{s.name || s.title}</div>
-                      <div className="text-[11px] text-slate-500">{s.module || 'Spoken English'}</div>
+                    <td className="py-3 px-4">
+                      <div className="font-semibold text-gray-900 dark:text-white">{s.name || s.title}</div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">{s.module || 'Spoken English'}</div>
                     </td>
-                    <td className="py-2.5 px-3.5 font-medium text-slate-800">{s.panchayatName}</td>
-                    <td className="py-2.5 px-3.5 text-slate-600">{s.villageName}</td>
-                    <td className="py-2.5 px-3.5 font-medium text-slate-900">{s.volunteerName}</td>
-                    <td className="py-2.5 px-3.5">
-                      <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700">
+                    <td className="py-3 px-4 font-medium text-gray-800 dark:text-gray-200">{s.panchayatName}</td>
+                    <td className="py-3 px-4 text-gray-600 dark:text-gray-400">{s.villageName}</td>
+                    <td className="py-3 px-4 font-medium text-gray-900 dark:text-white">{s.volunteerName}</td>
+                    <td className="py-3 px-4">
+                      <span className="inline-flex px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                         {s.status}
                       </span>
                     </td>
-                    <td className="py-2.5 px-3.5 text-right font-bold text-slate-900">
+                    <td className="py-3 px-4 text-right font-bold text-gray-900 dark:text-white">
                       {s.attendanceCount || 20}/{s.totalStudents || 25}
                     </td>
                   </tr>
@@ -651,34 +651,34 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {reportType === 'lesson-plan' && (
             <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                  <th className="py-2.5 px-3.5">Date &amp; Module</th>
-                  <th className="py-2.5 px-3.5">Topic &amp; Objective</th>
-                  <th className="py-2.5 px-3.5">Standard</th>
-                  <th className="py-2.5 px-3.5">Panchayat &amp; Village</th>
-                  <th className="py-2.5 px-3.5">Volunteer</th>
-                  <th className="py-2.5 px-3.5 text-right">Status</th>
+                <tr className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-semibold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4">Date &amp; Module</th>
+                  <th className="py-3 px-4">Topic &amp; Objective</th>
+                  <th className="py-3 px-4">Standard</th>
+                  <th className="py-3 px-4">Panchayat &amp; Village</th>
+                  <th className="py-3 px-4">Volunteer</th>
+                  <th className="py-3 px-4 text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
                 {filteredLessonPlans.map((lp) => (
-                  <tr key={lp.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-3.5 whitespace-nowrap">
-                      <div className="font-semibold text-slate-900">{lp.date || '28 Aug 2026'}</div>
-                      <div className="text-[11px] text-slate-500">{lp.moduleName}</div>
+                  <tr key={lp.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-4 whitespace-nowrap">
+                      <div className="font-semibold text-gray-900 dark:text-white">{lp.date || '28 Aug 2026'}</div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">{lp.moduleName}</div>
                     </td>
-                    <td className="py-2.5 px-3.5">
-                      <div className="font-semibold text-slate-900">{lp.topic}</div>
-                      <div className="text-[11px] text-slate-500 line-clamp-1">{lp.objective}</div>
+                    <td className="py-3 px-4">
+                      <div className="font-semibold text-gray-900 dark:text-white">{lp.topic}</div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400 line-clamp-1">{lp.objective}</div>
                     </td>
-                    <td className="py-2.5 px-3.5 text-slate-600">{lp.targetStandard || '6th - 8th'}</td>
-                    <td className="py-2.5 px-3.5">
-                      <div className="font-medium text-slate-800">{lp.panchayatName}</div>
-                      <div className="text-[11px] text-slate-500">{lp.villageName}</div>
+                    <td className="py-3 px-4 text-gray-600 dark:text-gray-400">{lp.targetStandard || '6th - 8th'}</td>
+                    <td className="py-3 px-4">
+                      <div className="font-medium text-gray-800 dark:text-gray-200">{lp.panchayatName}</div>
+                      <div className="text-[11px] text-gray-500 dark:text-gray-400">{lp.villageName}</div>
                     </td>
-                    <td className="py-2.5 px-3.5 font-medium text-slate-900">{lp.volunteerName}</td>
-                    <td className="py-2.5 px-3.5 text-right">
-                      <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <td className="py-3 px-4 font-medium text-gray-900 dark:text-white">{lp.volunteerName}</td>
+                    <td className="py-3 px-4 text-right">
+                      <span className="inline-flex px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800">
                         {lp.status || 'Approved'}
                       </span>
                     </td>
@@ -692,30 +692,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {reportType === 'student-attendance' && (
             <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                  <th className="py-2.5 px-3.5">Panchayat</th>
-                  <th className="py-2.5 px-3.5">Village Learning Center</th>
-                  <th className="py-2.5 px-3.5 text-center">Total Enrolled</th>
-                  <th className="py-2.5 px-3.5 text-center">Avg Present</th>
-                  <th className="py-2.5 px-3.5 text-center">Attendance %</th>
-                  <th className="py-2.5 px-3.5 text-center">Sessions Run</th>
-                  <th className="py-2.5 px-3.5 text-right">Health Status</th>
+                <tr className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-semibold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4">Panchayat</th>
+                  <th className="py-3 px-4">Village Learning Center</th>
+                  <th className="py-3 px-4 text-center">Total Enrolled</th>
+                  <th className="py-3 px-4 text-center">Avg Present</th>
+                  <th className="py-3 px-4 text-center">Attendance %</th>
+                  <th className="py-3 px-4 text-center">Sessions Run</th>
+                  <th className="py-3 px-4 text-right">Health Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
                 {villageAttendanceData.map((d, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-3.5 font-bold text-slate-900">{d.panchayatName}</td>
-                    <td className="py-2.5 px-3.5 font-medium text-slate-800">{d.villageName}</td>
-                    <td className="py-2.5 px-3.5 text-center text-slate-700">{d.totalRegistered}</td>
-                    <td className="py-2.5 px-3.5 text-center font-semibold text-slate-900">{d.avgPresent}</td>
-                    <td className="py-2.5 px-3.5 text-center font-bold text-[#0B3D91]">{d.attendancePct}%</td>
-                    <td className="py-2.5 px-3.5 text-center text-slate-600">{d.sessionsCount}</td>
-                    <td className="py-2.5 px-3.5 text-right">
-                      <span className={`inline-flex px-2 py-0.5 rounded text-[11px] font-semibold ${
+                  <tr key={idx} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-4 font-bold text-gray-900 dark:text-white">{d.panchayatName}</td>
+                    <td className="py-3 px-4 font-medium text-gray-800 dark:text-gray-200">{d.villageName}</td>
+                    <td className="py-3 px-4 text-center text-gray-700 dark:text-gray-300">{d.totalRegistered}</td>
+                    <td className="py-3 px-4 text-center font-semibold text-gray-900 dark:text-white">{d.avgPresent}</td>
+                    <td className="py-3 px-4 text-center font-bold text-brand-500 dark:text-brand-400">{d.attendancePct}%</td>
+                    <td className="py-3 px-4 text-center text-gray-600 dark:text-gray-400">{d.sessionsCount}</td>
+                    <td className="py-3 px-4 text-right">
+                      <span className={`inline-flex px-2 py-0.5 rounded-lg text-[11px] font-semibold ${
                         d.status === 'Optimal'
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-amber-50 text-amber-700'
+                          ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400'
+                          : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
                       }`}>
                         {d.status}
                       </span>
@@ -730,32 +730,32 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
           {reportType === 'volunteer-attendance' && (
             <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
-                  <th className="py-2.5 px-3.5">Volunteer Mentor</th>
-                  <th className="py-2.5 px-3.5">Affiliated College</th>
-                  <th className="py-2.5 px-3.5 text-center">Assigned</th>
-                  <th className="py-2.5 px-3.5 text-center">Completed</th>
-                  <th className="py-2.5 px-3.5 text-center">On-Time Rate</th>
-                  <th className="py-2.5 px-3.5 text-center">Total Hours</th>
-                  <th className="py-2.5 px-3.5 text-right">Status</th>
+                <tr className="bg-gray-50/80 dark:bg-gray-800/40 border-b border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 font-semibold uppercase tracking-wider text-[11px]">
+                  <th className="py-3 px-4">Volunteer Mentor</th>
+                  <th className="py-3 px-4">Affiliated College</th>
+                  <th className="py-3 px-4 text-center">Assigned</th>
+                  <th className="py-3 px-4 text-center">Completed</th>
+                  <th className="py-3 px-4 text-center">On-Time Rate</th>
+                  <th className="py-3 px-4 text-center">Total Hours</th>
+                  <th className="py-3 px-4 text-right">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-gray-700 dark:text-gray-300">
                 {volunteerAttendanceData.map((v) => (
-                  <tr key={v.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-3.5 font-bold text-slate-900 flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-[#0B3D91]/10 text-[#0B3D91] text-[10px] font-bold flex items-center justify-center">
+                  <tr key={v.id} className="hover:bg-gray-50/80 dark:hover:bg-gray-800/40 transition-colors">
+                    <td className="py-3 px-4 font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                      <div className="w-6 h-6 rounded-full bg-brand-500/10 text-brand-500 dark:bg-brand-500/20 dark:text-brand-400 text-[10px] font-bold flex items-center justify-center">
                         {v.name.charAt(0)}
                       </div>
                       <span>{v.name}</span>
                     </td>
-                    <td className="py-2.5 px-3.5 text-slate-600">{v.college}</td>
-                    <td className="py-2.5 px-3.5 text-center text-slate-700 font-semibold">{v.assignedSessions}</td>
-                    <td className="py-2.5 px-3.5 text-center text-emerald-700 font-bold">{v.completedSessions}</td>
-                    <td className="py-2.5 px-3.5 text-center text-[#0B3D91] font-semibold">{v.onTimeRate}</td>
-                    <td className="py-2.5 px-3.5 text-center text-slate-600">{v.totalHours}</td>
-                    <td className="py-2.5 px-3.5 text-right">
-                      <span className="inline-flex px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-[#0B3D91]">
+                    <td className="py-3 px-4 text-gray-600 dark:text-gray-400">{v.college}</td>
+                    <td className="py-3 px-4 text-center text-gray-700 dark:text-gray-300 font-semibold">{v.assignedSessions}</td>
+                    <td className="py-3 px-4 text-center text-emerald-600 dark:text-emerald-400 font-bold">{v.completedSessions}</td>
+                    <td className="py-3 px-4 text-center text-brand-500 dark:text-brand-400 font-semibold">{v.onTimeRate}</td>
+                    <td className="py-3 px-4 text-center text-gray-600 dark:text-gray-400">{v.totalHours}</td>
+                    <td className="py-3 px-4 text-right">
+                      <span className="inline-flex px-2 py-0.5 rounded-lg text-[11px] font-semibold bg-blue-50 text-brand-500 dark:bg-brand-950/40 dark:text-brand-400">
                         {v.status}
                       </span>
                     </td>

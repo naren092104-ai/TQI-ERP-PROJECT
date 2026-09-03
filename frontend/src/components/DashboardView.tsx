@@ -1,31 +1,18 @@
 import React, { useState, useEffect, useMemo } from 'react';
+// Deliberately short list. Icons here earn their place by aiding
+// navigation (row chevrons, the workflow menu, the search field);
+// none are used as decoration next to a number or a heading.
 import {
-  Users,
-  Student as StudentIcon,
   CalendarCheck,
   CurrencyInr,
-  Warning,
-  MapPin,
-  Plus,
-  CheckCircle,
-  ArrowRight,
   CaretRight,
   Search,
-  Calendar,
-  TrendingUp as TrendingUpIcon,
-  TreeStructure,
   BookOpen,
   FileText,
   Camera,
-  Circle,
-  Clock,
-  Sparkle,
-  ArrowUpRight,
-  Pulse,
 } from './ui/icons';
 import { TabType, Panchayat, AttendanceSession, Cluster, ApprovalItem, UserRole, FinanceEntry, Session, Student, Volunteer } from '../types';
 import { apiUrl } from '../utils/api';
-import Badge from './ui/badge';
 import { AttendanceTrendChart } from './ui/AttendanceTrendChart';
 import { ActivityFeed, ActivityItem } from './ui/ActivityFeed';
 
@@ -237,171 +224,239 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [attendanceDrafts, financeEntries, pendingApprovals]);
 
   return (
-    <div className="w-full space-y-6">
+    <div className="w-full space-y-8">
       {/* ============================================================
-          HERO STRIP — single-line greeting + primary action
+          PAGE HEADER — plain type, no card, no gradient.
+          The greeting is the only large type on the page.
           ============================================================ */}
-      <section className="tqi-page-hero">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
-          <div className="pl-3">
-            <div className="flex flex-wrap items-center gap-2 text-text-muted">
-              <span className="tqi-pulse">
-                {isSuperAdmin ? 'Operations live' : `${clusterName} active`}
-              </span>
-              <span className="text-xs">·</span>
-              <span className="text-xs font-medium tracking-wide">{todayLabel()}</span>
+      <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-[0.14em] text-text-muted">
+            {todayLabel()} &middot; {isSuperAdmin ? 'All clusters' : clusterName}
+          </p>
+          <h1 className="mt-2 text-[1.75rem] font-bold leading-tight tracking-tight text-text">
+            Good day, {isSuperAdmin ? 'Super Administrator' : clusterName.split(' ')[0]}.
+          </h1>
+          <p className="mt-1.5 max-w-2xl text-sm leading-relaxed text-text-muted">
+            {completedDaysCount === 8
+              ? 'All 8 sessions completed. Time to wrap reports and plan the next cycle.'
+              : inProgressDay
+              ? `Day ${inProgressDay.day} of the cycle is in motion — ${inProgressDay.title.toLowerCase()}.`
+              : `Cycle progress sits at ${progressPercent}%. The next milestone is Day ${
+                  dynamicRoadmap.find((d) => d.status !== 'Completed')?.day || 8
+                }.`}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
+          <button type="button" onClick={onOpenNewFinance} className="tqi-btn-outline">
+            Record expense
+          </button>
+          <button type="button" onClick={onOpenNewAttendance} className="tqi-btn-primary">
+            Mark attendance
+          </button>
+        </div>
+      </header>
+
+      {/* ============================================================
+          METRIC BAR — one surface, four numbers, hairline dividers.
+          No icon chips and no status badges: the number is the
+          content, so nothing else competes with it.
+          ============================================================ */}
+      <section className="tqi-card !p-0">
+        <dl className="grid grid-cols-2 lg:grid-cols-4">
+          {[
+            {
+              label: 'Enrolled students',
+              value: studentsCount.toLocaleString('en-IN'),
+              note: `Across ${panchayats.length} ${panchayats.length === 1 ? 'panchayat' : 'panchayats'}`,
+              tab: 'students' as TabType,
+            },
+            {
+              label: 'Field mentors',
+              value: volunteersCount.toLocaleString('en-IN'),
+              note: `${uniqueColleges.length} ${uniqueColleges.length === 1 ? 'college' : 'colleges'}`,
+              tab: 'volunteers' as TabType,
+            },
+            {
+              label: 'Cycle progress',
+              value: `${completedDaysCount} / 8`,
+              note: `${attendanceDrafts.length || sessionsCount} logs recorded`,
+              tab: 'attendance' as TabType,
+            },
+            {
+              label: 'Cluster expenses',
+              value: formatINR(totalExpenses),
+              note: `${financeEntries.length} ${financeEntries.length === 1 ? 'bill' : 'bills'} filed`,
+              tab: 'finance' as TabType,
+            },
+          ].map((m, i) => (
+            <button
+              key={m.label}
+              type="button"
+              onClick={() => onNavigate(m.tab)}
+              className={[
+                'group px-5 py-5 text-left transition-colors hover:bg-surface-hover',
+                // 2-up on mobile: divide the pair, then rule off the second row.
+                i % 2 === 1 ? 'border-l border-border-subtle' : '',
+                i >= 2 ? 'border-t border-border-subtle lg:border-t-0' : '',
+                // 4-up on desktop: a single hairline between each column.
+                i > 0 ? 'lg:border-l lg:border-border-subtle' : '',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+            >
+              <dt className="text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-text-muted">
+                {m.label}
+              </dt>
+              <dd className="mt-2 text-[1.875rem] font-bold leading-none tracking-tight text-text tqi-num">
+                {m.value}
+              </dd>
+              <p className="mt-2 text-xs text-text-muted">{m.note}</p>
+            </button>
+          ))}
+        </dl>
+      </section>
+
+      {/* ============================================================
+          PRIORITY ROW — the cycle you are running (8) and the queue
+          waiting on you (4). This sits directly under the metrics
+          because it is what the operator has to act on.
+          ============================================================ */}
+      <section className="grid grid-cols-12 gap-5">
+        {/* 8-day academic cycle */}
+        <div className="col-span-12 tqi-card xl:col-span-8">
+          <div className="tqi-section-header">
+            <div>
+              <h3 className="tqi-section-title">8-day academic cycle</h3>
+              <p className="tqi-section-sub">
+                Milestone progression across village school centres, Feb&ndash;Apr.
+              </p>
             </div>
-            <h1 className="mt-2 text-[1.7rem] sm:text-[1.9rem] font-bold leading-[1.15] text-text">
-              Good day, {isSuperAdmin ? 'Super Administrator' : clusterName.split(' ')[0]}.
-            </h1>
-            <p className="mt-1.5 text-sm text-text-muted max-w-2xl">
-              {completedDaysCount === 8
-                ? 'All 8 sessions completed. Time to wrap reports and plan the next cycle.'
-                : inProgressDay
-                ? `Day ${inProgressDay.day} of the cycle is in motion — ${inProgressDay.title.toLowerCase()}.`
-                : `Cycle progress sits at ${progressPercent}%. The next milestone is Day ${
-                    dynamicRoadmap.find((d) => d.status !== 'Completed')?.day || 8
-                  }.`}
-            </p>
+            <button
+              type="button"
+              onClick={() => onNavigate(isSuperAdmin ? 'academic-setup' : 'module-library')}
+              className="tqi-btn-ghost"
+            >
+              {isSuperAdmin ? 'Configure term' : 'Module library'}
+            </button>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
-            {pendingApprovals.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-baseline justify-between text-xs">
+              <span className="font-medium text-text-muted">Delivery status</span>
+              <span className="font-semibold text-text tqi-num">
+                {completedDaysCount} of 8 sessions &middot; {progressPercent}%
+              </span>
+            </div>
+            {/* One colour. A gradient here would imply the value changes
+                meaning as it grows, which it does not. */}
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full"
+              style={{ background: 'var(--border-subtle)' }}
+            >
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{ width: `${progressPercent}%`, background: 'var(--brand)' }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-6 -mx-2 overflow-x-auto custom-scrollbar">
+            <div className="tqi-timeline min-w-[640px] px-2">
+              {dynamicRoadmap.map((item) => (
+                <div
+                  key={item.day}
+                  className="tqi-timeline-step"
+                  data-state={
+                    item.status === 'Completed'
+                      ? 'completed'
+                      : item.status === 'In Progress'
+                      ? 'progress'
+                      : 'scheduled'
+                  }
+                >
+                  {/* The dot's colour already carries the state, so it
+                      holds the day number rather than a second icon. */}
+                  <div className="tqi-timeline-dot">
+                    <span className="text-[10px] font-bold">{item.day}</span>
+                  </div>
+                  <div className="tqi-timeline-title">{item.title}</div>
+                  <div className="tqi-timeline-day">{item.month}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Needs attention */}
+        <div className="col-span-12 tqi-card flex flex-col xl:col-span-4">
+          <div className="tqi-section-header">
+            <div>
+              <h3 className="tqi-section-title">Needs attention</h3>
+              <p className="tqi-section-sub">
+                {pendingApprovals.length > 0
+                  ? `${pendingApprovals.length} ${
+                      pendingApprovals.length === 1 ? 'entry' : 'entries'
+                    } awaiting verification`
+                  : 'Every field log and expense is reviewed.'}
+              </p>
+            </div>
+          </div>
+
+          {pendingApprovals.length > 0 ? (
+            <>
+              <ul className="-mx-1 flex-1 space-y-1">
+                {pendingApprovals.slice(0, 5).map((appr) => (
+                  <li key={appr.id}>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate('approvals')}
+                      className="tqi-link-row"
+                    >
+                      <div className="min-w-0">
+                        <div className="tqi-link-title truncate">{appr.module}</div>
+                        <div className="tqi-link-desc truncate">
+                          {appr.recordId} &middot; {appr.submittedBy || 'Volunteer'}
+                        </div>
+                      </div>
+                      <CaretRight className="h-4 w-4 shrink-0 text-text-muted" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
               <button
                 type="button"
                 onClick={() => onNavigate('approvals')}
-                className="tqi-cta-secondary"
+                className="tqi-btn-outline mt-4 w-full"
               >
-                <Warning className="h-4 w-4" style={{ color: 'var(--warning)' }} />
-                <span>{pendingApprovals.length} pending</span>
+                Open approval center
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => onNavigate('finance')}
-              className="tqi-cta-secondary"
-            >
-              <CurrencyInr className="h-4 w-4" style={{ color: 'var(--brand-orange)' }} />
-              <span>Record expense</span>
-            </button>
-            <button
-              type="button"
-              onClick={onOpenNewAttendance}
-              className="tqi-cta"
-            >
-              <span>Mark attendance</span>
-              <span className="tqi-cta-icon">
-                <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
-              </span>
-            </button>
-          </div>
+            </>
+          ) : (
+            <p className="flex-1 py-8 text-center text-sm text-text-muted">
+              Nothing in the queue.
+            </p>
+          )}
         </div>
       </section>
 
       {/* ============================================================
-          KPI STRIP — 4 metrics, editorial single row
+          ANALYSIS ROW — attendance trend (8) + activity log (4).
+          Sits below the priority row: this is context, not a task.
           ============================================================ */}
-      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4 tqi-stagger">
-        <button
-          type="button"
-          onClick={() => onNavigate('students')}
-          className="tqi-kpi text-left"
-        >
-          <div className="tqi-kpi-head">
-            <span className="tqi-icon-chip"><StudentIcon className="h-4.5 w-4.5" /></span>
-            <Badge color="success" size="sm">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-success mr-1" />
-              Active
-            </Badge>
-          </div>
-          <div>
-            <div className="tqi-kpi-label">Enrolled students</div>
-            <div className="tqi-kpi-value">{studentsCount.toLocaleString('en-IN')}</div>
-          </div>
-          <div className="tqi-kpi-foot">
-            <TrendingUpIcon className="h-3.5 w-3.5" style={{ color: 'var(--success)' }} />
-            <span>Across {panchayats.length} panchayats</span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate('volunteers')}
-          className="tqi-kpi text-left"
-        >
-          <div className="tqi-kpi-head">
-            <span className="tqi-icon-chip tqi-icon-chip-teal"><Users className="h-4.5 w-4.5" /></span>
-            <Badge color="info" size="sm">
-              {uniqueColleges.length} {uniqueColleges.length === 1 ? 'college' : 'colleges'}
-            </Badge>
-          </div>
-          <div>
-            <div className="tqi-kpi-label">Field mentors</div>
-            <div className="tqi-kpi-value">{volunteersCount.toLocaleString('en-IN')}</div>
-          </div>
-          <div className="tqi-kpi-foot">
-            <TreeStructure className="h-3.5 w-3.5" />
-            <span>Volunteer rosters & attendance</span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate('attendance')}
-          className="tqi-kpi text-left"
-        >
-          <div className="tqi-kpi-head">
-            <span className="tqi-icon-chip tqi-icon-chip-success"><CalendarCheck className="h-4.5 w-4.5" /></span>
-            <Badge color="success" size="sm">{progressPercent}%</Badge>
-          </div>
-          <div>
-            <div className="tqi-kpi-label">Cycle progress</div>
-            <div className="tqi-kpi-value">{completedDaysCount}<span className="text-text-muted text-base font-semibold"> / 8</span></div>
-          </div>
-          <div className="tqi-kpi-foot">
-            <Clock className="h-3.5 w-3.5" />
-            <span>{(attendanceDrafts.length || sessionsCount)} logs recorded</span>
-          </div>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => onNavigate('finance')}
-          className="tqi-kpi text-left"
-        >
-          <div className="tqi-kpi-head">
-            <span className="tqi-icon-chip tqi-icon-chip-orange"><CurrencyInr className="h-4.5 w-4.5" /></span>
-            <Badge color="warning" size="sm">{financeEntries.length} bills</Badge>
-          </div>
-          <div>
-            <div className="tqi-kpi-label">Cluster expenses</div>
-            <div className="tqi-kpi-value">{formatINR(totalExpenses)}</div>
-          </div>
-          <div className="tqi-kpi-foot">
-            <FileText className="h-3.5 w-3.5" />
-            <span>Verified entries this cycle</span>
-          </div>
-        </button>
-      </section>
-
-      {/* ============================================================
-          CENTERPIECE BENTO — Trend chart (8) + Activity (4)
-          ============================================================ */}
-      <section className="grid grid-cols-12 gap-4 md:gap-5 tqi-stagger">
+      <section className="grid grid-cols-12 gap-5">
         <div className="col-span-12 xl:col-span-8">
           <AttendanceTrendChart data={chartData} height={240} />
         </div>
-        <div className="col-span-12 xl:col-span-4 tqi-card flex flex-col">
+        <div className="col-span-12 tqi-card flex flex-col xl:col-span-4">
           <div className="tqi-section-header">
             <div>
               <h3 className="tqi-section-title">Recent activity</h3>
               <p className="tqi-section-sub">Latest updates from your cluster.</p>
             </div>
-            <span className="tqi-chip tqi-chip-brand">
-              <span className="tqi-live">Live</span>
-            </span>
           </div>
-          <div className="flex-1 -mx-1">
+          <div className="-mx-1 flex-1">
             <ActivityFeed
               items={recentActivity}
               onItemClick={(it) => it.tab && onNavigate(it.tab)}
@@ -413,157 +468,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               onClick={() => onNavigate('reports')}
               className="tqi-btn-ghost mt-3 w-full justify-center"
             >
-              <span>View full activity log</span>
-              <ArrowUpRight className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </section>
-
-      {/* ============================================================
-          BENTO ROW — Curriculum (8) + Approvals (4)
-          ============================================================ */}
-      <section className="grid grid-cols-12 gap-4 md:gap-5">
-        {/* Curriculum roadmap */}
-        <div className="col-span-12 xl:col-span-8 tqi-card">
-          <div className="tqi-section-header">
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h3 className="tqi-section-title">8-day academic cycle</h3>
-                <span className="tqi-chip tqi-chip-brand">
-                  <span className="tqi-chip-dot" style={{ background: 'var(--brand)' }} />
-                  {progressPercent}% delivered
-                </span>
-              </div>
-              <p className="tqi-section-sub">
-                Structured milestone progression synchronised across village school centres, Feb–Apr.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => onNavigate(isSuperAdmin ? 'academic-setup' : 'module-library')}
-              className="tqi-btn-ghost"
-            >
-              <span>{isSuperAdmin ? 'Configure term' : 'Module library'}</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          {/* Refined progress bar */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between text-xs text-text-muted font-medium">
-              <span>Delivery status</span>
-              <span className="font-semibold text-text">{completedDaysCount} of 8 sessions</span>
-            </div>
-            <div
-              className="h-1.5 w-full overflow-hidden rounded-full"
-              style={{ background: 'var(--surface-hover)' }}
-            >
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${progressPercent}%`,
-                  background:
-                    'linear-gradient(90deg, var(--brand) 0%, var(--brand-teal) 60%, var(--brand-orange) 100%)',
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Timeline */}
-          <div className="mt-6 -mx-2 overflow-x-auto custom-scrollbar">
-            <div className="tqi-timeline px-2 min-w-[640px]">
-              {dynamicRoadmap.map((item) => {
-                const state =
-                  item.status === 'Completed'
-                    ? 'completed'
-                    : item.status === 'In Progress'
-                    ? 'progress'
-                    : 'scheduled';
-                return (
-                  <div key={item.day} className="tqi-timeline-step" data-state={state}>
-                    <div className="tqi-timeline-dot">
-                      {item.status === 'Completed' ? (
-                        <CheckCircle className="h-3 w-3" />
-                      ) : item.status === 'In Progress' ? (
-                        <Circle className="h-3 w-3" />
-                      ) : (
-                        <span className="text-[10px] font-bold">{item.day}</span>
-                      )}
-                    </div>
-                    <div className="tqi-timeline-day">Day {item.day}</div>
-                    <div className="tqi-timeline-title">{item.title}</div>
-                    <div className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
-                      {item.month}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* Approvals */}
-        <div className="col-span-12 xl:col-span-4 tqi-card flex flex-col">
-          <div className="tqi-section-header">
-            <div>
-              <h3 className="tqi-section-title">Pending approvals</h3>
-              <p className="tqi-section-sub">
-                {pendingApprovals.length > 0
-                  ? `${pendingApprovals.length} entries awaiting verification`
-                  : 'All field logs and expenses are reviewed.'}
-              </p>
-            </div>
-            {pendingApprovals.length > 0 && (
-              <span className="tqi-chip tqi-chip-warning">
-                <span className="tqi-chip-dot" style={{ background: 'var(--warning)' }} />
-                {pendingApprovals.length}
-              </span>
-            )}
-          </div>
-
-          {pendingApprovals.length > 0 ? (
-            <ul className="space-y-1 -mx-1">
-              {pendingApprovals.slice(0, 4).map((appr) => (
-                <li key={appr.id}>
-                  <button
-                    type="button"
-                    onClick={() => onNavigate('approvals')}
-                    className="tqi-link-row"
-                  >
-                    <div className="min-w-0">
-                      <div className="tqi-link-title truncate">{appr.module}</div>
-                      <div className="tqi-link-desc truncate">
-                        {appr.recordId} · {appr.submittedBy || 'Volunteer'}
-                      </div>
-                    </div>
-                    <CaretRight className="h-4 w-4 text-text-muted shrink-0" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center text-center py-6">
-              <span
-                className="tqi-icon-chip tqi-icon-chip-success"
-                style={{ width: 44, height: 44, borderRadius: 'var(--radius-lg)' }}
-              >
-                <CheckCircle className="h-5 w-5" />
-              </span>
-              <p className="mt-3 text-sm font-medium text-text-secondary">
-                All field logs and expenses approved.
-              </p>
-            </div>
-          )}
-
-          {pendingApprovals.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onNavigate('approvals')}
-              className="tqi-btn-outline mt-4 w-full"
-            >
-              <span>Open approval center</span>
-              <ArrowUpRight className="h-3.5 w-3.5" />
+              View full activity log
             </button>
           )}
         </div>
@@ -580,23 +485,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               Milestone tracking across the 8-day academic program by cluster.
             </p>
           </div>
-          <div className="hidden sm:flex items-center gap-4 text-xs text-text-muted">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} />
-              Completed
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--brand-orange)' }} />
-              In progress
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--brand)' }} />
-              Scheduled
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--border-strong)' }} />
-              Pending
-            </span>
+          {/* The only place on this page that spends colour on legend
+              swatches — it is teaching the code used by the cells below,
+              so each dot has to match its cell's `tone` exactly. */}
+          <div className="hidden items-center gap-4 text-xs text-text-muted sm:flex">
+            {[
+              { label: 'Completed', color: 'var(--success)' },
+              { label: 'In progress', color: 'var(--warning-fg)' },
+              { label: 'Scheduled', color: 'var(--brand)' },
+              { label: 'Pending', color: 'var(--text-muted)' },
+            ].map((l) => (
+              <span key={l.label} className="flex items-center gap-1.5">
+                <span className="h-2 w-2 rounded-full" style={{ background: l.color }} />
+                {l.label}
+              </span>
+            ))}
           </div>
         </div>
 
@@ -658,59 +561,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                    <div className="grid flex-1 grid-cols-4 gap-1.5 sm:grid-cols-8">
                       {daysStatus.map((d, idx) => {
-                        const bg =
-                          d.state === 'Completed'
-                            ? 'var(--success-bg)'
-                            : d.state === 'In Progress'
-                            ? 'var(--brand-orange-light)'
-                            : d.state === 'Scheduled'
-                            ? 'var(--brand-light)'
-                            : 'var(--surface-hover)';
-                        const color =
-                          d.state === 'Completed'
-                            ? 'var(--success)'
-                            : d.state === 'In Progress'
-                            ? 'var(--brand-orange)'
-                            : d.state === 'Scheduled'
-                            ? 'var(--brand)'
-                            : 'var(--text-muted)';
-                        const border =
-                          d.state === 'Completed'
-                            ? 'var(--success-border)'
-                            : d.state === 'In Progress'
-                            ? 'color-mix(in srgb, var(--brand-orange) 30%, transparent)'
-                            : d.state === 'Scheduled'
-                            ? 'var(--brand-xlight)'
-                            : 'var(--border)';
+                        // One lookup instead of three parallel ternaries.
+                        // The legend above already teaches these colours, so
+                        // the cell needs no icon on top of them.
+                        const tone = {
+                          Completed: { bg: 'var(--success-bg)', fg: 'var(--success)' },
+                          'In Progress': { bg: 'var(--warning-bg)', fg: 'var(--warning-fg)' },
+                          Scheduled: { bg: 'var(--brand-light)', fg: 'var(--brand)' },
+                          Pending: { bg: 'var(--surface-hover)', fg: 'var(--text-muted)' },
+                        }[d.state];
                         return (
                           <div
                             key={idx}
                             title={`Day ${idx + 1}: ${d.state} (${d.label})`}
-                            className="flex flex-col items-center justify-center py-1.5 rounded-md text-center"
-                            style={{ background: bg, border: `1px solid ${border}` }}
+                            className="rounded-md py-2 text-center text-[10px] font-bold uppercase tracking-wider tqi-num"
+                            style={{ background: tone.bg, color: tone.fg }}
                           >
-                            <span
-                              className="text-[9px] font-bold uppercase tracking-wider"
-                              style={{ color }}
-                            >
-                              D{idx + 1}
-                            </span>
-                            <div className="mt-0.5">
-                              {d.state === 'Completed' && (
-                                <CheckCircle className="h-3 w-3" style={{ color }} />
-                              )}
-                              {d.state === 'In Progress' && (
-                                <Circle className="h-3 w-3" style={{ color }} />
-                              )}
-                              {d.state === 'Scheduled' && (
-                                <Calendar className="h-3 w-3" style={{ color }} />
-                              )}
-                              {d.state === 'Pending' && (
-                                <span className="block h-1 w-1 rounded-full bg-text-muted" />
-                              )}
-                            </div>
+                            D{idx + 1}
                           </div>
                         );
                       })}
@@ -764,8 +633,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 className="tqi-btn-ghost"
                 title="Open directory"
               >
-                <span className="hidden sm:inline">Directory</span>
-                <ArrowUpRight className="h-3.5 w-3.5" />
+                Directory
               </button>
             </div>
           </div>
@@ -790,10 +658,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         className="cursor-pointer"
                       >
                         <td>
-                          <div className="flex items-center gap-2.5">
-                            <MapPin className="h-4 w-4 text-text-muted shrink-0" />
-                            <span className="font-semibold text-text">{p.name}</span>
-                          </div>
+                          <span className="font-semibold text-text">{p.name}</span>
                         </td>
                         <td className="text-text-muted max-w-xs truncate">
                           {p.villages?.map((v) => v.name).join(', ') ||
@@ -828,7 +693,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <p className="tqi-section-sub">Direct access to daily operations.</p>
             </div>
           </div>
-          <ul className="space-y-1 -mx-1 flex-1">
+          <ul className="-mx-1 flex-1 space-y-1">
             {[
               { label: '8-day attendance & homework', tab: 'attendance' as TabType, desc: 'Log daily marks & volunteer attendance', icon: CalendarCheck },
               { label: 'Finance & OCR bill scanning', tab: 'finance' as TabType, desc: 'Verify tickets, fuel & food bills', icon: CurrencyInr },
@@ -844,39 +709,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     onClick={() => onNavigate(item.tab)}
                     className="tqi-link-row"
                   >
-                    <span
-                      className="tqi-icon-chip"
-                      style={{ width: 32, height: 32, borderRadius: 'var(--radius-sm)' }}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                    </span>
+                    {/* Icons stay in this list — it is a navigation menu,
+                        so the glyph genuinely helps you find the row. No
+                        tinted chip around it though. */}
+                    <Icon className="h-4 w-4 shrink-0 text-text-muted" />
                     <div className="min-w-0 flex-1">
                       <div className="tqi-link-title truncate">{item.label}</div>
                       <div className="tqi-link-desc truncate">{item.desc}</div>
                     </div>
-                    <CaretRight className="h-4 w-4 text-text-muted shrink-0" />
+                    <CaretRight className="h-4 w-4 shrink-0 text-text-muted" />
                   </button>
                 </li>
               );
             })}
           </ul>
-
-          <div
-            className="mt-4 -mx-1 rounded-lg px-3 py-2.5 text-xs flex items-center gap-2"
-            style={{ background: 'var(--brand-light)', color: 'var(--brand)' }}
-          >
-            <Sparkle className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Tip: Press{' '}
-              <kbd
-                className="rounded border px-1.5 py-0.5 font-mono text-[10px]"
-                style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
-              >
-                ⌘K
-              </kbd>{' '}
-              anywhere to jump to any view.
-            </span>
-          </div>
         </div>
       </section>
     </div>

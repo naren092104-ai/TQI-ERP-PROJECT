@@ -13,7 +13,7 @@ export function renderOnboardingEmail({
   clusterName?: string;
   loginUrl?: string;
 }): { html: string; text: string } {
-  const portalUrl = loginUrl || process.env.APP_URL || 'http://localhost:5173';
+  const portalUrl = loginUrl || process.env.APP_URL || 'https://tqi-erp.pages.dev';
   const roleDisplay = role === 'SUPER_ADMIN' || role === 'Super Admin' ? 'Super Admin (State Central)' : 'Cluster Admin (College SPOC)';
   const clusterDisplay = clusterName ? `${clusterName}` : 'All Clusters';
 

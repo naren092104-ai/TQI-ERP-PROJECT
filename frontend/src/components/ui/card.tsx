@@ -6,7 +6,7 @@ const Card = React.forwardRef<
 >(({ className = "", size = "default", ...props }, ref) => (
   <div
     ref={ref}
-    className={`rounded-2xl border border-gray-200 bg-white text-gray-800 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] dark:text-white/90 transition-all duration-200 ${
+    className={`rounded-2xl border border-border bg-card text-card-foreground shadow-theme-xs transition-all duration-200 ${
       size === "sm" ? "p-4 space-y-3" : "p-5 md:p-6 space-y-4"
     } ${className}`}
     {...props}
@@ -32,7 +32,7 @@ const CardTitle = React.forwardRef<
 >(({ className = "", ...props }, ref) => (
   <h3
     ref={ref}
-    className={`text-base font-semibold tracking-tight text-gray-800 dark:text-white/90 ${className}`}
+    className={`text-base font-semibold tracking-tight text-foreground ${className}`}
     {...props}
   />
 ))
@@ -44,7 +44,7 @@ const CardDescription = React.forwardRef<
 >(({ className = "", ...props }, ref) => (
   <p
     ref={ref}
-    className={`text-sm text-gray-500 dark:text-gray-400 ${className}`}
+    className={`text-sm text-muted-foreground ${className}`}
     {...props}
   />
 ))
@@ -54,7 +54,7 @@ const CardContent = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement>
 >(({ className = "", ...props }, ref) => (
-  <div ref={ref} className={`text-sm text-gray-800 dark:text-gray-200 ${className}`} {...props} />
+  <div ref={ref} className={`text-sm text-card-foreground ${className}`} {...props} />
 ))
 CardContent.displayName = "CardContent"
 
