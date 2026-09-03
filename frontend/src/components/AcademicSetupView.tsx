@@ -6,7 +6,7 @@ import {
   BookOpen,
   MapPin,
   CheckCircle2
-} from 'lucide-react';
+} from './ui/icons';
 import { Button } from "@/components/ui/button";
 import {
   Card,

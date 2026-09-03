@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from './ui/select';
 import { ActionButton } from './ui/action-button';
-import { Search, X, Calendar, Lock, Trash2 } from 'lucide-react';
+import { Search, X, Calendar, Lock, Trash2 } from './ui/icons';
 
 interface SessionsViewProps {
   sessions: Session[];
@@ -773,8 +773,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
       {/* 4. Cardless TailAdmin Session Table */}
       <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="tqi-table-compact w-full text-left border-collapse">
             <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
                 <th className="px-5 py-3.5">Date &amp; Time</th>

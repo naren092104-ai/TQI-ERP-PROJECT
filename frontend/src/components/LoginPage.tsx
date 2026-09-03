@@ -2,20 +2,22 @@ import React, { useState } from 'react';
 import { UserRole } from '../types';
 import { apiUrl } from '../utils/api';
 import { TqiLogo } from './TqiLogo';
-import { 
-  Mail, 
-  Lock, 
-  Eye, 
-  EyeOff, 
-  Sparkles, 
-  ShieldCheck, 
-  CheckCircle2, 
-  UserCheck, 
-  KeyRound, 
+import {
+  Icon,
+  type IconName,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  KeyRound,
   ArrowRight,
-  HelpCircle,
-  X
-} from 'lucide-react';
+  ShieldCheck,
+  AlertCircle,
+  CheckCircle2,
+  X,
+  Star,
+  Hash,
+} from './ui/icons';
 
 export interface AuthSession {
   token?: string;
@@ -34,6 +36,102 @@ interface LoginPageProps {
   onLoginSuccess: (session: AuthSession) => void;
 }
 
+const TRUST_PILLS = ['Connect', 'Explore', 'Share', 'Lead'];
+
+const MobileBrandStrip: React.FC = () => (
+  <div className="tqi-login-mobile-strip" aria-hidden>
+    <TqiLogo size={36} />
+    <div>
+      <div className="tqi-login-mobile-strip-name">Talent Quest for India</div>
+      <div className="tqi-login-mobile-strip-meta">Academic ERP</div>
+    </div>
+  </div>
+);
+
+const CardBrandMark: React.FC = () => (
+  <div className="tqi-login-card-brand">
+    <TqiLogo size={32} />
+    <div>
+      <div className="tqi-login-card-brand-name">Talent Quest for India</div>
+      <div className="tqi-login-card-brand-meta">Academic ERP</div>
+    </div>
+  </div>
+);
+
+const StagePanel: React.FC<{ kicker: string; eyebrow: React.ReactNode }> = ({ kicker, eyebrow }) => (
+  <aside className="tqi-login-stage">
+    <div className="tqi-stage-orb" aria-hidden />
+    <div className="tqi-dot-grid" aria-hidden />
+    <div className="tqi-stage-content">
+      <div style={{ position: 'relative', zIndex: 2 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+          <TqiLogo size={42} />
+          <div className="flex flex-col" style={{ lineHeight: 1.1 }}>
+            <span style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
+              Talent Quest for India
+            </span>
+            <span
+              style={{
+                fontSize: '0.6875rem',
+                fontWeight: 600,
+                opacity: 0.75,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+                color: '#fff',
+              }}
+            >
+              Academic ERP
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ position: 'relative', zIndex: 2 }}>
+        <span className="tqi-login-kicker">
+          <ShieldCheck size={12} weight="light" /> {kicker}
+        </span>
+        <h1 className="tqi-login-headline" style={{ marginTop: '1.1rem' }}>
+          {eyebrow}
+        </h1>
+        <p className="tqi-login-sub">
+          Coordinate college volunteers, track 8-day cycles, log field expenses with OCR, and route
+          approvals from a single workspace built for Tamil Nadu.
+        </p>
+      </div>
+
+      <div className="tqi-testimonial">
+        <div className="tqi-testimonial-stars" aria-label="5 out of 5 stars">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Star key={i} size={14} weight="fill" />
+          ))}
+        </div>
+        <p className="tqi-testimonial-quote">
+          TQI transformed my perspective on community leadership and gave me the tools to drive real
+          change across our college cluster.
+        </p>
+        <div className="tqi-testimonial-author">
+          <span className="tqi-testimonial-avatar">PS</span>
+          <div>
+            <div className="tqi-testimonial-name">Priya Sharma</div>
+            <div className="tqi-testimonial-meta">Youth Volunteer · TQI Tamil Nadu</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="tqi-trust-row">
+        <p className="tqi-trust-row-eyebrow">Trusted by modern TQI teams</p>
+        <div className="tqi-trust-pills">
+          {TRUST_PILLS.map((p) => (
+            <span key={p} className="tqi-trust-pill">
+              {p}
+            </span>
+          ))}
+        </div>
+      </div>
+    </div>
+  </aside>
+);
+
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [identifier, setIdentifier] = useState('anand.s@tqi.org');
   const [password, setPassword] = useState('TQI@Admin2026!');
@@ -49,12 +147,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotSent, setForgotSent] = useState(false);
+  const [forgotStatus, setForgotStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [forgotError, setForgotError] = useState<string | null>(null);
 
-  const quickRoles = [
+  const quickRoles: { label: string; email: string; pass: string; role: UserRole }[] = [
     { label: 'Super Admin', email: 'anand.s@tqi.org', pass: 'TQI@Admin2026!', role: 'Super Admin' },
-    { label: 'Cluster Admin (KSR)', email: 'erode.admin@tqi.org', pass: 'Cluster@2026!', role: 'Cluster Admin' },
-    { label: 'Volunteer SPOC', email: 'saravanan.m@tqi.org', pass: 'Volunteer@2026!', role: 'Volunteer' },
+    { label: 'Cluster Admin', email: 'erode.admin@tqi.org', pass: 'Cluster@2026!', role: 'Cluster Admin' },
+    { label: 'Volunteer SPOC', email: 'saravanan.m@tqi.org', pass: 'Volunteer@2026!', role: 'Cluster Admin' },
   ];
 
   const applyQuickRole = (qr: typeof quickRoles[0]) => {
@@ -62,6 +161,45 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setPassword(qr.pass);
     setActiveMethod('password');
     setErrorMessage(null);
+  };
+
+  const openForgot = () => {
+    setForgotEmail(identifier);
+    setForgotStatus('idle');
+    setForgotError(null);
+    setShowForgotModal(true);
+  };
+
+  const closeForgot = () => {
+    if (forgotStatus === 'sending') return;
+    setShowForgotModal(false);
+    setForgotStatus('idle');
+    setForgotError(null);
+  };
+
+  const handleForgotSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = (forgotEmail || identifier).trim();
+    if (!email) { setForgotError('Please enter your work email.'); return; }
+    setForgotStatus('sending');
+    setForgotError(null);
+    try {
+      const response = await fetch(apiUrl('/api/auth/forgot-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        setForgotError(data?.error || 'Unable to send reset link. Please try again.');
+        setForgotStatus('error');
+        return;
+      }
+      setForgotStatus('sent');
+    } catch {
+      setForgotError('Unable to reach the server. Please check your connection and try again.');
+      setForgotStatus('error');
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -119,19 +257,37 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       if (session.mustChangePassword) setPendingSession(session);
       else onLoginSuccess(session);
       setIsLoading(false);
-    } catch {
-      // Fallback offline mock sign-in for seamless reliability
-      const roleMatch = quickRoles.find(r => r.email.toLowerCase() === cleanId.toLowerCase());
+    } catch (err) {
+      // SECURITY: Never mint a session on a network/auth failure. The previous
+      // catch block fell back to a fake Super-Admin session, which let any
+      // unauthenticated visitor into the app whenever the backend was
+      // unreachable. We now only allow the offline demo path when BOTH the
+      // email AND password match a known quickRole exactly, and only for the
+      // password flow (never for OTP, which has no offline equivalent).
+      const passwordOnlyLogin = activeMethod === 'password';
+      if (!passwordOnlyLogin) {
+        setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
+        setIsLoading(false);
+        return;
+      }
+      const roleMatch = quickRoles.find(
+        (r) => r.email.toLowerCase() === cleanId.toLowerCase() && r.pass === cleanPass
+      );
+      if (!roleMatch) {
+        setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
+        setIsLoading(false);
+        return;
+      }
       const session: AuthSession = {
-        token: 'mock-session-jwt-token',
-        id: 'user-' + Date.now(),
-        name: roleMatch?.label || cleanId.split('@')[0].toUpperCase(),
-        email: cleanId,
-        role: (roleMatch?.role as UserRole) || 'Super Admin',
-        clusterId: 'c1',
-        clusterName: 'KSR College of Technology (Erode)',
-        designation: roleMatch?.role || 'Super Admin',
-        avatarText: cleanId.slice(0, 2).toUpperCase(),
+        token: 'demo-' + Date.now(),
+        id: 'demo-' + roleMatch.email,
+        name: roleMatch.label,
+        email: roleMatch.email,
+        role: roleMatch.role,
+        clusterId: 'demo',
+        clusterName: 'Demo cluster',
+        designation: roleMatch.label,
+        avatarText: roleMatch.label.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase(),
         mustChangePassword: false,
       };
       onLoginSuccess(session);
@@ -154,398 +310,402 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       const data = await response.json();
       if (!response.ok || !data?.success) { setErrorMessage(data?.error || 'Unable to change password.'); setIsLoading(false); return; }
       onLoginSuccess({ ...pendingSession!, mustChangePassword: false });
-    } catch { 
-      onLoginSuccess({ ...pendingSession!, mustChangePassword: false });
+    } catch {
+      // SECURITY: Never advance to the dashboard without backend confirmation.
+      // A network failure here previously signed the user in without ever
+      // recording the new password. Surface the error and keep them on the
+      // onboarding screen so they can retry.
+      setErrorMessage('Unable to reach the server. Please check your connection and try again.');
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
+  // ============= Onboarding / change-password view =============
   if (pendingSession) {
     return (
-      <div className="min-h-screen flex flex-col justify-between bg-gray-50 dark:bg-gray-950 font-sans">
-        {/* Top Navbar */}
-        <header className="h-20 border-b border-gray-200 bg-white px-6 sm:px-12 flex items-center justify-between dark:border-gray-800 dark:bg-gray-900">
-          <div className="flex items-center gap-3">
-            <TqiLogo size={44} />
-            <div className="flex flex-col">
-              <span className="text-lg font-bold text-gray-900 dark:text-white tracking-tight">
-                Talent Quest for India
-              </span>
-              <span className="text-xs font-semibold text-brand-500 dark:text-brand-400">
-                Academic ERP
-              </span>
-            </div>
-          </div>
-        </header>
+      <div className="tqi-login-shell">
+        <StagePanel
+          kicker="First-time onboarding"
+          eyebrow={
+            <>
+              One last <span className="tqi-apricot-underline">step.</span>
+              <br />
+              Make it yours.
+            </>
+          }
+        />
 
-        {/* Change Password Card */}
-        <main className="flex-1 flex items-center justify-center p-6">
-          <div className="w-full max-w-md rounded-3xl border border-gray-100 dark:border-gray-800 bg-white p-8 sm:p-10 shadow-2xl shadow-slate-200/60 dark:shadow-none dark:bg-gray-900">
-            <div className="mb-6 text-center">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 mb-3">
-                <KeyRound className="h-3.5 w-3.5" /> First-time onboarding
-              </span>
-              <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Set Your New Password</h2>
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                Welcome, <strong>{pendingSession.name}</strong>. Choose a secure personal password.
-              </p>
-            </div>
+        <section className="tqi-login-form-side">
+          <MobileBrandStrip />
+          <div className="tqi-login-card">
+            <CardBrandMark />
+            <span className="tqi-login-kicker" style={{ background: 'var(--brand-light)', color: 'var(--brand)', borderColor: 'transparent' }}>
+              <KeyRound size={12} weight="light" /> First-time onboarding
+            </span>
+            <h1 className="tqi-login-h1" style={{ marginTop: '0.85rem' }}>
+              Set your new password
+            </h1>
+            <p className="tqi-login-sub2 tqi-hide-mobile">
+              Welcome, <strong style={{ color: 'var(--text)' }}>{pendingSession.name}</strong>. Choose a
+              personal password you don't reuse anywhere else.
+            </p>
 
             {errorMessage && (
-              <div className="mb-4 rounded-xl border border-error-200 bg-error-50 p-3 text-xs text-error-600 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-400">
-                {errorMessage}
+              <div className="tqi-alert tqi-alert-error" style={{ marginTop: '1rem', marginBottom: 0 }}>
+                <AlertCircle size={14} weight="light" className="shrink-0" />
+                <span>{errorMessage}</span>
               </div>
             )}
 
-            <form onSubmit={handlePasswordChange} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
-                  New Password (8+ characters) *
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={newPassword}
-                  onChange={(e) => { setNewPassword(e.target.value); setErrorMessage(null); }}
-                  placeholder="Enter a strong password"
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                />
+            <form onSubmit={handlePasswordChange} style={{ marginTop: '1.25rem' }}>
+              <div style={{ marginBottom: '0.85rem' }}>
+                <label className="tqi-login-label" htmlFor="new-pass">New password</label>
+                <div className="tqi-login-input-wrap">
+                  <Lock size={16} weight="light" className="tqi-login-input-icon" />
+                  <input
+                    id="new-pass"
+                    type="password"
+                    className="tqi-login-input"
+                    value={newPassword}
+                    minLength={8}
+                    onChange={(e) => { setNewPassword(e.target.value); setErrorMessage(null); }}
+                    placeholder="At least 8 characters"
+                  />
+                </div>
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
+                  Use 8+ characters, including a number and a symbol.
+                </span>
               </div>
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
-                  Confirm New Password *
-                </label>
-                <input
-                  type="password"
-                  required
-                  minLength={8}
-                  value={confirmPassword}
-                  onChange={(e) => { setConfirmPassword(e.target.value); setErrorMessage(null); }}
-                  placeholder="Re-enter new password"
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                />
+
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label className="tqi-login-label" htmlFor="confirm-pass">Confirm new password</label>
+                <div className="tqi-login-input-wrap">
+                  <Lock size={16} weight="light" className="tqi-login-input-icon" />
+                  <input
+                    id="confirm-pass"
+                    type="password"
+                    className="tqi-login-input"
+                    value={confirmPassword}
+                    minLength={8}
+                    onChange={(e) => { setConfirmPassword(e.target.value); setErrorMessage(null); }}
+                    placeholder="Re-enter the same password"
+                  />
+                </div>
               </div>
 
               <button
                 type="submit"
                 disabled={isLoading || newPassword.length < 8 || newPassword !== confirmPassword}
-                className="w-full rounded-xl bg-[#f06e00] hover:bg-[#d96300] text-white font-bold py-3 text-xs shadow-lg shadow-orange-500/25 transition disabled:opacity-50"
+                className="tqi-login-primary"
               >
-                {isLoading ? 'Saving Password...' : 'Save Password & Enter ERP'}
+                <span>{isLoading ? 'Saving…' : 'Save and enter ERP'}</span>
+                <ArrowRight size={16} weight="light" />
               </button>
             </form>
           </div>
-        </main>
-
-        {/* Footer */}
-        <footer className="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 sm:px-12 py-4 text-center text-xs text-gray-400">
-          &copy; 2026 Talent Quest for India. All rights reserved.
-        </footer>
+        </section>
       </div>
     );
   }
 
+  // ============= Default sign-in view =============
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-white dark:bg-gray-950 font-sans selection:bg-orange-500/20">
-      
-      {/* Top Navbar: Talent Quest for India */}
-      <header className="h-16 md:h-20 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 sm:px-12 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <TqiLogo size={42} />
-          <div className="flex flex-col">
-            <span className="text-lg md:text-xl font-extrabold text-[#c04800] dark:text-orange-400 tracking-tight leading-none">
-              Talent Quest for India
-            </span>
-            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
-              Academic ERP Platform
-            </span>
+    <div className="tqi-login-shell">
+      <StagePanel
+        kicker="Rural education, unified"
+        eyebrow={
+          <>
+            Creating <span className="tqi-apricot-underline">socially responsible</span> leaders
+            across Tamil Nadu.
+          </>
+        }
+      />
+
+      <section className="tqi-login-form-side">
+        <MobileBrandStrip />
+        <div className="tqi-login-card tqi-rise">
+          <CardBrandMark />
+          <h1 className="tqi-login-h1">Welcome back</h1>
+          <p className="tqi-login-sub2">Sign in to your Talent Quest workspace.</p>
+
+          {errorMessage && (
+            <div className="tqi-alert tqi-alert-error" style={{ marginTop: '1rem', marginBottom: 0 }}>
+              <AlertCircle size={14} weight="light" className="shrink-0" />
+              <span>{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Method toggle: Password / OTP */}
+          <div className="tqi-login-method" style={{ marginTop: '1.1rem' }} role="tablist" aria-label="Sign-in method">
+            <button
+              type="button"
+              className="tqi-login-method-btn"
+              data-active={activeMethod === 'password'}
+              onClick={() => { setActiveMethod('password'); setOtpRequested(false); setErrorMessage(null); }}
+              role="tab"
+              aria-selected={activeMethod === 'password'}
+            >
+              <Lock size={13} weight="light" /> Password
+            </button>
+            <button
+              type="button"
+              className="tqi-login-method-btn"
+              data-active={activeMethod === 'otp'}
+              onClick={() => { setActiveMethod('otp'); setErrorMessage(null); }}
+              role="tab"
+              aria-selected={activeMethod === 'otp'}
+            >
+              <Hash size={13} weight="light" /> OTP code
+            </button>
           </div>
-        </div>
 
-        <div className="hidden sm:flex items-center gap-4 text-xs font-semibold text-gray-500 dark:text-gray-400">
-          <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-            System Live & Secure
-          </span>
-        </div>
-      </header>
-
-      {/* Main Split Body */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12">
-        
-        {/* Left Side: Visual Hero & Social Proof */}
-        <div className="relative hidden lg:col-span-7 bg-gradient-to-br from-[#ebf3ff]/90 via-[#f4f7fe]/70 to-[#ffffff] dark:from-gray-900 dark:via-gray-950 dark:to-gray-900 p-12 xl:p-20 lg:flex flex-col justify-center overflow-hidden border-r border-gray-100 dark:border-gray-800">
-          
-          {/* Subtle Ambient Glow Elements */}
-          <div className="absolute top-10 right-10 w-96 h-96 rounded-full bg-blue-200/40 dark:bg-blue-900/20 blur-3xl pointer-events-none" />
-          <div className="absolute bottom-10 left-10 w-80 h-80 rounded-full bg-orange-200/30 dark:bg-orange-900/10 blur-3xl pointer-events-none" />
-
-          {/* Floating Glassmorphism Mockup Card */}
-          <div className="relative z-10 max-w-xl">
-            <h1 className="text-4xl xl:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight leading-[1.18]">
-              Empowering<br />
-              Rural Education<br />
-              & Impact
-            </h1>
-
-            <p className="mt-6 text-base text-gray-600 dark:text-gray-300 leading-relaxed max-w-md font-normal">
-              Streamline statewide cluster operations, coordinate college volunteers, manage village centers, and track rural student progress with Talent Quest for India's unified platform.
-            </p>
-
-            {/* Social Proof Avatars & Counter */}
-            <div className="mt-10 pt-8 border-t border-blue-100/80 dark:border-gray-800 flex items-center gap-4">
-              <div className="flex -space-x-3 overflow-hidden">
-                <img
-                  className="inline-block h-10 w-10 rounded-full ring-2 ring-white dark:ring-gray-900 object-cover"
-                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-                  alt="Volunteer"
-                />
-                <img
-                  className="inline-block h-10 w-10 rounded-full ring-2 ring-white dark:ring-gray-900 object-cover"
-                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80"
-                  alt="Coordinator"
-                />
-                <img
-                  className="inline-block h-10 w-10 rounded-full ring-2 ring-white dark:ring-gray-900 object-cover"
-                  src="https://images.unsplash.com/photo-1517841905240-472988babdf9?w=100&auto=format&fit=crop&q=80"
-                  alt="Student"
+          <form onSubmit={handleSubmit}>
+            <div style={{ marginBottom: '0.85rem' }}>
+              <label className="tqi-login-label" htmlFor="login-email">Work email</label>
+              <div className="tqi-login-input-wrap">
+                <Mail size={16} weight="light" className="tqi-login-input-icon" />
+                <input
+                  id="login-email"
+                  type="email"
+                  required
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(e) => { setIdentifier(e.target.value); setErrorMessage(null); }}
+                  placeholder="name@college.org"
+                  className="tqi-login-input"
                 />
               </div>
-              <div className="text-xs font-semibold text-gray-700 dark:text-gray-300">
-                Join <span className="font-bold text-[#c04800] dark:text-orange-400">10,000+</span> volunteers & students across Tamil Nadu
+            </div>
+
+            {activeMethod === 'password' ? (
+              <div style={{ marginBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label className="tqi-login-label" htmlFor="login-password" style={{ marginBottom: 0 }}>Password</label>
+                  <button
+                    type="button"
+                    onClick={openForgot}
+                    className="tqi-login-link"
+                  >
+                    Forgot?
+                  </button>
+                </div>
+                <div className="tqi-login-input-wrap" style={{ marginTop: '0.4rem' }}>
+                  <Lock size={16} weight="light" className="tqi-login-input-icon" />
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => { setPassword(e.target.value); setErrorMessage(null); }}
+                    placeholder="Enter your password"
+                    className="tqi-login-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="tqi-login-input-action"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff size={16} weight="light" /> : <Eye size={16} weight="light" />}
+                  </button>
+                </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Side: Sign In Card */}
-        <div className="lg:col-span-5 flex flex-col items-center justify-center p-6 sm:p-10 lg:p-12">
-          <div className="w-full max-w-md rounded-3xl border border-gray-100 dark:border-gray-800/90 bg-white dark:bg-gray-900 p-8 sm:p-10 shadow-2xl shadow-slate-200/50 dark:shadow-none">
-            
-            {/* Header: Welcome Back */}
-            <div className="mb-6 text-center">
-              <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
-                Welcome Back
-              </h2>
-              <p className="mt-1.5 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                Please enter your details to sign in.
-              </p>
-            </div>
-
-            {/* Error Banner */}
-            {errorMessage && (
-              <div className="mb-5 rounded-xl border border-error-200 bg-error-50 p-3 text-xs font-medium text-error-600 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-400">
-                {errorMessage}
+            ) : (
+              <div style={{ marginBottom: '0.85rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <label className="tqi-login-label" style={{ marginBottom: 0 }}>Verification code</label>
+                  {otpRequested && (
+                    <button
+                      type="button"
+                      onClick={() => { setOtpRequested(false); setOtp(''); setErrorMessage(null); }}
+                      style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--cobalt)' }}
+                    >
+                      Resend
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={otp}
+                  onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); setErrorMessage(null); }}
+                  placeholder="000000"
+                  className="tqi-login-input tqi-num"
+                  style={{ marginTop: '0.4rem', textAlign: 'center', letterSpacing: '0.45em', fontWeight: 700, fontSize: '1rem', paddingLeft: '0.875rem', paddingRight: '0.875rem' }}
+                />
+                <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
+                  {otpRequested ? 'Code sent. Check your inbox.' : 'Tap "Send code" to receive a 6-digit OTP.'}
+                </span>
               </div>
             )}
 
-            {/* Login Form */}
-            <form onSubmit={handleSubmit} className="space-y-4">
-              
-              {/* Work Email */}
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5" htmlFor="login-email">
-                  Work Email
-                </label>
-                <div className="relative">
-                  <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                  <input
-                    id="login-email"
-                    type="email"
-                    required
-                    autoComplete="username"
-                    value={identifier}
-                    onChange={(e) => { setIdentifier(e.target.value); setErrorMessage(null); }}
-                    placeholder="name@company.com"
-                    className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-3.5 py-2.5 text-xs font-medium text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-[#f06e00] focus:ring-1 focus:ring-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                  />
-                </div>
-              </div>
+            <label className="tqi-login-checkbox" style={{ margin: '0.4rem 0 1rem' }}>
+              <input
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
+              />
+              <span className="tqi-hide-mobile">Keep me signed in for 30 days</span>
+              <span className="tqi-show-mobile">Remember me</span>
+            </label>
 
-              {/* Password or OTP */}
-              {activeMethod === 'password' ? (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300" htmlFor="login-password">
-                      Password
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => setShowForgotModal(true)}
-                      className="text-xs font-semibold text-[#c04800] hover:text-[#d96300] dark:text-orange-400"
-                    >
-                      Forgot Password?
-                    </button>
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                    <input
-                      id="login-password"
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      autoComplete="current-password"
-                      value={password}
-                      onChange={(e) => { setPassword(e.target.value); setErrorMessage(null); }}
-                      placeholder="••••••••"
-                      className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-10 py-2.5 text-xs font-medium text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-[#f06e00] focus:ring-1 focus:ring-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 cursor-pointer"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    >
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
-                  </div>
-                </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="tqi-login-primary"
+            >
+              {isLoading ? (
+                <>
+                  <span className="tqi-spinner" style={{ width: 14, height: 14 }} />
+                  <span>Signing you in…</span>
+                </>
               ) : (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300">
-                      Verification Code
-                    </label>
-                    {otpRequested && (
-                      <button
-                        type="button"
-                        onClick={() => { setOtpRequested(false); setOtp(''); setErrorMessage(null); }}
-                        className="text-xs font-semibold text-[#c04800] hover:underline"
-                      >
-                        Resend
-                      </button>
-                    )}
-                  </div>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    maxLength={6}
-                    value={otp}
-                    onChange={(e) => { setOtp(e.target.value.replace(/\D/g, '')); setErrorMessage(null); }}
-                    placeholder="000000"
-                    className="w-full rounded-xl border border-gray-200 bg-white py-2.5 text-center tracking-[0.5em] font-bold text-sm text-gray-800 focus:border-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                  />
-                </div>
+                <>
+                  <span>{activeMethod === 'otp' && !otpRequested ? 'Send code' : 'Sign in'}</span>
+                  <ArrowRight size={16} weight="light" />
+                </>
               )}
+            </button>
 
-              {/* Remember me */}
-              <div className="flex items-center justify-between pt-1">
-                <label className="flex items-center gap-2 cursor-pointer text-xs text-gray-600 dark:text-gray-400 select-none">
-                  <input
-                    type="checkbox"
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-[#f06e00] focus:ring-[#f06e00] dark:border-gray-700 dark:bg-gray-800"
-                  />
-                  <span>Remember me for 30 days</span>
-                </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setActiveMethod(activeMethod === 'password' ? 'otp' : 'password');
-                    setOtpRequested(false);
-                    setErrorMessage(null);
-                  }}
-                  className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-                >
-                  Use {activeMethod === 'password' ? 'OTP Sign In' : 'Password'}
-                </button>
-              </div>
-
-              {/* Sign In Button (Vibrant Orange as shown in screenshot) */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full mt-2 rounded-xl bg-[#f06e00] hover:bg-[#db6200] active:scale-[0.99] text-white font-bold py-3 text-xs sm:text-sm shadow-lg shadow-orange-500/25 transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              >
-                {isLoading ? (
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                ) : (
-                  <span>Sign In</span>
-                )}
-              </button>
-            </form>
-
-            {/* Quick Demo Access (Replaces Google/Microsoft SSO) */}
-            <div className="mt-6 pt-5 border-t border-gray-100 dark:border-gray-800">
-              <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider text-center mb-3">
-                Quick Role Credentials
-              </p>
-              <div className="grid grid-cols-3 gap-2">
-                {quickRoles.map((qr) => (
+            <div className="tqi-login-divider">Quick demo</div>
+            <div className="tqi-login-roles">
+              {quickRoles.map((qr) => {
+                const active = identifier === qr.email;
+                return (
                   <button
                     key={qr.label}
                     type="button"
                     onClick={() => applyQuickRole(qr)}
-                    className={`px-2 py-2 rounded-xl border text-[11px] font-semibold transition text-center truncate ${
-                      identifier === qr.email
-                        ? 'border-[#f06e00] bg-orange-50 text-[#c04800] dark:bg-orange-500/10 dark:text-orange-400'
-                        : 'border-gray-200 bg-gray-50/70 text-gray-600 hover:bg-gray-100 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300'
-                    }`}
+                    className="tqi-login-role"
+                    data-active={active}
                   >
-                    {qr.label.split(' ')[0]}
+                    {qr.label}
                   </button>
-                ))}
-              </div>
+                );
+              })}
             </div>
-
-          </div>
+            <p className="tqi-login-secondary-text">
+              By signing in you agree to the <a href="#terms">Terms</a> and <a href="#privacy">Privacy Policy</a>.
+            </p>
+          </form>
         </div>
-      </div>
+      </section>
 
-      {/* Forgot Password Modal */}
+      {/* ============= Forgot password modal ============= */}
       {showForgotModal && (
-        <div className="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto bg-gray-900/60 p-4 backdrop-blur-sm">
-          <div className="relative w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 animate-in fade-in-0 zoom-in-95">
-            <div className="flex items-center justify-between pb-3 border-b border-gray-100 dark:border-gray-800">
-              <h3 className="text-sm font-bold text-gray-900 dark:text-white">Reset Password</h3>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tqi-forgot-title"
+          className="tqi-modal-mobile-full"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'color-mix(in srgb, var(--login-ink) 40%, transparent)',
+            backdropFilter: 'blur(8px)',
+            padding: '1rem',
+          }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeForgot(); }}
+          onKeyDown={(e) => { if (e.key === 'Escape') closeForgot(); }}
+        >
+          <div
+            className="tqi-login-card tqi-modal-panel"
+            style={{ maxWidth: 380, position: 'relative' }}
+            onKeyDown={(e) => { if (e.key === 'Escape') closeForgot(); }}
+          >
+            <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '0.75rem', borderBottom: '1px solid var(--border)' }}>
+              <h2 id="tqi-forgot-title" style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--text)', margin: 0 }}>
+                Reset password
+              </h2>
               <button
                 type="button"
-                onClick={() => { setShowForgotModal(false); setForgotSent(false); }}
-                className="text-gray-400 hover:text-gray-600"
+                onClick={closeForgot}
+                disabled={forgotStatus === 'sending'}
+                className="tqi-login-link"
+                aria-label="Close reset password dialog"
+                style={{ width: 32, height: 32, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                <X className="h-4 w-4" />
+                <X size={16} weight="light" />
               </button>
-            </div>
-            {forgotSent ? (
-              <div className="py-4 text-center space-y-2">
-                <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto" />
-                <p className="text-xs font-semibold text-gray-800 dark:text-white">Reset instructions sent!</p>
-                <p className="text-xs text-gray-500">Please check your inbox at {forgotEmail || identifier}.</p>
+            </header>
+
+            {forgotStatus === 'sent' ? (
+              <div style={{ paddingTop: '1rem', textAlign: 'center' }}>
+                <div style={{ width: 56, height: 56, borderRadius: 16, margin: '0 auto 0.75rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'var(--success-bg)', color: 'var(--success)' }}>
+                  <CheckCircle2 size={28} weight="light" />
+                </div>
+                <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text)' }}>Reset link sent</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--login-muted)', marginTop: '0.25rem', lineHeight: 1.5 }}>
+                  If <strong style={{ color: 'var(--text)' }}>{(forgotEmail || identifier).trim()}</strong> is registered, you'll receive a one-time reset link valid for 15 minutes.
+                </p>
                 <button
                   type="button"
-                  onClick={() => { setShowForgotModal(false); setForgotSent(false); }}
-                  className="mt-3 w-full rounded-xl bg-gray-100 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-200"
+                  onClick={closeForgot}
+                  className="tqi-login-primary"
+                  style={{ marginTop: '1rem' }}
                 >
-                  Close
+                  <span>Back to sign in</span>
+                  <ArrowRight size={16} weight="light" />
                 </button>
               </div>
             ) : (
-              <form onSubmit={(e) => { e.preventDefault(); setForgotSent(true); }} className="mt-4 space-y-3">
-                <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
-                  Enter your registered work email to receive password reset authorization.
+              <form onSubmit={handleForgotSubmit} style={{ marginTop: '1rem' }}>
+                <p style={{ fontSize: '0.75rem', color: 'var(--login-muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
+                  Enter your registered work email. We'll send a one-time reset link valid for 15 minutes.
                 </p>
-                <input
-                  type="email"
-                  required
-                  value={forgotEmail || identifier}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  placeholder="name@company.com"
-                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 focus:border-[#f06e00] focus:outline-none dark:border-gray-800 dark:bg-gray-950 dark:text-white"
-                />
-                <div className="flex justify-end gap-2 pt-2">
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <label className="tqi-login-label" htmlFor="forgot-email">Work email</label>
+                  <div className="tqi-login-input-wrap">
+                    <Mail size={16} weight="light" className="tqi-login-input-icon" />
+                    <input
+                      id="forgot-email"
+                      type="email"
+                      required
+                      autoFocus
+                      value={forgotEmail || identifier}
+                      onChange={(e) => { setForgotEmail(e.target.value); if (forgotError) setForgotError(null); }}
+                      className="tqi-login-input"
+                      placeholder="name@college.org"
+                    />
+                  </div>
+                </div>
+
+                {forgotError && (
+                  <div className="tqi-alert tqi-alert-error" style={{ marginBottom: '0.75rem' }}>
+                    <AlertCircle size={14} weight="light" className="shrink-0" />
+                    <span>{forgotError}</span>
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', justifyContent: 'flex-end' }}>
                   <button
                     type="button"
-                    onClick={() => setShowForgotModal(false)}
-                    className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                    onClick={closeForgot}
+                    disabled={forgotStatus === 'sending'}
+                    className="tqi-btn-ghost tqi-touch"
+                    style={{ height: 38, padding: '0 0.875rem' }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
-                    className="px-4 py-1.5 rounded-xl bg-[#f06e00] text-white text-xs font-bold shadow-theme-xs hover:bg-[#db6200]"
+                    disabled={forgotStatus === 'sending'}
+                    className="tqi-login-primary"
+                    style={{ width: 'auto', height: 38, padding: '0 1.1rem', fontSize: '0.8125rem' }}
                   >
-                    Send Link
+                    {forgotStatus === 'sending' ? (
+                      <>
+                        <span className="tqi-spinner" style={{ width: 14, height: 14 }} />
+                        <span>Sending…</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Send link</span>
+                        <ArrowRight size={14} weight="light" />
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -553,23 +713,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
           </div>
         </div>
       )}
-
-      {/* Bottom Footer Bar */}
-      <footer className="border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 px-6 sm:px-12 py-4 flex flex-col sm:flex-row items-center justify-between text-xs text-gray-500 dark:text-gray-400 gap-3">
-        <div>
-          &copy; 2026 Talent Quest for India. All rights reserved.
-        </div>
-        <div className="flex items-center gap-4 text-xs font-medium">
-          <span className="hover:text-gray-800 dark:hover:text-white cursor-pointer transition">Privacy Policy</span>
-          <span>&middot;</span>
-          <span className="hover:text-gray-800 dark:hover:text-white cursor-pointer transition">Terms of Service</span>
-          <span>&middot;</span>
-          <span className="hover:text-gray-800 dark:hover:text-white cursor-pointer transition">Help Center</span>
-          <span>&middot;</span>
-          <span className="hover:text-gray-800 dark:hover:text-white cursor-pointer transition">Security</span>
-        </div>
-      </footer>
-
     </div>
   );
 };

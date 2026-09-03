@@ -6,7 +6,7 @@ import {
   Info, 
   Check, 
   ArrowRight
-} from 'lucide-react';
+} from './ui/icons';
 import { TabType, NotificationItem } from '../types';
 import { LottieIllustration } from './LottieIllustration';
 

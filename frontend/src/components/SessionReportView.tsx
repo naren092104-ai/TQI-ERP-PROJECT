@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { FileText, Users, ClipboardList, AlertTriangle, MessageSquare, Save, Send, Eye, XCircle, Search } from 'lucide-react';
+import { FileText, Users, ClipboardList, AlertTriangle, MessageSquare, Save, Send, Eye, XCircle, Search } from './ui/icons';
 import type { SessionReport, Session, UserRole } from '../types';
 import {
   Select,

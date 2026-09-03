@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { TqiModule, UserRole } from '../types';
-import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3 } from 'lucide-react';
+import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3 } from './ui/icons';
 import {
   Select,
   SelectContent,

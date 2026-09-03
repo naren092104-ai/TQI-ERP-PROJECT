@@ -1,4 +1,7 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { X } from './icons';
+
+export type ModalSize = "sm" | "md" | "lg" | "full";
 
 export interface ModalProps {
   isOpen: boolean;
@@ -7,9 +10,35 @@ export interface ModalProps {
   children: React.ReactNode;
   showCloseButton?: boolean;
   isFullscreen?: boolean;
+  size?: ModalSize;
   title?: string;
   subtitle?: string;
+  /** Render as a bottom sheet on mobile (slides up instead of centered). */
+  sheetOnMobile?: boolean;
 }
+
+const MOBILE_QUERY = "(max-width: 768px)";
+
+const useMediaQuery = (query: string) => {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(query).matches : false
+  );
+  useEffect(() => {
+    const m = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    m.addEventListener("change", handler);
+    setMatches(m.matches);
+    return () => m.removeEventListener("change", handler);
+  }, [query]);
+  return matches;
+};
+
+const sizeMaxWidth: Record<ModalSize, string> = {
+  sm: "max-w-sm",
+  md: "max-w-2xl",
+  lg: "max-w-4xl",
+  full: "max-w-[96vw]",
+};
 
 export const Modal: React.FC<ModalProps> = ({
   isOpen,
@@ -18,60 +47,111 @@ export const Modal: React.FC<ModalProps> = ({
   className = "",
   showCloseButton = true,
   isFullscreen = false,
+  size = "md",
   title,
   subtitle,
+  sheetOnMobile = false,
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
+  const isMobile = useMediaQuery(MOBILE_QUERY);
+
+  const handleEscape = useCallback(
+    (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    },
+    [onClose]
+  );
 
   useEffect(() => {
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-      }
-    };
-
     if (isOpen) {
       document.addEventListener("keydown", handleEscape);
       document.body.style.overflow = "hidden";
     } else {
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = "";
     }
-
     return () => {
       document.removeEventListener("keydown", handleEscape);
-      document.body.style.overflow = "unset";
+      document.body.style.overflow = "";
     };
-  }, [isOpen, onClose]);
+  }, [isOpen, handleEscape]);
 
   if (!isOpen) return null;
 
-  const contentClasses = isFullscreen
-    ? "w-full h-full"
-    : "relative w-full max-w-2xl rounded-2xl border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900";
+  // On mobile, default to full-screen unless the consumer explicitly opted out.
+  const mobileFullscreen = isMobile && !className.includes("tqi-modal-no-fullscreen");
+  const isFull = isFullscreen || mobileFullscreen || size === "full";
+  const asSheet = sheetOnMobile && isMobile && !isFullscreen;
+
+  const contentClasses = isFull
+    ? 'w-full h-full'
+    : `relative w-full ${sizeMaxWidth[size]} z-10`;
+
+  const containerClasses = asSheet
+    ? 'fixed inset-0 z-[80] flex items-end justify-center'
+    : 'fixed inset-0 z-[80] flex items-center justify-center overflow-y-auto p-3 sm:p-6';
+
+  const motionStyle: React.CSSProperties = asSheet
+    ? {
+        animation:
+          'tqi-modal-in var(--dur-medium, 480ms) var(--ease-out-expo) both',
+      }
+    : {
+        animation:
+          'tqi-modal-in var(--dur-medium, 480ms) var(--ease-out-expo) both',
+      };
 
   return (
-    <div className="fixed inset-0 z-99999 flex items-center justify-center overflow-y-auto p-4 sm:p-6">
-      {!isFullscreen && (
-        <div
-          className="fixed inset-0 h-full w-full bg-gray-900/60 backdrop-blur-sm transition-opacity"
-          onClick={onClose}
-        />
-      )}
+    <div className={containerClasses}>
+      <div
+        className="fixed inset-0 h-full w-full"
+        onClick={onClose}
+        aria-hidden
+        style={{
+          background:
+            'color-mix(in srgb, color-mix(in srgb, var(--text) 22%, transparent) 80%, transparent)',
+          backdropFilter: 'blur(8px) saturate(160%)',
+          WebkitBackdropFilter: 'blur(8px) saturate(160%)',
+          animation:
+            'tqi-fade-in var(--dur-fast, 220ms) var(--ease-out-quart) both',
+        }}
+      />
       <div
         ref={modalRef}
-        className={`${contentClasses} z-10 max-h-[90vh] overflow-y-auto custom-scrollbar ${className}`}
+        className={`${contentClasses} ${asSheet ? 'rounded-t-3xl rounded-b-none' : ''} ${isFull ? '' : 'max-h-[92vh] rounded-2xl'} overflow-y-auto custom-scrollbar ${className}`}
         onClick={(e) => e.stopPropagation()}
+        style={{
+          ...motionStyle,
+          background: 'var(--card)',
+          border: '1px solid var(--border)',
+          boxShadow:
+            '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 32px 80px -24px rgba(15, 23, 42, 0.4)',
+        }}
       >
         {(title || showCloseButton) && (
-          <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4 dark:border-gray-800">
-            <div>
+          <div
+            className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 ${asSheet ? 'rounded-t-3xl' : ''}`}
+            style={{
+              background:
+                'color-mix(in srgb, var(--card) 90%, transparent)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div className="min-w-0 flex-1">
               {title && (
-                <h3 className="text-lg font-semibold text-gray-800 dark:text-white/90">
+                <h3
+                  className="truncate text-[15px] sm:text-[17px] font-semibold tracking-tight"
+                  style={{ color: 'var(--text)' }}
+                >
                   {title}
                 </h3>
               )}
               {subtitle && (
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                <p
+                  className="mt-0.5 truncate text-[12px]"
+                  style={{ color: 'var(--text-muted)' }}
+                >
                   {subtitle}
                 </p>
               )}
@@ -79,27 +159,33 @@ export const Modal: React.FC<ModalProps> = ({
             {showCloseButton && (
               <button
                 onClick={onClose}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-400 transition hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-white"
+                className="tqi-touch ml-2 inline-flex shrink-0 items-center justify-center transition-all"
+                style={{
+                  width: 32,
+                  height: 32,
+                  color: 'var(--text-muted)',
+                  background:
+                    'color-mix(in srgb, var(--surface) 60%, transparent)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: 'var(--radius-md, 10px)',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--surface-hover)';
+                  e.currentTarget.style.color = 'var(--text)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background =
+                    'color-mix(in srgb, var(--surface) 60%, transparent)';
+                  e.currentTarget.style.color = 'var(--text-muted)';
+                }}
                 aria-label="Close"
               >
-                <svg
-                  width="20"
-                  height="20"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18"></line>
-                  <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
+                <X size={14} weight="light" />
               </button>
             )}
           </div>
         )}
-        <div className="p-6">{children}</div>
+        <div className={`p-4 sm:p-6 ${isFull ? 'flex-1' : ''}`}>{children}</div>
       </div>
     </div>
   );

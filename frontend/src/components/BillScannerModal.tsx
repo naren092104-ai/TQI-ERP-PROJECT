@@ -16,7 +16,7 @@ import {
   Layers,
   Sliders,
   ScanLine
-} from 'lucide-react';
+} from './ui/icons';
 import { ActionButton } from './ui/action-button';
 
 export interface BillAttachment {
@@ -249,8 +249,8 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-gray-950/85 backdrop-blur-sm animate-in fade-in-0 duration-200">
-      <div className="relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
+    <div className="tqi-modal-mobile-full fixed inset-0 z-[100000] flex items-center justify-center p-4 bg-gray-950/85 backdrop-blur-sm animate-in fade-in-0 duration-200">
+      <div className="tqi-modal-panel relative w-full max-w-2xl max-h-[92vh] flex flex-col rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
         {/* Header */}
         <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
           <div className="flex items-center gap-2">

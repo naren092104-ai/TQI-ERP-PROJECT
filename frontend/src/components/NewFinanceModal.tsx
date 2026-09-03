@@ -18,7 +18,7 @@ import {
   ReceiptIndianRupee,
   Calendar,
   Building2,
-} from 'lucide-react';
+} from './ui/icons';
 import { ActionButton } from './ui/action-button';
 import {
   Select,
@@ -539,8 +539,8 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
 
   return (
     <>
-      <div className="fixed inset-0 z-[99999] flex items-center justify-center p-0 sm:p-4 md:p-6 bg-gray-900/75 backdrop-blur-sm animate-in fade-in-0 duration-200">
-        <div className="relative w-full h-full sm:h-auto sm:max-h-[94vh] sm:max-w-4xl flex flex-col rounded-none sm:rounded-2xl border-0 sm:border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
+      <div className="tqi-modal-mobile-full fixed inset-0 z-[99999] flex items-center justify-center p-0 sm:p-4 md:p-6 bg-gray-900/75 backdrop-blur-sm animate-in fade-in-0 duration-200">
+        <div className="tqi-modal-panel relative w-full h-full sm:h-auto sm:max-h-[94vh] sm:max-w-4xl flex flex-col rounded-none sm:rounded-2xl border-0 sm:border border-gray-200 bg-white shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 overflow-hidden">
           {/* Top Modal Header */}
           <div className="px-4 sm:px-6 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2.5">

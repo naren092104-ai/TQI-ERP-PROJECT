@@ -51,6 +51,17 @@ import DateChangeRequestView from './components/DateChangeRequestView';
 import SessionReportView from './components/SessionReportView';
 import SessionSubmissionView from './components/SessionSubmissionView';
 import { apiUrl } from './utils/api';
+import { CommandPalette } from './components/ui/CommandPalette';
+import { NotFoundView } from './components/NotFoundView';
+
+const KNOWN_TABS: Set<string> = new Set([
+  'dashboard', 'academic-setup', 'approvals', 'clusters', 'audit-logs', 'users',
+  'panchayats', 'panchayat-detail', 'students', 'volunteers', 'sessions',
+  'attendance', 'lesson-plan', 'session-photos',
+  'finance', 'finance-statement', 'reports', 'report-preview',
+  'notifications', 'settings', 'date-change-requests',
+  'session-reports', 'session-submissions', 'module-library',
+]);
 
 
 export default function App() {
@@ -73,8 +84,15 @@ export default function App() {
   // Navigation & View State
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
-      const savedTab = localStorage.getItem(`tqi_current_tab_${currentUser?.role || 'Super Admin'}`) as TabType | null;
-      return savedTab === 'academic-setup' && currentUser?.role !== 'Super Admin' ? 'dashboard' : savedTab || 'dashboard';
+      const role = currentUser?.role || 'Super Admin';
+      const savedTab = localStorage.getItem(`tqi_current_tab_${role}`) as TabType | null;
+      if (!savedTab) return 'dashboard';
+      // Stale localStorage from older builds may have stored tabs that no
+      // longer exist (e.g. 'attendance-draft'). Normalize them back to
+      // 'dashboard' so the user doesn't land on a blank pane.
+      if (savedTab === 'academic-setup' && role !== 'Super Admin') return 'dashboard';
+      if (!KNOWN_TABS.has(savedTab)) return 'dashboard';
+      return savedTab;
     } catch {
       return 'dashboard';
     }
@@ -87,6 +105,23 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [selectedLessonPlanId, setSelectedLessonPlanId] = useState<string | undefined>(undefined);
+  const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
+
+  // Global ⌘K / Ctrl+K to open the command palette
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (isMod && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((p) => !p);
+      } else if (e.key === '/' && document.activeElement === document.body) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     try {
@@ -1505,10 +1540,30 @@ export default function App() {
                   onDownloadResource={handleDownloadModuleResource}
                 />
               )}
+
+              {/* Fallback for unknown / future tabs */}
+              {!KNOWN_TABS.has(currentTab) && (
+                <NotFoundView
+                  onBack={() => setCurrentTab('dashboard')}
+                  title="This workspace is being built"
+                  message={`The "${currentTab}" view is not available in this build. Head back to the dashboard to continue.`}
+                />
+              )}
             </ErrorBoundary>
           </div>
         </main>
       </div>
+
+      {/* Command palette — overlay above everything */}
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={(tab) => {
+          handleNavigate(tab);
+          setPaletteOpen(false);
+        }}
+        currentUserRole={currentUserRole}
+      />
     </div>
   );
 }

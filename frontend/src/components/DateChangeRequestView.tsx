@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, Clock, CheckCircle2, XCircle, Send, AlertCircle, Filter, Search, ChevronDown, Eye } from 'lucide-react';
+import { Calendar, Clock, CheckCircle2, XCircle, Send, AlertCircle, Filter, Search, ChevronDown, Eye } from './ui/icons';
 import type { DateChangeRequest, Session, UserRole } from '../types';
 import {
   Select,
@@ -172,7 +172,7 @@ const DateChangeRequestView: React.FC<DateChangeRequestViewProps> = ({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+          <table className="tqi-table-compact w-full text-left border-collapse">
             <thead>
               <tr className="bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-700 text-sm text-gray-600 dark:text-gray-400">
                 {isSuperAdmin && <th className="p-4 font-medium">Cluster</th>}

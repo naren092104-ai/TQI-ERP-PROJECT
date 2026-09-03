@@ -18,7 +18,7 @@ import {
   Send,
   FileSpreadsheet,
   ArrowRight,
-} from 'lucide-react';
+} from './ui/icons';
 import {
   Select,
   SelectContent,

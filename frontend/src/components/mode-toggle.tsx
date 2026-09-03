@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Moon, Sun, Monitor, Check } from 'lucide-react';
+import { Moon, Sun, Monitor, Check } from './ui/icons';
 import { useTheme } from './theme-provider';
 
 export function ModeToggle() {

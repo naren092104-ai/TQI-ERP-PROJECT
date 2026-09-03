@@ -9,7 +9,7 @@ import {
   X,
   ExternalLink,
   ChevronRight
-} from 'lucide-react';
+} from './ui/icons';
 import { TabType, Panchayat } from '../types';
 import Badge from './ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableCell } from './ui/table';

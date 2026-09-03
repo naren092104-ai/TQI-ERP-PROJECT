@@ -20,6 +20,8 @@ const baseConfig: PoolOptions = {
   timezone: '+00:00',
 };
 
+import { initDatabaseSchema } from './init.js';
+
 export let pool: Pool;
 
 export async function initializeDatabase(): Promise<void> {
@@ -44,7 +46,12 @@ export async function initializeDatabase(): Promise<void> {
     database: DB_NAME,
   });
   console.log(`[DB] Connection pool created for '${DB_NAME}'.`);
+
+  // Automatically initialize all tables, columns, and initial Super Admin
+  await initDatabaseSchema();
 }
+
+export { initDatabaseSchema };
 
 export async function testDatabaseConnection(): Promise<void> {
   if (!pool) {
@@ -62,4 +69,5 @@ export async function getDatabaseStatus(): Promise<'connected' | 'disconnected'>
     return 'disconnected';
   }
 }
+
 

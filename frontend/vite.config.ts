@@ -10,7 +10,20 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, 'src'),
+        // `@react-pdf/renderer` references Node's `Buffer`; alias to the
+        // browser polyfill so Vite resolves it correctly.
+        buffer: 'buffer/',
       },
+    },
+    define: {
+      // Expose Node-style globals that `@react-pdf/renderer` reaches for
+      // at runtime in the browser. The actual Buffer instance is attached
+      // to `globalThis` in `src/utils/pdf/styles.ts`.
+      'globalThis.Buffer': 'globalThis.Buffer',
+      global: 'globalThis',
+    },
+    optimizeDeps: {
+      include: ['buffer', '@react-pdf/renderer'],
     },
     server: {
       port: 5173,

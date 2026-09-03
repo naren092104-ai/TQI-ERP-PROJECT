@@ -14,7 +14,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Trash2
-} from 'lucide-react';
+} from './ui/icons';
 import { Cluster, TabType } from '../types';
 import Badge from './ui/badge';
 import { ActionButton } from './ui/action-button';

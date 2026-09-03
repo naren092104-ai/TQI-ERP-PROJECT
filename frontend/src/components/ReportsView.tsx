@@ -607,7 +607,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         <div className="overflow-x-auto">
           {/* 1. Session Report Table */}
           {reportType === 'session' && (
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                   <th className="py-2.5 px-3.5">Date &amp; Code</th>
@@ -649,7 +649,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
           {/* 2. Lesson Plan Report Table */}
           {reportType === 'lesson-plan' && (
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                   <th className="py-2.5 px-3.5">Date &amp; Module</th>
@@ -690,7 +690,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
           {/* 3. Student Attendance Table */}
           {reportType === 'student-attendance' && (
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                   <th className="py-2.5 px-3.5">Panchayat</th>
@@ -728,7 +728,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
           {/* 4. Volunteer Attendance Table */}
           {reportType === 'volunteer-attendance' && (
-            <table className="w-full text-left border-collapse text-xs">
+            <table className="tqi-table-compact w-full text-left border-collapse text-xs">
               <thead>
                 <tr className="bg-slate-50/50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                   <th className="py-2.5 px-3.5">Volunteer Mentor</th>

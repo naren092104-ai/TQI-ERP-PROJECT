@@ -56,14 +56,13 @@ async function resetAndSeed() {
     // Create default super admin: username "admin" / email "admin@tqi.org" with password "admin123"
     const passwordHash = await bcrypt.hash('admin123', 10);
 
-    console.log('[RESET] Seeding default Super Admin user (name: Admin, email: admin@tqi.org / admin / admin@gmail.com, password: admin123)...');
+    console.log('[RESET] Seeding default Super Admin user (name: Admin, email: admin@tqi.org / admin, password: admin123)...');
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES
        ('usr-super-admin', 'Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-alias', 'Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-gmail', 'Admin', 'admin@gmail.com', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
+       ('usr-admin-alias', 'Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
        ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), must_change_password = FALSE, status = 'ACTIVE'`,
-      [passwordHash, passwordHash, passwordHash],
+      [passwordHash, passwordHash],
     );
 
     // Seed standard reference modules

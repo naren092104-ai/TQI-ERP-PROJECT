@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Search, X } from 'lucide-react';
+import { Search, X } from './ui/icons';
 
 interface SessionPhotosViewProps {
   panchayats: Panchayat[];

@@ -302,6 +302,10 @@ export interface FinanceEntry {
   countAmount?: string;
   sessionDay?: string;
   draftId?: string;
+  submittedAt?: string;
+  updatedAt?: string;
+  submittedBy?: string;
+  vendor?: string;
 }
 
 export interface RouteDraftItem {
@@ -495,6 +499,9 @@ export interface AttendanceSession {
   lastSaved?: string;
   adminComment?: string;
   correctionReason?: string;
+  submittedAt?: string;
+  updatedAt?: string;
+  submittedBy?: string;
   records: AttendanceRecord[];
   volunteerAttendance?: VolunteerAttendanceRecord[];
 }

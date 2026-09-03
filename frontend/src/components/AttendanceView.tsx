@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AttendanceSession, Student, Panchayat, TabType, AttendanceRecord } from '../types';
 import { Badge } from './ui/badge';
-import { Check, X, Calendar, MapPin, Sparkles, CheckCircle2 } from 'lucide-react';
+import { Check, X, Calendar, MapPin, Sparkles, CheckCircle2 } from './ui/icons';
 import {
   Select,
   SelectContent,
@@ -746,7 +746,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <table className="tqi-table-compact w-full text-left border-collapse">
               <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
                 <tr>
                   <th className="px-5 py-3.5">Session &amp; Day</th>

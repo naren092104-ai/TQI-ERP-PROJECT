@@ -1,31 +1,33 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Users, 
-  GraduationCap, 
-  CalendarCheck, 
-  ReceiptIndianRupee, 
-  ShieldAlert, 
-  MapPin, 
-  Plus, 
-  CheckCircle2, 
-  ArrowRight, 
-  ChevronRight, 
-  Search, 
-  BookOpen, 
-  Clock, 
-  ExternalLink,
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Users,
+  Student as StudentIcon,
+  CalendarCheck,
+  CurrencyInr,
+  Warning,
+  MapPin,
+  Plus,
+  CheckCircle,
+  ArrowRight,
+  CaretRight,
+  Search,
   Calendar,
-  Sparkles,
-  TrendingUp,
+  TrendingUp as TrendingUpIcon,
+  TreeStructure,
+  BookOpen,
+  FileText,
+  Camera,
+  Circle,
+  Clock,
+  Sparkle,
   ArrowUpRight,
-  ArrowDownRight,
-  Layers
-} from 'lucide-react';
+  Pulse,
+} from './ui/icons';
 import { TabType, Panchayat, AttendanceSession, Cluster, ApprovalItem, UserRole, FinanceEntry, Session, Student, Volunteer } from '../types';
 import { apiUrl } from '../utils/api';
 import Badge from './ui/badge';
-import ComponentCard from './ui/ComponentCard';
-import { Table, TableBody, TableCell, TableHeader, TableRow } from './ui/table';
+import { AttendanceTrendChart } from './ui/AttendanceTrendChart';
+import { ActivityFeed, ActivityItem } from './ui/ActivityFeed';
 
 interface DashboardViewProps {
   onNavigate: (tab: TabType, targetId?: string) => void;
@@ -48,11 +50,30 @@ interface DashboardViewProps {
   volunteers?: Volunteer[];
 }
 
+const todayLabel = () => {
+  const d = new Date();
+  return d.toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' });
+};
+
+const formatINR = (n: number) =>
+  n >= 100000 ? `₹${(n / 100000).toFixed(1)}L` : `₹${n.toLocaleString('en-IN')}`;
+
+const relativeTime = (ts: number | string | Date): string => {
+  const t = typeof ts === 'number' ? ts : new Date(ts).getTime();
+  const diff = Date.now() - t;
+  if (Number.isNaN(diff) || diff < 0) return 'just now';
+  const m = 60_000, h = 60 * m, d = 24 * h;
+  if (diff < m) return 'just now';
+  if (diff < h) return `${Math.floor(diff / m)}m ago`;
+  if (diff < d) return `${Math.floor(diff / h)}h ago`;
+  if (diff < 7 * d) return `${Math.floor(diff / d)}d ago`;
+  return new Date(t).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+};
+
 export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigate,
-  onOpenNewSession,
-  onOpenNewFinance,
   onOpenNewAttendance,
+  onOpenNewFinance,
   panchayats = [],
   studentsCount = 0,
   volunteersCount = 0,
@@ -65,36 +86,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   clusterName = 'Dharmapuri Cluster',
   financeEntries = [],
   sessions = [],
-  students = [],
   volunteers = [],
 }) => {
   const [panchayatSearch, setPanchayatSearch] = useState('');
   const [setupDays, setSetupDays] = useState<{ dayNumber: number; sessionName: string }[]>([]);
   const isSuperAdmin = userRole === 'Super Admin';
   const pendingApprovals = approvals.filter((a) => a.status === 'Pending');
-  
-  // Total dynamic villages
-  const totalVillages = panchayats.reduce((sum, p) => sum + (p.villages?.length || p.villagesCount || 0), 0);
-  
-  // Total dynamic expenses calculated from verified entries
-  const totalExpenses = financeEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
 
-  // Dynamic unique colleges count
-  const uniqueColleges = Array.from(new Set(volunteers.map((v) => v.college).filter(Boolean)));
-  const collegesText = uniqueColleges.length > 0 
-    ? `${uniqueColleges.length} Partner College${uniqueColleges.length > 1 ? 's' : ''}` 
-    : 'No colleges mapped';
+  const totalVillages = useMemo(
+    () => panchayats.reduce((sum, p) => sum + (p.villages?.length || p.villagesCount || 0), 0),
+    [panchayats]
+  );
+  const totalExpenses = useMemo(
+    () => financeEntries.reduce((sum, f) => sum + (Number(f.amount) || 0), 0),
+    [financeEntries]
+  );
+  const uniqueColleges = useMemo(
+    () => Array.from(new Set(volunteers.map((v) => v.college).filter(Boolean))),
+    [volunteers]
+  );
 
-  // Load custom academic day names dynamically if configured
   useEffect(() => {
     fetch(apiUrl('/api/academic-setup'))
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.success && Array.isArray(data.setup)) {
-          setSetupDays(data.setup.map((s: { day_number: number; session_name: string }) => ({
-            dayNumber: s.day_number,
-            sessionName: s.session_name,
-          })));
+          setSetupDays(
+            data.setup.map((s: { day_number: number; session_name: string }) => ({
+              dayNumber: s.day_number,
+              sessionName: s.session_name,
+            }))
+          );
         }
       })
       .catch(() => {});
@@ -111,562 +133,752 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     8: { name: 'Culmination Showcase & Feedback', month: 'Apr', topic: 'Presentation' },
   };
 
-  // Build dynamic 8-day status based on logged attendance
-  const dynamicRoadmap = Array.from({ length: 8 }, (_, i) => {
-    const dayNum = i + 1;
-    const customConfig = setupDays.find((s) => s.dayNumber === dayNum);
-    const meta = defaultSuggestedNames[dayNum];
-    const sessionName = customConfig?.sessionName || meta.name;
-    
-    const hasCompletedAttendance = attendanceDrafts.some((a) => a.dayNumber === dayNum && a.status === 'Approved');
-    const hasPendingAttendance = attendanceDrafts.some((a) => a.dayNumber === dayNum && a.status !== 'Approved');
-    
-    let status: 'Completed' | 'In Progress' | 'Scheduled' = 'Scheduled';
-    if (hasCompletedAttendance) status = 'Completed';
-    else if (hasPendingAttendance) status = 'In Progress';
-
-    return {
-      day: dayNum,
-      title: sessionName,
-      month: meta.month,
-      topic: meta.topic,
-      status,
-    };
-  });
+  const dynamicRoadmap = useMemo(() => {
+    return Array.from({ length: 8 }, (_, i) => {
+      const dayNum = i + 1;
+      const customConfig = setupDays.find((s) => s.dayNumber === dayNum);
+      const meta = defaultSuggestedNames[dayNum];
+      const sessionName = customConfig?.sessionName || meta.name;
+      const hasCompleted = attendanceDrafts.some(
+        (a) => a.dayNumber === dayNum && a.status === 'Approved'
+      );
+      const hasPending = attendanceDrafts.some(
+        (a) => a.dayNumber === dayNum && a.status !== 'Approved'
+      );
+      let status: 'Completed' | 'In Progress' | 'Scheduled' = 'Scheduled';
+      if (hasCompleted) status = 'Completed';
+      else if (hasPending) status = 'In Progress';
+      return { day: dayNum, title: sessionName, month: meta.month, topic: meta.topic, status };
+    });
+  }, [attendanceDrafts, setupDays]);
 
   const completedDaysCount = dynamicRoadmap.filter((d) => d.status === 'Completed').length;
+  const inProgressDay = dynamicRoadmap.find((d) => d.status === 'In Progress');
   const progressPercent = Math.round((completedDaysCount / 8) * 100);
 
-  const filteredPanchayats = panchayats.filter((p) =>
-    p.name.toLowerCase().includes(panchayatSearch.toLowerCase()) ||
-    p.villages?.some((v) => v.name.toLowerCase().includes(panchayatSearch.toLowerCase()))
+  const filteredPanchayats = panchayats.filter(
+    (p) =>
+      p.name.toLowerCase().includes(panchayatSearch.toLowerCase()) ||
+      p.villages?.some((v) => v.name.toLowerCase().includes(panchayatSearch.toLowerCase()))
   );
+
+  // Build chart data: 8 days, completed count per day
+  const chartData = useMemo(() => {
+    return dynamicRoadmap.map((d) => {
+      const sessionToday = sessions.find(
+        (s) => s.dayNumber === d.day
+      );
+      return {
+        day: d.day,
+        label: d.title,
+        completed:
+          d.status === 'Completed' ? Math.max(1, Math.round((sessionsCount || 8) / 8)) : 0,
+        inProgress: d.status === 'In Progress' ? 1 : 0,
+        scheduled: d.status === 'Scheduled' ? 1 : 0,
+        total: 1,
+      };
+    });
+  }, [dynamicRoadmap, sessions, sessionsCount]);
+
+  // Build recent activity from the data we have
+  const recentActivity: ActivityItem[] = useMemo(() => {
+    const items: ActivityItem[] = [];
+    attendanceDrafts.slice(0, 3).forEach((a, i) => {
+      const raw = a.submittedAt || a.updatedAt || Date.now() - (i + 1) * 3600_000;
+      items.push({
+        id: `att-${a.id || i}`,
+        kind: 'attendance',
+        title: `Day ${a.dayNumber} attendance logged`,
+        meta: `${a.status} · ${a.panchayatName || 'cluster entry'}`,
+        actor: a.submittedBy || 'Field mentor',
+        timestamp: relativeTime(raw),
+        timestampMs: new Date(raw).getTime(),
+        status: a.status === 'Approved' ? 'success' : 'pending',
+        tab: 'attendance',
+      });
+    });
+    financeEntries.slice(0, 3).forEach((f, i) => {
+      const raw = f.submittedAt || f.date || Date.now() - (i + 2) * 3600_000;
+      items.push({
+        id: `fin-${f.id || i}`,
+        kind: 'finance',
+        title: `${f.vendor || 'Expense'} — ₹${Number(f.amount || 0).toLocaleString('en-IN')}`,
+        meta: f.category || 'Reimbursement',
+        actor: f.submittedBy || 'Volunteer',
+        timestamp: relativeTime(raw),
+        timestampMs: new Date(raw).getTime(),
+        status: f.status === 'Approved' ? 'success' : f.status === 'Pending' ? 'pending' : 'info',
+        tab: 'finance',
+      });
+    });
+    pendingApprovals.slice(0, 2).forEach((p, i) => {
+      const raw = Date.now() - (i + 1) * 1800_000;
+      items.push({
+        id: `apr-${p.id || i}`,
+        kind: 'approval',
+        title: `${p.module} awaiting review`,
+        meta: p.recordId,
+        actor: p.submittedBy || 'Volunteer',
+        timestamp: relativeTime(raw),
+        timestampMs: raw,
+        status: 'pending',
+        tab: 'approvals',
+      });
+    });
+    // Sort by raw epoch ms (newest first) — comparing pre-formatted strings
+    // is unsafe because "12h ago" < "5m ago" lexicographically.
+    return items
+      .sort((a, b) => {
+        const am = a.timestampMs ?? 0;
+        const bm = b.timestampMs ?? 0;
+        return bm - am;
+      })
+      .slice(0, 8);
+  }, [attendanceDrafts, financeEntries, pendingApprovals]);
 
   return (
     <div className="w-full space-y-6">
-      {/* 1. TailAdmin Welcome Header Card */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Good day, {isSuperAdmin ? 'Super Administrator' : clusterName}
+      {/* ============================================================
+          HERO STRIP — single-line greeting + primary action
+          ============================================================ */}
+      <section className="tqi-page-hero">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="pl-3">
+            <div className="flex flex-wrap items-center gap-2 text-text-muted">
+              <span className="tqi-pulse">
+                {isSuperAdmin ? 'Operations live' : `${clusterName} active`}
+              </span>
+              <span className="text-xs">·</span>
+              <span className="text-xs font-medium tracking-wide">{todayLabel()}</span>
+            </div>
+            <h1 className="mt-2 text-[1.7rem] sm:text-[1.9rem] font-bold leading-[1.15] text-text">
+              Good day, {isSuperAdmin ? 'Super Administrator' : clusterName.split(' ')[0]}.
             </h1>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-              Overview of rural education operations, field mentorship, and 8-session cycle milestones.
+            <p className="mt-1.5 text-sm text-text-muted max-w-2xl">
+              {completedDaysCount === 8
+                ? 'All 8 sessions completed. Time to wrap reports and plan the next cycle.'
+                : inProgressDay
+                ? `Day ${inProgressDay.day} of the cycle is in motion — ${inProgressDay.title.toLowerCase()}.`
+                : `Cycle progress sits at ${progressPercent}%. The next milestone is Day ${
+                    dynamicRoadmap.find((d) => d.status !== 'Completed')?.day || 8
+                  }.`}
             </p>
           </div>
 
-          {/* Quick Action Toolbar */}
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
             {pendingApprovals.length > 0 && (
               <button
                 type="button"
                 onClick={() => onNavigate('approvals')}
-                className="inline-flex items-center gap-2 rounded-xl border border-warning-200 bg-warning-50/70 px-3.5 py-2.5 text-xs font-semibold text-warning-700 hover:bg-warning-100 dark:border-warning-900/40 dark:bg-warning-500/10 dark:text-warning-400 transition"
+                className="tqi-cta-secondary"
               >
-                <ShieldAlert className="h-4 w-4" />
-                <span>Pending Approvals</span>
-                <span className="inline-flex items-center justify-center rounded-full bg-warning-500 px-2 py-0.5 text-[10px] font-bold text-white">
-                  {pendingApprovals.length}
-                </span>
+                <Warning className="h-4 w-4" style={{ color: 'var(--warning)' }} />
+                <span>{pendingApprovals.length} pending</span>
               </button>
             )}
-
+            <button
+              type="button"
+              onClick={() => onNavigate('finance')}
+              className="tqi-cta-secondary"
+            >
+              <CurrencyInr className="h-4 w-4" style={{ color: 'var(--brand-orange)' }} />
+              <span>Record expense</span>
+            </button>
             <button
               type="button"
               onClick={onOpenNewAttendance}
-              className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
+              className="tqi-cta"
             >
-              <Plus className="h-4 w-4" />
-              <span>Mark Attendance</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={onOpenNewFinance}
-              className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3.5 py-2.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
-            >
-              <ReceiptIndianRupee className="h-4 w-4 text-brand-500" />
-              <span>Record Expense</span>
+              <span>Mark attendance</span>
+              <span className="tqi-cta-icon">
+                <Plus className="h-3.5 w-3.5" strokeWidth={2.5} />
+              </span>
             </button>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* 2. TailAdmin Ecommerce/ERP Metrics 4-Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 md:gap-6">
-        {/* Metric 1: Enrolled Students */}
-        <div
+      {/* ============================================================
+          KPI STRIP — 4 metrics, editorial single row
+          ============================================================ */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:gap-4 tqi-stagger">
+        <button
+          type="button"
           onClick={() => onNavigate('students')}
-          className="cursor-pointer rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.03] md:p-6"
+          className="tqi-kpi text-left"
         >
-          <div className="flex items-center justify-center w-12 h-12 bg-brand-50 rounded-xl dark:bg-brand-500/10">
-            <GraduationCap className="h-6 w-6 text-brand-500 dark:text-brand-400" />
-          </div>
-          <div className="flex items-end justify-between mt-5">
-            <div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">Enrolled Students</span>
-              <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                {studentsCount.toLocaleString('en-IN')}
-              </h4>
-            </div>
-            <Badge color="success">
-              <TrendingUp className="h-3.5 w-3.5" />
+          <div className="tqi-kpi-head">
+            <span className="tqi-icon-chip"><StudentIcon className="h-4.5 w-4.5" /></span>
+            <Badge color="success" size="sm">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-success mr-1" />
               Active
             </Badge>
           </div>
-        </div>
+          <div>
+            <div className="tqi-kpi-label">Enrolled students</div>
+            <div className="tqi-kpi-value">{studentsCount.toLocaleString('en-IN')}</div>
+          </div>
+          <div className="tqi-kpi-foot">
+            <TrendingUpIcon className="h-3.5 w-3.5" style={{ color: 'var(--success)' }} />
+            <span>Across {panchayats.length} panchayats</span>
+          </div>
+        </button>
 
-        {/* Metric 2: Field Mentors */}
-        <div
+        <button
+          type="button"
           onClick={() => onNavigate('volunteers')}
-          className="cursor-pointer rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:border-blue-light-300 dark:border-gray-800 dark:bg-white/[0.03] md:p-6"
+          className="tqi-kpi text-left"
         >
-          <div className="flex items-center justify-center w-12 h-12 bg-blue-light-50 rounded-xl dark:bg-blue-light-500/10">
-            <Users className="h-6 w-6 text-blue-light-500" />
-          </div>
-          <div className="flex items-end justify-between mt-5">
-            <div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">Field Mentors</span>
-              <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                {volunteersCount.toLocaleString('en-IN')}
-              </h4>
-            </div>
-            <Badge color="info">
-              {uniqueColleges.length} Colleges
+          <div className="tqi-kpi-head">
+            <span className="tqi-icon-chip tqi-icon-chip-teal"><Users className="h-4.5 w-4.5" /></span>
+            <Badge color="info" size="sm">
+              {uniqueColleges.length} {uniqueColleges.length === 1 ? 'college' : 'colleges'}
             </Badge>
           </div>
-        </div>
+          <div>
+            <div className="tqi-kpi-label">Field mentors</div>
+            <div className="tqi-kpi-value">{volunteersCount.toLocaleString('en-IN')}</div>
+          </div>
+          <div className="tqi-kpi-foot">
+            <TreeStructure className="h-3.5 w-3.5" />
+            <span>Volunteer rosters & attendance</span>
+          </div>
+        </button>
 
-        {/* Metric 3: Attendance Logs */}
-        <div
+        <button
+          type="button"
           onClick={() => onNavigate('attendance')}
-          className="cursor-pointer rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:border-success-300 dark:border-gray-800 dark:bg-white/[0.03] md:p-6"
+          className="tqi-kpi text-left"
         >
-          <div className="flex items-center justify-center w-12 h-12 bg-success-50 rounded-xl dark:bg-success-500/10">
-            <CalendarCheck className="h-6 w-6 text-success-500" />
+          <div className="tqi-kpi-head">
+            <span className="tqi-icon-chip tqi-icon-chip-success"><CalendarCheck className="h-4.5 w-4.5" /></span>
+            <Badge color="success" size="sm">{progressPercent}%</Badge>
           </div>
-          <div className="flex items-end justify-between mt-5">
-            <div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">Attendance Logs</span>
-              <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                {(attendanceDrafts.length || sessionsCount).toLocaleString('en-IN')}
-              </h4>
-            </div>
-            <Badge color="success">
-              {completedDaysCount}/8 Days ({progressPercent}%)
-            </Badge>
+          <div>
+            <div className="tqi-kpi-label">Cycle progress</div>
+            <div className="tqi-kpi-value">{completedDaysCount}<span className="text-text-muted text-base font-semibold"> / 8</span></div>
           </div>
-        </div>
+          <div className="tqi-kpi-foot">
+            <Clock className="h-3.5 w-3.5" />
+            <span>{(attendanceDrafts.length || sessionsCount)} logs recorded</span>
+          </div>
+        </button>
 
-        {/* Metric 4: Cluster Expenses */}
-        <div
+        <button
+          type="button"
           onClick={() => onNavigate('finance')}
-          className="cursor-pointer rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition hover:border-warning-300 dark:border-gray-800 dark:bg-white/[0.03] md:p-6"
+          className="tqi-kpi text-left"
         >
-          <div className="flex items-center justify-center w-12 h-12 bg-warning-50 rounded-xl dark:bg-warning-500/10">
-            <ReceiptIndianRupee className="h-6 w-6 text-warning-500" />
+          <div className="tqi-kpi-head">
+            <span className="tqi-icon-chip tqi-icon-chip-orange"><CurrencyInr className="h-4.5 w-4.5" /></span>
+            <Badge color="warning" size="sm">{financeEntries.length} bills</Badge>
           </div>
-          <div className="flex items-end justify-between mt-5">
-            <div>
-              <span className="text-sm text-gray-500 dark:text-gray-400">Cluster Expenses</span>
-              <h4 className="mt-2 font-bold text-gray-800 text-title-sm dark:text-white/90">
-                &#8377;{totalExpenses.toLocaleString('en-IN')}
-              </h4>
-            </div>
-            <Badge color="warning">
-              {financeEntries.length} Bills
-            </Badge>
+          <div>
+            <div className="tqi-kpi-label">Cluster expenses</div>
+            <div className="tqi-kpi-value">{formatINR(totalExpenses)}</div>
           </div>
-        </div>
-      </div>
+          <div className="tqi-kpi-foot">
+            <FileText className="h-3.5 w-3.5" />
+            <span>Verified entries this cycle</span>
+          </div>
+        </button>
+      </section>
 
-      {/* 3. Main Dashboard Bento Layout */}
-      <div className="grid grid-cols-12 gap-4 md:gap-6">
-        {/* Academic Curriculum Roadmap */}
-        <div className="col-span-12 xl:col-span-8 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-5 border-b border-gray-100 dark:border-gray-800">
+      {/* ============================================================
+          CENTERPIECE BENTO — Trend chart (8) + Activity (4)
+          ============================================================ */}
+      <section className="grid grid-cols-12 gap-4 md:gap-5 tqi-stagger">
+        <div className="col-span-12 xl:col-span-8">
+          <AttendanceTrendChart data={chartData} height={240} />
+        </div>
+        <div className="col-span-12 xl:col-span-4 tqi-card flex flex-col">
+          <div className="tqi-section-header">
+            <div>
+              <h3 className="tqi-section-title">Recent activity</h3>
+              <p className="tqi-section-sub">Latest updates from your cluster.</p>
+            </div>
+            <span className="tqi-chip tqi-chip-brand">
+              <span className="tqi-live">Live</span>
+            </span>
+          </div>
+          <div className="flex-1 -mx-1">
+            <ActivityFeed
+              items={recentActivity}
+              onItemClick={(it) => it.tab && onNavigate(it.tab)}
+            />
+          </div>
+          {recentActivity.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onNavigate('reports')}
+              className="tqi-btn-ghost mt-3 w-full justify-center"
+            >
+              <span>View full activity log</span>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* ============================================================
+          BENTO ROW — Curriculum (8) + Approvals (4)
+          ============================================================ */}
+      <section className="grid grid-cols-12 gap-4 md:gap-5">
+        {/* Curriculum roadmap */}
+        <div className="col-span-12 xl:col-span-8 tqi-card">
+          <div className="tqi-section-header">
             <div>
               <div className="flex items-center gap-2.5">
-                <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                  8-Day Academic Curriculum (Feb&ndash;Apr)
-                </h3>
-                <Badge color="primary" size="sm">
-                  {progressPercent}% Delivered
-                </Badge>
+                <h3 className="tqi-section-title">8-day academic cycle</h3>
+                <span className="tqi-chip tqi-chip-brand">
+                  <span className="tqi-chip-dot" style={{ background: 'var(--brand)' }} />
+                  {progressPercent}% delivered
+                </span>
               </div>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Structured milestone progression synchronised across village school centres.
+              <p className="tqi-section-sub">
+                Structured milestone progression synchronised across village school centres, Feb–Apr.
               </p>
             </div>
-
             <button
               type="button"
               onClick={() => onNavigate(isSuperAdmin ? 'academic-setup' : 'module-library')}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition self-start sm:self-auto"
+              className="tqi-btn-ghost"
             >
               <span>{isSuperAdmin ? 'Configure term' : 'Module library'}</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </button>
           </div>
 
-          {/* Progress bar */}
-          <div className="mt-5 space-y-2">
-            <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 font-medium">
-              <span>Delivery Status</span>
-              <span className="font-semibold text-gray-800 dark:text-white">{completedDaysCount} of 8 Sessions Completed</span>
+          {/* Refined progress bar */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-text-muted font-medium">
+              <span>Delivery status</span>
+              <span className="font-semibold text-text">{completedDaysCount} of 8 sessions</span>
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
+            <div
+              className="h-1.5 w-full overflow-hidden rounded-full"
+              style={{ background: 'var(--surface-hover)' }}
+            >
               <div
-                className="h-full rounded-full bg-brand-500 transition-all duration-500"
-                style={{ width: `${progressPercent}%` }}
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${progressPercent}%`,
+                  background:
+                    'linear-gradient(90deg, var(--brand) 0%, var(--brand-teal) 60%, var(--brand-orange) 100%)',
+                }}
               />
             </div>
           </div>
 
-          {/* 8 Milestone Cards */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-            {dynamicRoadmap.map((item) => {
-              const badgeVariant = item.status === 'Completed' ? 'success' : item.status === 'In Progress' ? 'primary' : 'light';
-              return (
-                <div
-                  key={item.day}
-                  onClick={() => onNavigate('attendance')}
-                  className="group cursor-pointer rounded-xl border border-gray-200 bg-gray-50/50 p-4 hover:border-brand-300 hover:bg-brand-50/30 transition-all dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800 dark:hover:bg-brand-500/5"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Day 0{item.day}
-                    </span>
-                    <span className="text-xs font-semibold text-brand-500 dark:text-brand-400">
+          {/* Timeline */}
+          <div className="mt-6 -mx-2 overflow-x-auto custom-scrollbar">
+            <div className="tqi-timeline px-2 min-w-[640px]">
+              {dynamicRoadmap.map((item) => {
+                const state =
+                  item.status === 'Completed'
+                    ? 'completed'
+                    : item.status === 'In Progress'
+                    ? 'progress'
+                    : 'scheduled';
+                return (
+                  <div key={item.day} className="tqi-timeline-step" data-state={state}>
+                    <div className="tqi-timeline-dot">
+                      {item.status === 'Completed' ? (
+                        <CheckCircle className="h-3 w-3" />
+                      ) : item.status === 'In Progress' ? (
+                        <Circle className="h-3 w-3" />
+                      ) : (
+                        <span className="text-[10px] font-bold">{item.day}</span>
+                      )}
+                    </div>
+                    <div className="tqi-timeline-day">Day {item.day}</div>
+                    <div className="tqi-timeline-title">{item.title}</div>
+                    <div className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-text-muted">
                       {item.month}
-                    </span>
+                    </div>
                   </div>
-                  <div className="mt-2 text-sm font-semibold text-gray-800 group-hover:text-brand-500 dark:text-white dark:group-hover:text-brand-400 transition-colors line-clamp-1">
-                    {item.title}
-                  </div>
-                  <div className="mt-1 text-xs text-gray-500 dark:text-gray-400 truncate">
-                    {item.topic}
-                  </div>
-                  <div className="mt-3 pt-2.5 border-t border-gray-200/60 dark:border-gray-800 flex items-center justify-between">
-                    <Badge color={badgeVariant as any} size="sm">
-                      {item.status}
-                    </Badge>
-                    <span className="text-xs font-semibold text-gray-400 group-hover:text-brand-500 dark:text-gray-500 dark:group-hover:text-brand-400 transition-colors">
-                      Logs &rarr;
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </div>
 
-        {/* Approvals Queue */}
-        <div className="col-span-12 xl:col-span-4 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] flex flex-col justify-between">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
-              <div>
-                <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                  Pending Approvals
-                </h3>
-                <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                  {pendingApprovals.length} entries requiring verification
-                </p>
-              </div>
-              {pendingApprovals.length > 0 && (
-                <Badge color="warning" size="sm">
-                  {pendingApprovals.length}
-                </Badge>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              {pendingApprovals.length > 0 ? (
-                pendingApprovals.slice(0, 4).map((appr) => (
-                  <div
-                    key={appr.id}
-                    onClick={() => onNavigate('approvals')}
-                    className="cursor-pointer rounded-xl p-3 bg-gray-50 hover:bg-brand-50/40 dark:bg-white/[0.02] dark:hover:bg-brand-500/5 transition space-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-semibold text-gray-800 dark:text-white">
-                        {appr.module}
-                      </span>
-                      <span className="text-xs font-semibold text-warning-600 dark:text-warning-400">
-                        Review &rarr;
-                      </span>
-                    </div>
-                    <div className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                      {appr.recordId} &middot; {appr.submittedBy || 'Volunteer'}
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="py-10 text-center">
-                  <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-success-50 dark:bg-success-500/10 text-success-500">
-                    <CheckCircle2 className="h-6 w-6" />
-                  </div>
-                  <p className="mt-3 text-sm font-medium text-gray-600 dark:text-gray-400">
-                    All field logs and expenses approved.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {pendingApprovals.length > 0 && (
-            <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
-              <button
-                type="button"
-                onClick={() => onNavigate('approvals')}
-                className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-gray-300 bg-white py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
-              >
-                Open Approval Center
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* 8-Day Progress by Cluster */}
-        <div className="col-span-12 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-5">
+        {/* Approvals */}
+        <div className="col-span-12 xl:col-span-4 tqi-card flex flex-col">
+          <div className="tqi-section-header">
             <div>
-              <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                8-Day Curriculum Progress by Cluster
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                Milestone tracking across all 8 academic program days
+              <h3 className="tqi-section-title">Pending approvals</h3>
+              <p className="tqi-section-sub">
+                {pendingApprovals.length > 0
+                  ? `${pendingApprovals.length} entries awaiting verification`
+                  : 'All field logs and expenses are reviewed.'}
               </p>
             </div>
-            <div className="flex items-center gap-3 text-xs">
-              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Completed
+            {pendingApprovals.length > 0 && (
+              <span className="tqi-chip tqi-chip-warning">
+                <span className="tqi-chip-dot" style={{ background: 'var(--warning)' }} />
+                {pendingApprovals.length}
               </span>
-              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500" /> In Progress
-              </span>
-              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-500" /> Scheduled
-              </span>
-              <span className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                <span className="w-2.5 h-2.5 rounded-full bg-gray-300 dark:bg-gray-600" /> Pending
-              </span>
-            </div>
+            )}
           </div>
 
-          <div className="space-y-3.5">
-            {clusters.length > 0 ? clusters.map(cluster => {
-              const clusterSessions = sessions.filter(s => s.clusterId === cluster.id);
-              
-              const daysStatus = Array.from({length: 8}, (_, i) => {
-                const day = i + 1;
-                const daySession = clusterSessions.find(s => s.dayNumber === day);
-                if (daySession && (daySession.status === 'Completed' || daySession.status === 'Approved')) {
-                  return { state: 'Completed', label: daySession.name || `Day ${day}` };
-                } else if (daySession && (daySession.status === 'In Progress' || daySession.status === 'Submitted' || daySession.status === 'Pending Review')) {
-                  return { state: 'In Progress', label: daySession.name || `Day ${day}` };
-                } else if (daySession && daySession.status === 'Scheduled') {
-                  return { state: 'Scheduled', label: daySession.name || `Day ${day}` };
-                }
-                return { state: 'Pending', label: `Day ${day}` };
-              });
+          {pendingApprovals.length > 0 ? (
+            <ul className="space-y-1 -mx-1">
+              {pendingApprovals.slice(0, 4).map((appr) => (
+                <li key={appr.id}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate('approvals')}
+                    className="tqi-link-row"
+                  >
+                    <div className="min-w-0">
+                      <div className="tqi-link-title truncate">{appr.module}</div>
+                      <div className="tqi-link-desc truncate">
+                        {appr.recordId} · {appr.submittedBy || 'Volunteer'}
+                      </div>
+                    </div>
+                    <CaretRight className="h-4 w-4 text-text-muted shrink-0" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center text-center py-6">
+              <span
+                className="tqi-icon-chip tqi-icon-chip-success"
+                style={{ width: 44, height: 44, borderRadius: 'var(--radius-lg)' }}
+              >
+                <CheckCircle className="h-5 w-5" />
+              </span>
+              <p className="mt-3 text-sm font-medium text-text-secondary">
+                All field logs and expenses approved.
+              </p>
+            </div>
+          )}
 
-              const compCount = daysStatus.filter(s => s.state === 'Completed').length;
-              const inProgCount = daysStatus.filter(s => s.state === 'In Progress').length;
+          {pendingApprovals.length > 0 && (
+            <button
+              type="button"
+              onClick={() => onNavigate('approvals')}
+              className="tqi-btn-outline mt-4 w-full"
+            >
+              <span>Open approval center</span>
+              <ArrowUpRight className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* ============================================================
+          CLUSTER PROGRESS — full width, refined row layout
+          ============================================================ */}
+      <section className="tqi-card">
+        <div className="tqi-section-header">
+          <div>
+            <h3 className="tqi-section-title">Cluster progress</h3>
+            <p className="tqi-section-sub">
+              Milestone tracking across the 8-day academic program by cluster.
+            </p>
+          </div>
+          <div className="hidden sm:flex items-center gap-4 text-xs text-text-muted">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--success)' }} />
+              Completed
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--brand-orange)' }} />
+              In progress
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--brand)' }} />
+              Scheduled
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full" style={{ background: 'var(--border-strong)' }} />
+              Pending
+            </span>
+          </div>
+        </div>
+
+        {clusters.length > 0 ? (
+          <ul className="space-y-2.5">
+            {clusters.map((cluster) => {
+              const clusterSessions = sessions.filter((s) => s.clusterId === cluster.id);
+              const daysStatus = Array.from({ length: 8 }, (_, i) => {
+                const day = i + 1;
+                const ds = clusterSessions.find((s) => s.dayNumber === day);
+                if (ds && (ds.status === 'Completed' || ds.status === 'Approved'))
+                  return { state: 'Completed' as const, label: ds.name || `Day ${day}` };
+                if (
+                  ds &&
+                  (ds.status === 'In Progress' ||
+                    ds.status === 'Submitted' ||
+                    ds.status === 'Pending Review')
+                )
+                  return { state: 'In Progress' as const, label: ds.name || `Day ${day}` };
+                if (ds && ds.status === 'Scheduled')
+                  return { state: 'Scheduled' as const, label: ds.name || `Day ${day}` };
+                return { state: 'Pending' as const, label: `Day ${day}` };
+              });
+              const compCount = daysStatus.filter((s) => s.state === 'Completed').length;
               const progressPct = Math.round((compCount / 8) * 100);
 
               return (
-                <div key={cluster.id} className="rounded-xl border border-gray-200/80 bg-gray-50/40 p-4 dark:border-gray-800 dark:bg-white/[0.02] hover:border-brand-300 dark:hover:border-brand-500/30 transition">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-                    <div className="w-full lg:w-64 flex-shrink-0">
+                <li
+                  key={cluster.id}
+                  className="rounded-xl px-4 py-3.5 transition"
+                  style={{ border: '1px solid var(--border-subtle)', background: 'var(--surface)' }}
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:gap-6">
+                    <div className="lg:w-56 shrink-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm text-gray-900 dark:text-white">{cluster.name}</span>
+                        <span className="text-sm font-semibold text-text">{cluster.name}</span>
                         {cluster.collegeName && (
-                          <span className="text-[11px] text-gray-400 dark:text-gray-500 truncate max-w-[120px]">
-                            &middot; {cluster.collegeName}
+                          <span className="text-[11px] text-text-muted truncate">
+                            · {cluster.collegeName}
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-3 mt-1.5">
-                        <div className="flex-1 bg-gray-200 dark:bg-gray-700 h-1.5 rounded-full overflow-hidden">
+                      <div className="mt-2 flex items-center gap-2.5">
+                        <div
+                          className="flex-1 h-1.5 rounded-full overflow-hidden"
+                          style={{ background: 'var(--border-subtle)' }}
+                        >
                           <div
-                            className="bg-brand-500 h-full rounded-full transition-all duration-500"
-                            style={{ width: `${progressPct}%` }}
+                            className="h-full rounded-full transition-all duration-500"
+                            style={{
+                              width: `${progressPct}%`,
+                              background: 'var(--brand)',
+                            }}
                           />
                         </div>
-                        <span className="text-xs font-semibold text-brand-600 dark:text-brand-400">
+                        <span className="text-xs font-semibold tabular-nums" style={{ color: 'var(--brand)' }}>
                           {progressPct}%
                         </span>
                       </div>
                     </div>
 
-                    <div className="flex-1 grid grid-cols-4 sm:grid-cols-8 gap-2">
+                    <div className="flex-1 grid grid-cols-4 sm:grid-cols-8 gap-1.5">
                       {daysStatus.map((d, idx) => {
-                        const isDone = d.state === 'Completed';
-                        const isInProg = d.state === 'In Progress';
-                        const isSched = d.state === 'Scheduled';
-
+                        const bg =
+                          d.state === 'Completed'
+                            ? 'var(--success-bg)'
+                            : d.state === 'In Progress'
+                            ? 'var(--brand-orange-light)'
+                            : d.state === 'Scheduled'
+                            ? 'var(--brand-light)'
+                            : 'var(--surface-hover)';
+                        const color =
+                          d.state === 'Completed'
+                            ? 'var(--success)'
+                            : d.state === 'In Progress'
+                            ? 'var(--brand-orange)'
+                            : d.state === 'Scheduled'
+                            ? 'var(--brand)'
+                            : 'var(--text-muted)';
+                        const border =
+                          d.state === 'Completed'
+                            ? 'var(--success-border)'
+                            : d.state === 'In Progress'
+                            ? 'color-mix(in srgb, var(--brand-orange) 30%, transparent)'
+                            : d.state === 'Scheduled'
+                            ? 'var(--brand-xlight)'
+                            : 'var(--border)';
                         return (
                           <div
                             key={idx}
                             title={`Day ${idx + 1}: ${d.state} (${d.label})`}
-                            className={`group relative flex flex-col items-center justify-center p-2 rounded-lg border text-center transition-all ${
-                              isDone
-                                ? 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/20 dark:text-emerald-400'
-                                : isInProg
-                                ? 'border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-400 shadow-sm animate-pulse'
-                                : isSched
-                                ? 'border-blue-200 bg-blue-50/80 text-blue-700 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-400'
-                                : 'border-gray-200/60 bg-white dark:border-gray-800 dark:bg-gray-800/40 text-gray-400'
-                            }`}
+                            className="flex flex-col items-center justify-center py-1.5 rounded-md text-center"
+                            style={{ background: bg, border: `1px solid ${border}` }}
                           >
-                            <span className="text-[10px] font-bold uppercase tracking-wider mb-0.5">
-                              Day {idx + 1}
+                            <span
+                              className="text-[9px] font-bold uppercase tracking-wider"
+                              style={{ color }}
+                            >
+                              D{idx + 1}
                             </span>
-                            <div className="flex items-center justify-center h-4">
-                              {isDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
-                              {isInProg && <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">Active</span>}
-                              {isSched && <Calendar className="w-3 h-3 text-blue-600 dark:text-blue-400" />}
-                              {!isDone && !isInProg && !isSched && <span className="text-[10px] text-gray-300 dark:text-gray-600">&bull;</span>}
+                            <div className="mt-0.5">
+                              {d.state === 'Completed' && (
+                                <CheckCircle className="h-3 w-3" style={{ color }} />
+                              )}
+                              {d.state === 'In Progress' && (
+                                <Circle className="h-3 w-3" style={{ color }} />
+                              )}
+                              {d.state === 'Scheduled' && (
+                                <Calendar className="h-3 w-3" style={{ color }} />
+                              )}
+                              {d.state === 'Pending' && (
+                                <span className="block h-1 w-1 rounded-full bg-text-muted" />
+                              )}
                             </div>
                           </div>
                         );
                       })}
                     </div>
                   </div>
-                </div>
+                </li>
               );
-            }) : (
-              <div className="text-sm text-gray-500 text-center py-6 border border-dashed border-gray-200 dark:border-gray-800 rounded-xl">
-                No clusters onboarded yet. Create a cluster under the Clusters tab to begin tracking 8-day progress.
-              </div>
-            )}
+            })}
+          </ul>
+        ) : (
+          <div className="tqi-tint">
+            <p className="text-sm font-medium text-text">No clusters onboarded yet.</p>
+            <p className="mt-1 text-xs">
+              Create a cluster under the <button
+                type="button"
+                onClick={() => onNavigate('clusters')}
+                className="font-semibold underline underline-offset-2"
+                style={{ color: 'var(--brand)' }}
+              >Clusters tab</button> to begin tracking 8-day progress.
+            </p>
           </div>
-        </div>
-        
-        {/* Panchayats & Village Units Table */}
-        <div className="col-span-12 xl:col-span-8 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-gray-100 dark:border-gray-800">
+        )}
+      </section>
+
+      {/* ============================================================
+          BOTTOM BENTO — Panchayats (8) + Quick links (4)
+          ============================================================ */}
+      <section className="grid grid-cols-12 gap-4 md:gap-5">
+        {/* Panchayats table */}
+        <div className="col-span-12 xl:col-span-8 tqi-card">
+          <div className="tqi-section-header">
             <div>
-              <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-                Panchayats & Village Units
-              </h3>
-              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                {panchayats.length} panchayats &middot; {totalVillages} villages active under {clusterName}
+              <h3 className="tqi-section-title">Panchayats & village units</h3>
+              <p className="tqi-section-sub">
+                {panchayats.length} panchayats · {totalVillages} villages active under {clusterName}.
               </p>
             </div>
-
             <div className="flex items-center gap-2.5">
-              <div className="relative w-44 sm:w-56">
-                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <div className="tqi-search" style={{ minWidth: 0, width: 220 }}>
+                <Search className="h-4 w-4 shrink-0" />
                 <input
                   type="text"
-                  placeholder="Search panchayats..."
+                  placeholder="Search panchayats…"
                   value={panchayatSearch}
                   onChange={(e) => setPanchayatSearch(e.target.value)}
-                  className="w-full rounded-lg border border-gray-300 bg-transparent pl-9 pr-3 py-1.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white"
                 />
               </div>
               <button
                 type="button"
                 onClick={() => onNavigate('panchayats')}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
+                className="tqi-btn-ghost"
+                title="Open directory"
               >
-                <span>Directory</span>
-                <ExternalLink className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Directory</span>
+                <ArrowUpRight className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
 
-          <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-800">
-            <div className="max-w-full overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableCell isHeader>Panchayat Hub</TableCell>
-                    <TableCell isHeader>Mapped Villages</TableCell>
-                    <TableCell isHeader className="text-right">Active Students</TableCell>
-                    <TableCell isHeader className="text-right">Action</TableCell>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+          <div className="tqi-table-container">
+            <div className="max-w-full overflow-x-auto custom-scrollbar">
+              <table className="tqi-table">
+                <thead>
+                  <tr>
+                    <th>Panchayat hub</th>
+                    <th>Mapped villages</th>
+                    <th className="text-right">Active students</th>
+                    <th className="text-right w-12" />
+                  </tr>
+                </thead>
+                <tbody>
                   {filteredPanchayats.length > 0 ? (
                     filteredPanchayats.map((p) => (
-                      <TableRow
+                      <tr
                         key={p.id}
                         onClick={() => onNavigate('panchayats')}
-                        className="cursor-pointer group"
+                        className="cursor-pointer"
                       >
-                        <TableCell>
+                        <td>
                           <div className="flex items-center gap-2.5">
-                            <MapPin className="h-4 w-4 text-gray-400 group-hover:text-brand-500 transition-colors shrink-0" />
-                            <span className="font-semibold text-gray-800 group-hover:text-brand-500 dark:text-white/90 dark:group-hover:text-brand-400 transition-colors">
-                              {p.name}
-                            </span>
+                            <MapPin className="h-4 w-4 text-text-muted shrink-0" />
+                            <span className="font-semibold text-text">{p.name}</span>
                           </div>
-                        </TableCell>
-                        <TableCell className="text-gray-500 dark:text-gray-400 truncate max-w-xs">
-                          {p.villages?.map((v) => v.name).join(', ') || `${p.villagesCount || 0} villages`}
-                        </TableCell>
-                        <TableCell className="text-right font-bold text-gray-800 dark:text-white tabular-nums">
-                          {p.activeStudents || 0}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-gray-700 dark:group-hover:text-white transition-colors inline-block" />
-                        </TableCell>
-                      </TableRow>
+                        </td>
+                        <td className="text-text-muted max-w-xs truncate">
+                          {p.villages?.map((v) => v.name).join(', ') ||
+                            `${p.villagesCount || 0} villages`}
+                        </td>
+                        <td className="text-right font-semibold text-text tabular-nums">
+                          {(p.activeStudents || 0).toLocaleString('en-IN')}
+                        </td>
+                        <td className="text-right">
+                          <CaretRight className="h-4 w-4 text-text-muted inline-block" />
+                        </td>
+                      </tr>
                     ))
                   ) : (
-                    <TableRow>
-                      <TableCell colSpan={4} className="py-8 text-center text-gray-500 dark:text-gray-400">
-                        No panchayats found matching "{panchayatSearch || clusterName}".
-                      </TableCell>
-                    </TableRow>
+                    <tr>
+                      <td colSpan={4} className="py-10 text-center text-text-muted">
+                        No panchayats match "{panchayatSearch || clusterName}".
+                      </td>
+                    </tr>
                   )}
-                </TableBody>
-              </Table>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
 
-        {/* Operational Quick Links */}
-        <div className="col-span-12 xl:col-span-4 rounded-2xl border border-gray-200 bg-white p-5 md:p-6 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] space-y-4">
-          <div className="pb-4 border-b border-gray-100 dark:border-gray-800">
-            <h3 className="text-base font-semibold text-gray-800 dark:text-white/90">
-              Operational Navigation
-            </h3>
-            <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-              Direct access to field workflows
-            </p>
+        {/* Quick links — inline rows, not cards */}
+        <div className="col-span-12 xl:col-span-4 tqi-card flex flex-col">
+          <div className="tqi-section-header">
+            <div>
+              <h3 className="tqi-section-title">Field workflows</h3>
+              <p className="tqi-section-sub">Direct access to daily operations.</p>
+            </div>
           </div>
-
-          <div className="space-y-2">
+          <ul className="space-y-1 -mx-1 flex-1">
             {[
-              { label: '8-Day Attendance & Homework', tab: 'attendance' as TabType, desc: 'Log daily marks & volunteer attendance' },
-              { label: 'Finance & OCR Bill Scanning', tab: 'finance' as TabType, desc: 'Verify tickets, fuel & food bills' },
-              { label: 'Curriculum PPT Module Library', tab: 'module-library' as TabType, desc: 'Teaching slides & worksheets' },
-              { label: 'Analytics & Semester Reports', tab: 'reports' as TabType, desc: 'Download CSV & PDF completion reports' },
-            ].map((item) => (
-              <button
-                key={item.tab}
-                type="button"
-                onClick={() => onNavigate(item.tab)}
-                className="group flex w-full items-start justify-between rounded-xl p-3 text-left transition-colors bg-gray-50/60 hover:bg-brand-50/40 dark:bg-white/[0.02] dark:hover:bg-brand-500/5"
+              { label: '8-day attendance & homework', tab: 'attendance' as TabType, desc: 'Log daily marks & volunteer attendance', icon: CalendarCheck },
+              { label: 'Finance & OCR bill scanning', tab: 'finance' as TabType, desc: 'Verify tickets, fuel & food bills', icon: CurrencyInr },
+              { label: 'Curriculum module library', tab: 'module-library' as TabType, desc: 'Teaching slides & worksheets', icon: BookOpen },
+              { label: 'Analytics & semester reports', tab: 'reports' as TabType, desc: 'Download CSV & PDF completion reports', icon: FileText },
+              { label: 'Session photos', tab: 'session-photos' as TabType, desc: 'Field captures & media archive', icon: Camera },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <li key={item.tab}>
+                  <button
+                    type="button"
+                    onClick={() => onNavigate(item.tab)}
+                    className="tqi-link-row"
+                  >
+                    <span
+                      className="tqi-icon-chip"
+                      style={{ width: 32, height: 32, borderRadius: 'var(--radius-sm)' }}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="tqi-link-title truncate">{item.label}</div>
+                      <div className="tqi-link-desc truncate">{item.desc}</div>
+                    </div>
+                    <CaretRight className="h-4 w-4 text-text-muted shrink-0" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div
+            className="mt-4 -mx-1 rounded-lg px-3 py-2.5 text-xs flex items-center gap-2"
+            style={{ background: 'var(--brand-light)', color: 'var(--brand)' }}
+          >
+            <Sparkle className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              Tip: Press{' '}
+              <kbd
+                className="rounded border px-1.5 py-0.5 font-mono text-[10px]"
+                style={{ background: 'var(--card)', borderColor: 'var(--border)', color: 'var(--text)' }}
               >
-                <div className="space-y-0.5">
-                  <div className="text-sm font-semibold text-gray-800 group-hover:text-brand-500 dark:text-white/90 dark:group-hover:text-brand-400 transition-colors">
-                    {item.label}
-                  </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-400">{item.desc}</div>
-                </div>
-                <ChevronRight className="h-4 w-4 text-gray-400 group-hover:text-brand-500 dark:group-hover:text-brand-400 transition-colors mt-0.5 shrink-0" />
-              </button>
-            ))}
+                ⌘K
+              </kbd>{' '}
+              anywhere to jump to any view.
+            </span>
           </div>
         </div>
-      </div>
+      </section>
     </div>
   );
 };
-

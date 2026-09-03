@@ -37,8 +37,8 @@ export const CorrectionWorkflowModal: React.FC<CorrectionWorkflowModalProps> = (
   };
 
   return (
-    <div className="fixed inset-0 z-[99999] bg-gray-900/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white border border-[#c4c6d3] rounded-md w-full max-w-lg shadow-sm overflow-hidden">
+    <div className="tqi-modal-mobile-full fixed inset-0 z-[99999] bg-gray-900/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="tqi-modal-panel bg-white border border-[#c4c6d3] rounded-md w-full max-w-lg shadow-sm overflow-hidden">
         {/* Header */}
         <div className="bg-[#002869] text-white p-4 flex items-center justify-between">
           <div className="flex items-center gap-2">

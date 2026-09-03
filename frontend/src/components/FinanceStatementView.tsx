@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
 import { TabType, FinanceEntry, FinanceDraft, RouteDraftItem, FoodDraftItem } from '../types';
 import { TqiLogo } from './TqiLogo';
-import { generateAndDownloadStatementPDF } from '../utils/pdfGenerator';
+import { exportFinanceStatementAsPdf } from '../utils/pdf/exportStatement';
 import { checkImageClarity, extractRouteAndDetailsFromText } from '../utils/billParser';
 import {
   Select,
@@ -782,24 +782,61 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   };
 
   // EXCEL (.XLSX) EXPORT USING XLSX LIBRARY
+  // Layout: 8 columns (A..H). Title / banner / section header rows are
+  // merged across all 8 columns so the document reads as a real report
+  // rather than eight parallel columns of stranded text. Totals are
+  // aligned to the right of the Total (INR) column with the label
+  // sitting flush against the value.
   const handleExportExcel = () => {
     const wb = XLSX.utils.book_new();
+    const wsData: any[][] = [];
+    const merges: XLSX.Range[] = [];
+    // Track which row index holds which banner so we can merge them.
+    const pushMergedBanner = (text: string) => {
+      const r = wsData.length;
+      wsData.push([text, '', '', '', '', '', '', '']);
+      merges.push({ s: { r, c: 0 }, e: { r, c: 7 } });
+    };
 
-    // Create styled matrix data
-    const wsData: any[][] = [
-      ['TALENT QUEST FOR INDIA', '', '', '', '', '', '', ''],
-      ['Academic year 2026-2027', '', '', '', '', '', '', ''],
-      ['FINANCE REPORT', '', '', '', '', '', '', ''],
-      [`${statementMeta.clusterName} Cluster`, '', '', '', '', '', '', ''],
-      [],
-      ['COLLEGE:', statementMeta.collegeName, '', 'CLUSTER:', statementMeta.clusterName, '', 'SESSION:', statementMeta.sessionName],
-      ['DATE:', statementMeta.date, '', 'SPOC:', statementMeta.spocName, '', 'FINANCER:', statementMeta.financerName],
-      ['DAY:', statementMeta.sessionDay, '', 'STATUS:', statementMeta.status, '', '', ''],
-      [],
-      ['EXPENSE DETAILS', '', '', '', '', '', '', ''],
-      ['S.No', 'Category', 'Description', 'Count', 'Count×Amount', 'Total (INR)', 'Bills Attached', 'Remarks'],
-    ];
+    // ── Title block (each row merged A:H) ─────────────────────────
+    pushMergedBanner('TALENT QUEST FOR INDIA');
+    pushMergedBanner('Academic Year 2026 – 2027');
+    pushMergedBanner('OFFICIAL FINANCE STATEMENT');
+    pushMergedBanner(`${statementMeta.clusterName} Cluster`);
+    wsData.push([]); // spacer
 
+    // ── Meta grid: three label/value pairs per row (A:B, D:E, G:H) ──
+    wsData.push([
+      'COLLEGE', statementMeta.collegeName, '',
+      'CLUSTER', statementMeta.clusterName, '',
+      'SESSION', statementMeta.sessionName,
+    ]);
+    wsData.push([
+      'DATE', statementMeta.date, '',
+      'SPOC', statementMeta.spocName, '',
+      'FINANCER', statementMeta.financerName,
+    ]);
+    wsData.push([
+      'DAY', statementMeta.sessionDay, '',
+      'STATUS', statementMeta.status, '',
+      '', '',
+    ]);
+    wsData.push([]); // spacer
+
+    // ── Section banner + table header row ────────────────────────
+    pushMergedBanner('EXPENSE DETAILS');
+    wsData.push([
+      'S.No',
+      'Category',
+      'Description',
+      'Count',
+      'Count × Amount',
+      'Total (INR)',
+      'Bills Attached',
+      'Remarks',
+    ]);
+
+    // ── Data rows ────────────────────────────────────────────────
     tableItems.forEach((item) => {
       wsData.push([
         item.sNo,
@@ -813,35 +850,45 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       ]);
     });
 
-    wsData.push([]);
+    // ── Totals — label in col E, value in col F (right of Total col)
+    wsData.push([]); // spacer
     if (travelTotal > 0) {
-      wsData.push(['', '', '', '', 'Travel Total:', travelTotal, '', '']);
+      wsData.push(['', '', '', '', 'Travel Subtotal', travelTotal, '', '']);
     }
     if (foodTotal > 0) {
-      wsData.push(['', '', '', '', 'Food Total:', foodTotal, '', '']);
+      wsData.push(['', '', '', '', 'Food Subtotal', foodTotal, '', '']);
     }
     if (stationeryTotal > 0) {
-      wsData.push(['', '', '', '', 'Stationery Total:', stationeryTotal, '', '']);
+      wsData.push(['', '', '', '', 'Stationery Subtotal', stationeryTotal, '', '']);
     }
     if (otherTotal > 0) {
-      wsData.push(['', '', '', '', 'Other Expenses Total:', otherTotal, '', '']);
+      wsData.push(['', '', '', '', 'Other Subtotal', otherTotal, '', '']);
     }
-    wsData.push(['', '', '', '', 'GRAND TOTAL (INR):', grandTotal, '', '']);
+    // Grand Total — full-width banner merged across all 8 cols
+    pushMergedBanner(`GRAND TOTAL (INR): ${grandTotal.toLocaleString('en-IN')}`);
+
+    // ── Sign-off row — two labeled pairs (A:B, E:F) ───────────────
     wsData.push([]);
-    wsData.push(['Coordinator / SPOC Signature:', statementMeta.spocName, '', '', 'Cluster Admin Signature:', statementMeta.financerName, '', '']);
+    wsData.push([
+      'Coordinator / SPOC', statementMeta.spocName, '', '',
+      'Cluster Admin (Financer)', statementMeta.financerName, '', '',
+    ]);
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
 
-    // Set column widths
+    // Apply merges
+    ws['!merges'] = merges;
+
+    // Column widths tuned to keep the layout balanced
     ws['!cols'] = [
-      { wch: 8 },  // S.No
-      { wch: 14 }, // Category
-      { wch: 35 }, // Description
-      { wch: 10 }, // Count
-      { wch: 15 }, // Count x Amount
-      { wch: 14 }, // Total
-      { wch: 20 }, // Bills
-      { wch: 35 }, // Remarks
+      { wch: 8 },   // A — S.No / labels
+      { wch: 22 },  // B — Category / values
+      { wch: 35 },  // C — Description
+      { wch: 10 },  // D — Count
+      { wch: 16 },  // E — Count × Amount / totals label
+      { wch: 16 },  // F — Total (INR) / totals value
+      { wch: 20 },  // G — Bills Attached
+      { wch: 32 },  // H — Remarks
     ];
 
     XLSX.utils.book_append_sheet(wb, ws, 'Finance Statement');
@@ -1010,25 +1057,37 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   // Client-Side PDF Generation Handler
+  // Uses `@react-pdf/renderer` to produce a real .pdf file that the
+  // browser downloads directly. One click → one PDF file.
   const handleExportPDF = async () => {
     setIsGeneratingPdf(true);
-    showToast('Generating official TQI PDF Statement with attached bills...');
+    showToast('Preparing official TQI PDF Statement...');
     try {
-      await generateAndDownloadStatementPDF({
-        elementId: 'printable-tqi-statement-doc',
-        meta: statementMeta,
+      await exportFinanceStatementAsPdf({
+        clusterName: statementMeta.clusterName,
+        collegeName: statementMeta.collegeName,
+        sessionName: statementMeta.sessionName,
+        sessionDay: statementMeta.sessionDay,
+        date: statementMeta.date,
+        status: statementMeta.status,
+        spocName: statementMeta.spocName,
+        spocRole: 'Coordinator (SPOC)',
+        financerName: statementMeta.financerName,
         items: tableItems,
         travelTotal,
         foodTotal,
         stationeryTotal,
         otherTotal,
         grandTotal,
-        attachedBills: allAttachedBills,
       });
-      showToast('PDF downloaded successfully!');
+      showToast('TQI Finance Statement PDF downloaded successfully.');
     } catch (err) {
       console.error('PDF export error:', err);
-      window.print();
+      showToast(
+        err instanceof Error
+          ? `PDF export failed: ${err.message}`
+          : 'PDF export failed.',
+      );
     } finally {
       setIsGeneratingPdf(false);
     }

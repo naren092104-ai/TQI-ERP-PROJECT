@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { 
   CheckCircle2, XCircle, ChevronDown, ChevronRight, AlertCircle, 
   Send, RotateCcw, Clock, Eye, FileText, Image, DollarSign, CalendarDays, Users
-} from 'lucide-react';
+} from './ui/icons';
 import type { SessionSubmission, Session, UserRole } from '../types';
 import {
   Select,

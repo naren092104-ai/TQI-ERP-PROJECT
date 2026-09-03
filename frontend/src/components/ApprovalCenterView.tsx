@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Search, CheckCircle2, AlertCircle, XCircle, Clock, Eye, Check, RefreshCw } from 'lucide-react';
+import { Search, CheckCircle2, AlertCircle, XCircle, Clock, Eye, Check, RefreshCw } from './ui/icons';
 import { ActionButton } from './ui/action-button';
 import { Badge } from './ui/badge';
 
@@ -284,7 +284,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
 
       {/* Approvals Table - Seamless & Borderless */}
       <div className="w-full overflow-x-auto">
-        <table className="w-full text-left text-xs border-collapse">
+        <table className="tqi-table-compact w-full text-left text-xs border-collapse">
           <thead>
             <tr className="border-b border-border/50 text-muted-foreground font-semibold">
               <th className="py-2.5 px-3">Module</th>

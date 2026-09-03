@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Outfit:wght@300;400;500;600;700;800&display=swap") layer(base);
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Outfit:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=Bricolage+Grotesque:opsz,wght@12..96,300..800&display=swap") layer(base);
 @import "tailwindcss";
 
 @custom-variant dark (&:is(.dark *));
@@ -8,6 +8,7 @@
   --font-jakarta: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-outfit: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Instrument Serif", "Plus Jakarta Sans", ui-serif, Georgia, serif;
 
   --breakpoint-*: initial;
   --breakpoint-2xsm: 375px;
@@ -41,19 +42,61 @@
   --color-white: #ffffff;
   --color-black: #101828;
 
-  --color-brand-25: #f2f7ff;
-  --color-brand-50: #ecf3ff;
-  --color-brand-100: #dde9ff;
-  --color-brand-200: #c2d6ff;
-  --color-brand-300: #9cb9ff;
-  --color-brand-400: #7592ff;
-  --color-brand-500: #465fff;
-  --color-brand-600: #3641f5;
-  --color-brand-700: #2a31d8;
-  --color-brand-800: #252dae;
-  --color-brand-900: #262e89;
-  --color-brand-950: #161950;
+  /* =========================================================
+     TQI BRAND — Navy (logo "q")
+     Light: #1717B8    Dark: #5B5BEF
+     ========================================================= */
+  --color-brand-25:  #F2F3FA;
+  --color-brand-50:  #E1E3F1;
+  --color-brand-100: #C5C9E2;
+  --color-brand-200: #9DA3CC;
+  --color-brand-300: #757BB6;
+  --color-brand-400: #5B5BEF;
+  --color-brand-500: #1717B8;
+  --color-brand-600: #1313A0;
+  --color-brand-700: #0F0F82;
+  --color-brand-800: #0C0C66;
+  --color-brand-900: #08084D;
+  --color-brand-950: #04042B;
 
+  /* TQI Accent — Teal (logo ring): info / secondary */
+  --color-teal-50:  #E6F5F5;
+  --color-teal-100: #C2E8E8;
+  --color-teal-200: #88D2D2;
+  --color-teal-300: #4DBABA;
+  --color-teal-400: #22B8B8;
+  --color-teal-500: #008C8C;
+  --color-teal-600: #006B6B;
+  --color-teal-700: #004F4F;
+  --color-teal-800: #003535;
+  --color-teal-900: #001D1D;
+
+  /* TQI Accent — Orange (logo "t"): warm / attention */
+  --color-warm-50:  #FFF3EB;
+  --color-warm-100: #FFE0CC;
+  --color-warm-200: #FFC299;
+  --color-warm-300: #FFA266;
+  --color-warm-400: #FF7A33;
+  --color-warm-500: #FF6B2C;
+  --color-warm-600: #FF5500;
+  --color-warm-700: #CC4400;
+  --color-warm-800: #993300;
+  --color-warm-900: #662200;
+
+  /* TQI Accent — Green (logo "i"): success */
+  --color-success-25:  #F4FBE9;
+  --color-success-50:  #E8F4D0;
+  --color-success-100: #CFEB9C;
+  --color-success-200: #B0DF6A;
+  --color-success-300: #85C742;
+  --color-success-400: #4CAF2A;
+  --color-success-500: #278A12;
+  --color-success-600: #1F6E0E;
+  --color-success-700: #17510A;
+  --color-success-800: #103906;
+  --color-success-900: #082203;
+
+  /* Blue-light family — kept for tertiary surfaces */
   --color-blue-light-25: #f5fbff;
   --color-blue-light-50: #f0f9ff;
   --color-blue-light-100: #e0f2fe;
@@ -67,58 +110,34 @@
   --color-blue-light-900: #0b4a6f;
   --color-blue-light-950: #062c41;
 
-  --color-gray-25: #fcfcfd;
-  --color-gray-50: #f9fafb;
-  --color-gray-100: #f2f4f7;
-  --color-gray-200: #e4e7ec;
-  --color-gray-300: #d0d5dd;
-  --color-gray-400: #98a2b3;
-  --color-gray-500: #667085;
-  --color-gray-600: #475467;
-  --color-gray-700: #344054;
-  --color-gray-800: #1d2939;
-  --color-gray-900: #101828;
-  --color-gray-950: #0c111d;
-  --color-gray-dark: #1a2231;
+  /* Neutrals — refined for slightly cooler, more premium feel */
+  --color-gray-25: #fbfcfd;
+  --color-gray-50: #f6f7f9;
+  --color-gray-100: #eef0f3;
+  --color-gray-200: #e1e4e9;
+  --color-gray-300: #c8ccd3;
+  --color-gray-400: #8e94a0;
+  --color-gray-500: #5f6573;
+  --color-gray-600: #414754;
+  --color-gray-700: #2c313c;
+  --color-gray-800: #1a1f2a;
+  --color-gray-900: #0e1118;
+  --color-gray-950: #070a12;
+  --color-gray-dark: #14181f;
 
-  --color-orange-25: #fffaf5;
-  --color-orange-50: #fff6ed;
-  --color-orange-100: #ffead5;
-  --color-orange-200: #fddcab;
-  --color-orange-300: #feb273;
-  --color-orange-400: #fd853a;
-  --color-orange-500: #fb6514;
-  --color-orange-600: #ec4a0a;
-  --color-orange-700: #c4320a;
-  --color-orange-800: #9c2a10;
-  --color-orange-900: #7e2410;
-  --color-orange-950: #511c10;
-
-  --color-success-25: #f6fef9;
-  --color-success-50: #ecfdf3;
-  --color-success-100: #d1fadf;
-  --color-success-200: #a6f4c5;
-  --color-success-300: #6ce9a6;
-  --color-success-400: #32d583;
-  --color-success-500: #12b76a;
-  --color-success-600: #039855;
-  --color-success-700: #027a48;
-  --color-success-800: #05603a;
-  --color-success-900: #054f31;
-  --color-success-950: #053321;
-
+  /* Error / Warning */
   --color-error-25: #fffbfa;
   --color-error-50: #fef3f2;
   --color-error-100: #fee4e2;
   --color-error-200: #fecdca;
   --color-error-300: #fda29b;
   --color-error-400: #f97066;
-  --color-error-500: #f04438;
-  --color-error-600: #d92d20;
-  --color-error-700: #b42318;
-  --color-error-800: #912018;
-  --color-error-900: #7a271a;
-  --color-error-950: #55160c;
+  --color-error-500: #e74c3c;
+  --color-error-600: #c0392b;
+  --color-error-700: #99291e;
+  --color-error-800: #6f2017;
+  --color-error-900: #4a1610;
+  --color-error-950: #2b0d0a;
 
   --color-warning-25: #fffcf5;
   --color-warning-50: #fffaeb;
@@ -136,16 +155,16 @@
   --color-theme-pink-500: #ee46bc;
   --color-theme-purple-500: #7a5af8;
 
-  --shadow-theme-xs: 0px 1px 2px 0px rgba(16, 24, 40, 0.05);
-  --shadow-theme-sm: 0px 1px 3px 0px rgba(16, 24, 40, 0.1),
-    0px 1px 2px 0px rgba(16, 24, 40, 0.06);
-  --shadow-theme-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.1),
-    0px 2px 4px -2px rgba(16, 24, 40, 0.06);
-  --shadow-theme-lg: 0px 12px 16px -4px rgba(16, 24, 40, 0.08),
-    0px 4px 6px -2px rgba(16, 24, 40, 0.03);
-  --shadow-theme-xl: 0px 20px 24px -4px rgba(16, 24, 40, 0.08),
-    0px 8px 8px -4px rgba(16, 24, 40, 0.03);
-  --shadow-focus-ring: 0px 0px 0px 4px rgba(70, 95, 255, 0.12);
+  --shadow-theme-xs: 0px 1px 2px 0px rgba(14, 17, 24, 0.04);
+  --shadow-theme-sm: 0px 1px 3px 0px rgba(14, 17, 24, 0.06),
+    0px 1px 2px 0px rgba(14, 17, 24, 0.04);
+  --shadow-theme-md: 0px 4px 12px -2px rgba(14, 17, 24, 0.08),
+    0px 2px 4px -2px rgba(14, 17, 24, 0.04);
+  --shadow-theme-lg: 0px 16px 24px -8px rgba(14, 17, 24, 0.10),
+    0px 4px 8px -4px rgba(14, 17, 24, 0.04);
+  --shadow-theme-xl: 0px 24px 40px -12px rgba(14, 17, 24, 0.14),
+    0px 8px 16px -6px rgba(14, 17, 24, 0.05);
+  --shadow-focus-ring: 0px 0px 0px 4px color-mix(in srgb, var(--color-brand, #1717B8) 12%, transparent);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -157,26 +176,146 @@
   --color-muted-foreground: var(--muted-foreground);
 }
 
+/* ============================================================
+   TQI-ERP SEMANTIC TOKENS
+   These power .btn-primary, .card, .tqi-input, .stat-item, etc.
+   ============================================================ */
 :root {
-  --background: #f9fafb;
-  --foreground: #101828;
+  /* Surfaces */
+  --background: #F4F6FB;
+  --foreground: #0E1118;
   --card: #ffffff;
-  --card-foreground: #101828;
-  --primary: #465fff;
-  --border: #e4e7ec;
-  --muted: #f2f4f7;
-  --muted-foreground: #667085;
+  --card-foreground: #0E1118;
+  --surface: #F4F6FB;
+  --surface-white: #ffffff;
+  --surface-hover: #F0F2F8;
+  --surface-tint: #F2F3FA;        /* subtle brand-tinted backdrop */
+  --surface-tint-strong: #E1E3F1;
+
+  /* Text */
+  --text: #0E1118;
+  --text-secondary: #414754;
+  --text-muted: #5F6573;
+  --text-placeholder: #8E94A0;
+  --text-on-brand: #ffffff;
+
+  /* Borders */
+  --border: #E1E4E9;
+  --border-strong: #C8CCD3;
+  --border-subtle: #EEF0F3;
+
+  /* Brand */
+  --primary: #1717B8;
+  --primary-foreground: #ffffff;
+  --brand: #1717B8;
+  --brand-dark: #1313A0;
+  --brand-light: #F2F3FA;
+  --brand-xlight: #E5E7F2;
+  --brand-ring: color-mix(in srgb, #1717B8 12%, transparent);
+  --brand-teal: #008C8C;
+  --brand-teal-light: #E6F5F5;
+  --brand-orange: #FF5500;
+  --brand-orange-light: #FFE0CC;
+
+  /* Status */
+  --success: #278A12;
+  --success-bg: #ECF8E5;
+  --success-border: #CFEB9C;
+  --success-fg: #17510A;
+  --warning: #B45309;
+  --warning-fg: #92400E;
+  --warning-bg: #FFFAEB;
+  --warning-border: #FEF0C7;
+  --error: #c0392b;
+  --error-bg: #FEF3F2;
+  --error-border: #FEE4E2;
+  --info: #1717B8;
+  --info-bg: var(--brand-light);
+  --info-border: var(--brand-xlight);
+  --teal-bg: #E6F5F5;
+  --teal-border: #C2E8E8;
+  --draft-bg: #F4F6FB;
+  --draft-text: #5F6573;
+  --muted: #EEF0F3;
+  --muted-foreground: #5F6573;
+
+  /* Radii */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 22px;
+
+  /* Shadows (semantic) */
+  --shadow-xs: 0 1px 2px rgba(14, 17, 24, 0.04);
+  --shadow-sm: 0 1px 3px rgba(14, 17, 24, 0.06), 0 1px 2px rgba(14, 17, 24, 0.04);
+  --shadow-md: 0 4px 12px -2px rgba(14, 17, 24, 0.08), 0 2px 4px -2px rgba(14, 17, 24, 0.04);
+  --shadow-lg: 0 16px 24px -8px rgba(14, 17, 24, 0.10), 0 4px 8px -4px rgba(14, 17, 24, 0.04);
+  --shadow-xl: 0 24px 40px -12px rgba(14, 17, 24, 0.14), 0 8px 16px -6px rgba(14, 17, 24, 0.05);
+  --shadow-brand: 0 8px 24px -8px color-mix(in srgb, #1717B8 35%, transparent);
 }
 
 .dark {
-  --background: #0c111d;
-  --foreground: #fcfcfd;
-  --card: #101828;
-  --card-foreground: #fcfcfd;
-  --primary: #465fff;
-  --border: #1d2939;
-  --muted: #1d2939;
-  --muted-foreground: #98a2b3;
+  --background: #0A0D14;
+  --foreground: #F6F7F9;
+  --card: #14181F;
+  --card-foreground: #F6F7F9;
+  --surface: #0F131B;
+  --surface-white: #14181F;
+  --surface-hover: #1A1F2A;
+  --surface-tint: #14182A;
+  --surface-tint-strong: #1A1F38;
+
+  --text: #F6F7F9;
+  --text-secondary: #C8CCD3;
+  --text-muted: #8E94A0;
+  --text-placeholder: #5F6573;
+  --text-on-brand: #ffffff;
+
+  --border: #1F2530;
+  --border-strong: #2C313C;
+  --border-subtle: #1A1F2A;
+
+  --primary: #5B5BEF;
+  --primary-foreground: #ffffff;
+  --brand: #5B5BEF;
+  --brand-dark: #757BB6;
+  --brand-light: #14182A;
+  --brand-xlight: #1A1F38;
+  --brand-ring: color-mix(in srgb, #5B5BEF 18%, transparent);
+  --brand-teal: #22B8B8;
+  --brand-teal-light: #002B2B;
+  --brand-orange: #FF7A33;
+  --brand-orange-light: #3A1A08;
+
+  --success: #4CAF2A;
+  --success-bg: #0F2A0A;
+  --success-border: #17510A;
+  --success-fg: #B0DF6A;
+  --warning: #FDB022;
+  --warning-fg: #FEC84B;
+  --warning-bg: #2A1A05;
+  --warning-border: #93370D;
+  --error: #F97066;
+  --error-bg: #2B0D0A;
+  --error-border: #99291E;
+  --info: #5B5BEF;
+  --info-bg: #14182A;
+  --info-border: #1A1F38;
+  --teal-bg: #002B2B;
+  --teal-border: #004F4F;
+  --draft-bg: #1A1F2A;
+  --draft-text: #8E94A0;
+  --muted: #1A1F2A;
+  --muted-foreground: #8E94A0;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 16px 24px -8px rgba(0, 0, 0, 0.55);
+  --shadow-xl: 0 24px 40px -12px rgba(0, 0, 0, 0.6);
+  --shadow-brand: 0 8px 24px -8px color-mix(in srgb, #5B5BEF 45%, transparent);
 }
 
 @layer base {
@@ -185,21 +324,31 @@
   ::before,
   ::backdrop,
   ::file-selector-button {
-    border-color: var(--color-gray-200, currentColor);
+    border-color: var(--color-border, currentColor);
   }
   .dark *,
   .dark ::after,
   .dark ::before {
-    border-color: var(--color-gray-800, #1d2939);
+    border-color: var(--color-border, #1F2530);
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
   }
   body {
-    @apply relative font-normal font-outfit text-gray-800 bg-gray-50 dark:bg-gray-950 dark:text-gray-200;
+    @apply relative font-normal font-sans antialiased;
+    color: var(--text);
+    background: var(--background);
     min-height: 100vh;
     overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    letter-spacing: -0.005em;
+  }
+  h1, h2, h3, h4 { letter-spacing: -0.02em; }
+  ::selection {
+    background: color-mix(in srgb, var(--brand) 22%, transparent);
+    color: var(--text);
   }
 }
 
@@ -257,23 +406,395 @@
 
 /* Card and Table styling */
 .tqi-card {
-  @apply rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03] md:p-6;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+  padding: 1.25rem;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+@media (min-width: 768px) { .tqi-card { padding: 1.5rem; } }
+.tqi-card-hover {
+  cursor: pointer;
+}
+.tqi-card-hover:hover {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
 }
 
 .tqi-table-container {
-  @apply overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.03];
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: var(--card);
 }
 
 .tqi-input {
-  @apply w-full rounded-lg border border-gray-300 bg-transparent px-4 py-2.5 text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-300 focus:outline-hidden focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:text-white/90 dark:placeholder:text-white/30 dark:focus:border-brand-800;
+  width: 100%;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background: var(--card);
+  padding: 0 0.875rem;
+  height: 38px;
+  font-size: 0.8125rem;
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.tqi-input::placeholder { color: var(--text-placeholder); }
+.tqi-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
 }
 
 .tqi-btn-primary {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2.5 text-sm font-medium text-white shadow-theme-xs hover:bg-brand-600 transition disabled:opacity-50 disabled:cursor-not-allowed;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: var(--radius-md);
+  background: var(--brand);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0 0.95rem;
+  height: 38px;
+  border: 1px solid var(--brand);
+  box-shadow: var(--shadow-brand);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.1s;
 }
+.tqi-btn-primary:hover { background: var(--brand-dark); box-shadow: 0 12px 28px -10px color-mix(in srgb, var(--brand) 45%, transparent); }
+.tqi-btn-primary:active { transform: translateY(1px); }
+.tqi-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .tqi-btn-outline {
-  @apply inline-flex items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-theme-xs hover:bg-gray-50 transition dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: var(--radius-md);
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0 0.85rem;
+  height: 36px;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-xs);
+  transition: background 0.14s, border-color 0.14s;
+}
+.tqi-btn-outline:hover { background: var(--surface-hover); border-color: color-mix(in srgb, var(--brand) 25%, var(--border-strong)); }
+
+.tqi-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0 0.7rem;
+  height: 34px;
+  border: 1px solid transparent;
+  transition: background 0.14s, color 0.14s;
+}
+.tqi-btn-ghost:hover { background: var(--surface-hover); color: var(--text); }
+
+/* ============================================================
+   REFINED DASHBOARD COMPONENTS
+   ============================================================ */
+
+/* Page hero — the welcome strip at the top of every view */
+.tqi-page-hero {
+  position: relative;
+  background:
+    radial-gradient(1200px 320px at 0% 0%, color-mix(in srgb, var(--brand) 6%, transparent), transparent 60%),
+    linear-gradient(180deg, var(--card) 0%, var(--surface-tint) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2xl);
+  padding: 1.5rem 1.5rem;
+  overflow: hidden;
+  isolation: isolate;
+}
+.dark .tqi-page-hero {
+  background:
+    radial-gradient(1200px 320px at 0% 0%, color-mix(in srgb, var(--brand) 12%, transparent), transparent 60%),
+    linear-gradient(180deg, var(--card) 0%, var(--surface-tint) 100%);
+}
+.tqi-page-hero::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--brand) 0%, var(--brand-teal) 50%, var(--brand-orange) 100%);
+  border-radius: 4px 0 0 4px;
+}
+.tqi-page-hero h1 { font-family: var(--font-sans); }
+
+/* KPI tile — refined single-row metric */
+.tqi-kpi {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.125rem 1.125rem 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+  overflow: hidden;
+}
+.tqi-kpi:hover {
+  border-color: color-mix(in srgb, var(--brand) 35%, var(--border));
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.tqi-kpi-head { display: flex; align-items: center; justify-content: space-between; }
+.tqi-kpi-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.tqi-kpi-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tqi-kpi-foot {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Icon chip — 38px brand-tinted square */
+.tqi-icon-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  background: var(--brand-light);
+  color: var(--brand);
+  flex-shrink: 0;
+}
+.tqi-icon-chip-teal   { background: var(--teal-bg);          color: var(--brand-teal); }
+.tqi-icon-chip-orange { background: var(--brand-orange-light); color: var(--brand-orange); }
+.tqi-icon-chip-success{ background: var(--success-bg);       color: var(--success); }
+.tqi-icon-chip-warn   { background: var(--warning-bg);       color: var(--warning); }
+
+/* Section header */
+.tqi-section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 1.25rem;
+}
+.tqi-section-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+.tqi-section-sub {
+  margin-top: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+/* Refined toolbar — single-row, used inside hero */
+.tqi-toolbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem;
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* 8-day timeline (curriculum) */
+.tqi-timeline { display: flex; align-items: stretch; gap: 0; position: relative; }
+.tqi-timeline-step {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 0.75rem 0.5rem 0.5rem;
+  position: relative;
+}
+.tqi-timeline-step::before {
+  content: "";
+  position: absolute;
+  top: 1.05rem;
+  left: 50%;
+  right: -50%;
+  height: 1.5px;
+  background: var(--border);
+}
+.tqi-timeline-step:last-child::before { display: none; }
+.tqi-timeline-dot {
+  position: relative;
+  z-index: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--card);
+  border: 1.5px solid var(--border-strong);
+  color: var(--text-muted);
+  margin-bottom: 0.6rem;
+  transition: all 0.2s;
+}
+.tqi-timeline-step[data-state="completed"] .tqi-timeline-dot { background: var(--success); border-color: var(--success); color: #fff; }
+.tqi-timeline-step[data-state="progress"] .tqi-timeline-dot { background: var(--brand-orange-light); border-color: var(--brand-orange); color: var(--brand-orange); }
+.tqi-timeline-step[data-state="scheduled"] .tqi-timeline-dot { background: var(--card); border-color: var(--brand); color: var(--brand); }
+.tqi-timeline-step[data-state="completed"]::before { background: var(--success); }
+.tqi-timeline-step[data-state="progress"]::before,
+.tqi-timeline-step[data-state="scheduled"]::before { background: linear-gradient(90deg, var(--success) 0%, var(--brand) 100%); }
+.tqi-timeline-day {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.tqi-timeline-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 0.25rem;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 9.5rem;
+}
+
+/* Search input — refined look */
+.tqi-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0 0.75rem;
+  height: 36px;
+  color: var(--text-muted);
+  transition: border-color 0.15s, box-shadow 0.15s;
+  min-width: 220px;
+}
+.tqi-search:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+.tqi-search input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 0.8125rem;
+  color: var(--text);
+  min-width: 0;
+}
+.tqi-search input::placeholder { color: var(--text-placeholder); }
+.tqi-search kbd {
+  font-size: 0.625rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  font-family: inherit;
+}
+
+/* Link row (used for quick links, replaces card-spam) */
+.tqi-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.875rem;
+  border-radius: var(--radius-md);
+  background: transparent;
+  transition: background 0.14s, color 0.14s;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  border: 0;
+  color: var(--text-secondary);
+}
+.tqi-link-row:hover { background: var(--surface-hover); color: var(--text); }
+.tqi-link-row .tqi-link-title { font-size: 0.8125rem; font-weight: 600; color: var(--text); }
+.tqi-link-row .tqi-link-desc { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.1rem; }
+
+/* Secondary display headline (the "now" pulse) */
+.tqi-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.tqi-pulse::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+}
+
+/* Editable brand-tinted accent strip on cards (the second-read moment) */
+.tqi-accent-strip {
+  position: relative;
+}
+.tqi-accent-strip::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.25rem;
+  bottom: 1.25rem;
+  width: 3px;
+  border-radius: 4px;
+  background: var(--brand);
+}
+
+/* Soft brand-tinted surface for empty states */
+.tqi-tint {
+  background: linear-gradient(180deg, var(--surface-tint) 0%, transparent 100%);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  text-align: center;
+  padding: 1.75rem 1rem;
 }
 
 /* Print styles */
@@ -378,12 +899,12 @@
 }
 .card-interactive {
   cursor: pointer;
-  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 .card-interactive:hover {
-  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--color-border));
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 /* Small coloured icon tile used in KPIs / list rows */
@@ -411,12 +932,12 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: border-color 0.16s, box-shadow 0.16s, transform 0.16s;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
 }
 .stat-item:hover {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--color-border));
   box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 .stat-label {
   font-size: 0.6875rem;
@@ -924,14 +1445,18 @@ h1.text-3xl, h1.text-\[26px\], h1.text-\[28px\], h1.text-\[30px\], h1.text-4xl {
 /* Keyboard focus for legacy raw inputs */
 .field-input:focus, input.rounded-xl:focus {
   border-color: var(--color-brand);
-  box-shadow: 0 0 0 3px var(--color-brand-xlight);
+  box-shadow: 0 0 0 3px var(--color-brand-ring);
 }
 
-/* --- Brand navy family --- */
-.text-\[\#002869\], .text-\[\#0b3d91\], .text-\[\#0B3D91\], .text-\[\#001947\] { color: var(--color-brand) !important; }
-.bg-\[\#002869\], .bg-\[\#0b3d91\], .bg-\[\#0B3D91\], .bg-\[\#001947\] { background-color: var(--color-brand) !important; }
-.border-\[\#002869\], .border-\[\#0b3d91\], .border-\[\#001947\] { border-color: var(--color-brand) !important; }
-.bg-\[\#dae2ff\], .bg-\[\#f0f4ff\], .bg-\[\#faf8ff\] { background-color: var(--color-brand-light) !important; }
+/* --- Brand navy family (legacy #002869) maps to TQI navy --- */
+.text-\[\#002869\], .text-\[\#0b3d91\], .text-\[\#0B3D91\], .text-\[\#001947\],
+.text-\[\#1717B8\], .text-\[\#1313A0\] { color: var(--color-brand) !important; }
+.bg-\[\#002869\], .bg-\[\#0b3d91\], .bg-\[\#0B3D91\], .bg-\[\#001947\],
+.bg-\[\#1717B8\], .bg-\[\#1313A0\] { background-color: var(--color-brand) !important; }
+.border-\[\#002869\], .border-\[\#0b3d91\], .border-\[\#001947\],
+.border-\[\#1717B8\] { border-color: var(--color-brand) !important; }
+.bg-\[\#dae2ff\], .bg-\[\#f0f4ff\], .bg-\[\#faf8ff\], .bg-\[\#F2F3FA\],
+.bg-\[\#E5E9F5\] { background-color: var(--color-brand-light) !important; }
 .border-\[\#dae2ff\], .border-\[\#c9d4f5\] { border-color: var(--color-info-border) !important; }
 
 /* --- Neutral slate family --- */
@@ -941,14 +1466,20 @@ h1.text-3xl, h1.text-\[26px\], h1.text-\[28px\], h1.text-\[30px\], h1.text-4xl {
 .bg-\[\#f4f3fb\] { background-color: var(--color-surface-hover) !important; }
 
 /* --- Orange / warm accent family --- */
-.text-\[\#fb7800\] { color: var(--color-brand-orange) !important; }
+.text-\[\#fb7800\], .text-\[\#FF5500\], .text-\[\#FF6B2C\] { color: var(--color-brand-orange) !important; }
 .text-\[\#592600\], .text-\[\#762900\], .text-\[\#b06000\] { color: var(--color-warning-fg) !important; }
-.bg-\[\#ffdbc8\], .bg-\[\#fff5ee\], .bg-\[\#fff7f2\], .bg-\[\#fff0d4\], .bg-\[\#ffe0cc\] { background-color: var(--color-warning-bg) !important; }
+.bg-\[\#ffdbc8\], .bg-\[\#fff5ee\], .bg-\[\#fff7f2\], .bg-\[\#fff0d4\], .bg-\[\#ffe0cc\],
+.bg-\[\#FFE0CC\] { background-color: var(--color-warning-bg) !important; }
 .border-\[\#ffdbc8\], .border-\[\#592600\] { border-color: var(--color-warning-border) !important; }
 
-/* --- Success green family --- */
-.text-\[\#137333\], .text-\[\#80d491\] { color: var(--color-success) !important; }
-.bg-\[\#e6f4ea\] { background-color: var(--color-success-bg) !important; }
+/* --- Teal family (logo ring) --- */
+.text-\[\#008C8C\], .text-\[\#22B8B8\] { color: var(--color-brand-teal) !important; }
+.bg-\[\#E6F5F5\], .bg-\[\#C2E8E8\] { background-color: var(--color-teal-bg) !important; }
+.border-\[\#C2E8E8\] { border-color: var(--color-teal-border) !important; }
+
+/* --- Success green family (logo "i") --- */
+.text-\[\#137333\], .text-\[\#80d491\], .text-\[\#278A12\], .text-\[\#4CAF2A\] { color: var(--color-success) !important; }
+.bg-\[\#e6f4ea\], .bg-\[\#ECF8E5\], .bg-\[\#E8F4D0\] { background-color: var(--color-success-bg) !important; }
 .border-\[\#ceead6\] { border-color: var(--color-success-border) !important; }
 
 /* --- Error red family --- */
@@ -956,6 +1487,13 @@ h1.text-3xl, h1.text-\[26px\], h1.text-\[28px\], h1.text-\[30px\], h1.text-4xl {
 .bg-\[\#ba1a1a\] { background-color: var(--color-error) !important; }
 .bg-\[\#ffdad6\] { background-color: var(--color-error-bg) !important; }
 .border-\[\#ffdad6\] { border-color: var(--color-error-border) !important; }
+.text-\[\#93000a\] { color: var(--color-error) !important; }
+
+/* --- Misc surface / focus tints --- */
+.bg-\[\#e8e7ef\], .bg-\[\#EEF0F3\], .bg-\[\#F4F6FB\] { background-color: var(--color-surface-hover) !important; }
+.bg-\[\#80bdff\] { background-color: var(--color-info-bg) !important; }
+.border-\[\#c4c6d3\]\/40, .border-\[\#c4c6d3\]\/60 { border-color: var(--color-border) !important; }
+.bg-\[\#dae2ff\]\/30 { background-color: var(--color-brand-light) !important; }
 
 /* Table normalise for raw <table>s */
 thead th {
@@ -992,5 +1530,2223 @@ html, body {
   overflow-x: hidden !important;
   max-width: 100vw !important;
   width: 100% !important;
+}
+
+/* ============================================================
+   PREMIUM MOTION TOKENS & EASINGS
+   Custom cubic-beziers — no linear, no ease-in-out anywhere.
+   ============================================================ */
+:root {
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-in-out-cubic: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --dur-instant: 120ms;
+  --dur-fast: 200ms;
+  --dur-base: 320ms;
+  --dur-slow: 520ms;
+  --dur-cinematic: 800ms;
+}
+
+/* Universal smooth transitions for interactive elements */
+button, a, [role="button"], input, select, textarea, .tqi-card, .tqi-kpi, .tqi-link-row,
+.tqi-btn-primary, .tqi-btn-outline, .tqi-btn-ghost {
+  transition-timing-function: var(--ease-out-quart);
+}
+
+/* ============================================================
+   FOCUS-VISIBLE — premium focus rings (orange, not blue)
+   ============================================================ */
+*:focus { outline: none; }
+*:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: 6px;
+  transition: outline-offset var(--dur-instant) var(--ease-out-quart);
+}
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+  border-color: var(--brand) !important;
+  box-shadow: 0 0 0 3px var(--brand-ring) !important;
+}
+
+/* ============================================================
+   DOUBLE-BEZEL CARD (Doppelrand Architecture)
+   Outer shell with hairline + inner core with its own
+   background, smaller radius, inner highlight. Used for
+   the most important surfaces (chart, hero, modals).
+   ============================================================ */
+.tqi-bezel {
+  position: relative;
+  background: var(--surface-tint);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px;
+  box-shadow: var(--shadow-xs);
+}
+.tqi-bezel-core {
+  position: relative;
+  background: var(--card);
+  border-radius: 19px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent);
+  overflow: hidden;
+}
+.dark .tqi-bezel-core {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 4%, transparent);
+}
+
+/* ============================================================
+   PREMIUM BUTTON-IN-BUTTON (CTA with nested trailing icon)
+   ============================================================ */
+.tqi-cta {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 42px;
+  padding: 0 0.5rem 0 1.05rem;
+  background: var(--brand);
+  color: var(--text-on-brand);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  border-radius: 999px;
+  border: 0;
+  cursor: pointer;
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 20%, transparent) inset,
+    0 8px 24px -8px color-mix(in srgb, var(--brand) 50%, transparent),
+    0 1px 2px rgba(14, 17, 24, 0.06);
+  transition: transform var(--dur-fast) var(--ease-out-quart),
+              box-shadow var(--dur-fast) var(--ease-out-quart),
+              background var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-cta:hover {
+  background: var(--brand-dark);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 20%, transparent) inset,
+    0 12px 32px -10px color-mix(in srgb, var(--brand) 60%, transparent);
+}
+.tqi-cta:active { transform: scale(0.98); }
+.tqi-cta-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 0.4rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, #fff 22%, transparent);
+  transition: transform var(--dur-fast) var(--ease-out-back);
+}
+.tqi-cta:hover .tqi-cta-icon { transform: translate(2px, -1px) scale(1.05); }
+.tqi-cta-secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  height: 38px;
+  padding: 0 0.95rem;
+  background: var(--card);
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  box-shadow: var(--shadow-xs);
+  transition: background var(--dur-fast) var(--ease-out-quart),
+              border-color var(--dur-fast) var(--ease-out-quart),
+              transform var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-cta-secondary:hover {
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--brand) 25%, var(--border));
+}
+.tqi-cta-secondary:active { transform: scale(0.98); }
+
+/* ============================================================
+   AVATAR — initial chip with brand-tinted gradient
+   ============================================================ */
+.tqi-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-on-brand);
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-teal) 100%);
+  flex-shrink: 0;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 25%, transparent);
+}
+.tqi-avatar-sm { width: 28px; height: 28px; border-radius: 9px; font-size: 0.6875rem; }
+.tqi-avatar-lg { width: 48px; height: 48px; border-radius: 16px; font-size: 0.9375rem; }
+.tqi-avatar-teal   { background: linear-gradient(135deg, var(--brand-teal) 0%, var(--brand) 100%); }
+.tqi-avatar-orange { background: linear-gradient(135deg, var(--brand-orange) 0%, #FFA266 100%); }
+.tqi-avatar-success{ background: linear-gradient(135deg, var(--success) 0%, var(--brand-teal) 100%); }
+
+/* ============================================================
+   PILL CHIP — refined status / category chip
+   ============================================================ */
+.tqi-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  height: 22px;
+  padding: 0 0.55rem;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface);
+  color: var(--text-secondary);
+}
+.tqi-chip-dot {
+  width: 6px; height: 6px; border-radius: 999px; flex-shrink: 0;
+}
+.tqi-chip-success { background: var(--success-bg); color: var(--success); border-color: var(--success-border); }
+.tqi-chip-warning { background: var(--warning-bg); color: var(--warning-fg); border-color: var(--warning-border); }
+.tqi-chip-error   { background: var(--error-bg); color: var(--error); border-color: var(--error-border); }
+.tqi-chip-info    { background: var(--info-bg); color: var(--info); border-color: var(--info-border); }
+.tqi-chip-teal    { background: var(--teal-bg); color: var(--brand-teal); border-color: var(--teal-border); }
+.tqi-chip-brand   { background: var(--brand-light); color: var(--brand); border-color: var(--brand-xlight); }
+
+/* ============================================================
+   ENTRY ANIMATIONS — staggered, springy
+   ============================================================ */
+@keyframes tqi-rise {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); filter: blur(4px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes tqi-rise-sm {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes tqi-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes tqi-pop {
+  0%   { transform: scale(0.92); opacity: 0; }
+  60%  { transform: scale(1.02); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes tqi-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+@keyframes tqi-pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--success) 50%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--success) 0%, transparent); }
+}
+@keyframes tqi-draw {
+  from { stroke-dashoffset: 1000; }
+  to   { stroke-dashoffset: 0; }
+}
+
+.tqi-rise { animation: tqi-rise var(--dur-cinematic) var(--ease-out-expo) both; }
+.tqi-rise-sm { animation: tqi-rise-sm var(--dur-base) var(--ease-out-quart) both; }
+.tqi-fade { animation: tqi-fade var(--dur-base) var(--ease-out-quart) both; }
+.tqi-pop  { animation: tqi-pop var(--dur-slow) var(--ease-out-back) both; }
+
+/* Stagger helpers — apply with style={{ animationDelay: '...' }} */
+.tqi-stagger > * { animation: tqi-rise-sm var(--dur-slow) var(--ease-out-quart) both; }
+.tqi-stagger > *:nth-child(1) { animation-delay: 0ms; }
+.tqi-stagger > *:nth-child(2) { animation-delay: 60ms; }
+.tqi-stagger > *:nth-child(3) { animation-delay: 120ms; }
+.tqi-stagger > *:nth-child(4) { animation-delay: 180ms; }
+.tqi-stagger > *:nth-child(5) { animation-delay: 240ms; }
+.tqi-stagger > *:nth-child(6) { animation-delay: 300ms; }
+.tqi-stagger > *:nth-child(7) { animation-delay: 360ms; }
+.tqi-stagger > *:nth-child(8) { animation-delay: 420ms; }
+
+/* ============================================================
+   PREMIUM SKELETON — shape-matched shimmer
+   ============================================================ */
+.tqi-skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+}
+.tqi-skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--text-muted) 8%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: tqi-shimmer 1.6s linear infinite;
+}
+
+/* ============================================================
+   CHART CONTAINER — for custom SVG charts
+   ============================================================ */
+.tqi-chart {
+  position: relative;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-xs);
+  padding: 1.25rem 1.25rem 1rem;
+  overflow: hidden;
+}
+.tqi-chart-grid line { stroke: var(--border-subtle); stroke-width: 1; }
+.tqi-chart-axis-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  fill: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tqi-chart-tooltip {
+  position: absolute;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.5rem 0.7rem;
+  font-size: 0.75rem;
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 5;
+  animation: tqi-rise-sm 200ms var(--ease-out-back) both;
+}
+.tqi-chart-legend {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.tqi-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.tqi-chart-legend-dot {
+  width: 8px; height: 8px; border-radius: 999px;
+}
+
+/* ============================================================
+   ACTIVITY FEED
+   ============================================================ */
+.tqi-activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem;
+  border-radius: var(--radius-md);
+  transition: background var(--dur-fast) var(--ease-out-quart);
+  cursor: pointer;
+}
+.tqi-activity-item:hover { background: var(--surface-hover); }
+.tqi-activity-body { flex: 1; min-width: 0; }
+.tqi-activity-title { font-size: 0.8125rem; font-weight: 600; color: var(--text); line-height: 1.3; }
+.tqi-activity-meta { font-size: 0.6875rem; color: var(--text-muted); margin-top: 2px; display: flex; align-items: center; gap: 0.4rem; }
+
+/* ============================================================
+   COMMAND PALETTE (Linear-style)
+   ============================================================ */
+.tqi-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: color-mix(in srgb, #070A12 55%, transparent);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+  padding-left: 1rem;
+  padding-right: 1rem;
+  animation: tqi-fade var(--dur-fast) var(--ease-out-quart) both;
+}
+.tqi-palette {
+  width: 100%;
+  max-width: 640px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow:
+    0 24px 48px -12px rgba(14, 17, 24, 0.25),
+    0 4px 12px -2px rgba(14, 17, 24, 0.10),
+    inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent);
+  overflow: hidden;
+  animation: tqi-rise var(--dur-slow) var(--ease-out-expo) both;
+}
+.dark .tqi-palette {
+  box-shadow:
+    0 24px 48px -12px rgba(0, 0, 0, 0.6),
+    0 4px 12px -2px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 color-mix(in srgb, #fff 6%, transparent);
+}
+.tqi-palette-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.tqi-palette-input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text);
+  font-family: inherit;
+  letter-spacing: -0.01em;
+}
+.tqi-palette-input::placeholder { color: var(--text-placeholder); }
+.tqi-palette-section-label {
+  padding: 0.5rem 1rem 0.25rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+.tqi-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0.55rem 0.85rem;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text);
+  border-radius: 0;
+  transition: background var(--dur-instant) var(--ease-out-quart);
+}
+.tqi-palette-item[data-active="true"] {
+  background: var(--brand-light);
+}
+.tqi-palette-item-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tqi-palette-item-meta {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.tqi-palette-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--surface);
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+}
+.tqi-palette-keys { display: flex; align-items: center; gap: 0.5rem; }
+.tqi-palette-keys kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 4px;
+  font-size: 10px; font-family: inherit; font-weight: 700;
+  background: var(--card); color: var(--text-secondary);
+  border: 1px solid var(--border); border-radius: 4px;
+}
+
+/* ============================================================
+   PREMIUM FORM FIELD
+   ============================================================ */
+.tqi-field { display: flex; flex-direction: column; gap: 0.4rem; }
+.tqi-field-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.tqi-field-label .tqi-required { color: var(--brand); margin-left: 2px; }
+.tqi-field-hint { font-size: 0.6875rem; color: var(--text-muted); margin-top: 2px; }
+.tqi-field-error { font-size: 0.6875rem; color: var(--error); margin-top: 2px; display: flex; align-items: center; gap: 0.25rem; }
+.tqi-input-premium {
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0 0.875rem;
+  height: 40px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  font-family: inherit;
+  letter-spacing: -0.005em;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-fast) var(--ease-out-quart),
+              box-shadow var(--dur-fast) var(--ease-out-quart),
+              background var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-input-premium::placeholder { color: var(--text-placeholder); font-weight: 400; }
+.tqi-input-premium:hover:not(:focus):not(:disabled) {
+  border-color: var(--border-strong);
+}
+.tqi-input-premium:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 4px var(--brand-ring);
+}
+.tqi-input-premium:disabled {
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.tqi-input-premium.is-error {
+  border-color: var(--error);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--error) 15%, transparent);
+}
+.tqi-textarea-premium {
+  min-height: 96px;
+  padding: 0.625rem 0.875rem;
+  height: auto;
+  resize: vertical;
+  line-height: 1.5;
+}
+.tqi-input-with-icon { position: relative; }
+.tqi-input-with-icon .tqi-input-premium { padding-left: 2.25rem; }
+.tqi-input-with-icon .tqi-input-icon {
+  position: absolute;
+  left: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.tqi-input-with-action .tqi-input-premium { padding-right: 3rem; }
+.tqi-input-with-action .tqi-input-action {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 0.65rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.tqi-input-with-action .tqi-input-action:hover { background: var(--surface-hover); color: var(--text); }
+
+/* ============================================================
+   NATIVE SELECT (premium chrome)
+   ============================================================ */
+.tqi-select-premium {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  padding-right: 2.25rem !important;
+  background-image: none;
+  cursor: pointer;
+}
+.tqi-select-premium:disabled {
+  background: var(--surface);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+.tqi-select-premium option {
+  background: var(--card);
+  color: var(--text);
+}
+
+/* ============================================================
+   PREMIUM EMPTY STATE
+   ============================================================ */
+.tqi-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 3rem 1.5rem;
+  gap: 0.5rem;
+  animation: tqi-rise var(--dur-slow) var(--ease-out-expo) both;
+}
+.tqi-empty-illustration {
+  width: 96px;
+  height: 96px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, var(--brand-light) 0%, var(--teal-bg) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 0.5rem;
+  color: var(--brand);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent),
+    var(--shadow-md);
+  position: relative;
+  overflow: hidden;
+}
+.tqi-empty-illustration::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--brand) 12%, transparent) 0%, transparent 60%);
+  pointer-events: none;
+}
+.tqi-empty-title { font-size: 1rem; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.tqi-empty-body { font-size: 0.8125rem; color: var(--text-muted); max-width: 380px; line-height: 1.5; }
+
+/* ============================================================
+   AUTH SPLIT SCREEN
+   ============================================================ */
+.tqi-auth-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100dvh;
+  background: var(--background);
+}
+@media (min-width: 1024px) {
+  .tqi-auth-shell { grid-template-columns: 1.05fr 1fr; }
+}
+.tqi-auth-stage {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #0a0a1a 0%, #1717B8 50%, #008C8C 100%);
+  color: #fff;
+  display: none;
+  padding: 3rem;
+  isolation: isolate;
+}
+@media (min-width: 1024px) { .tqi-auth-stage { display: flex; flex-direction: column; justify-content: space-between; } }
+.tqi-auth-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(900px 600px at 80% 20%, color-mix(in srgb, var(--brand-orange) 25%, transparent) 0%, transparent 50%),
+    radial-gradient(700px 500px at 10% 90%, color-mix(in srgb, #5B5BEF 35%, transparent) 0%, transparent 60%);
+  z-index: -1;
+}
+.tqi-auth-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(color-mix(in srgb, #fff 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, #fff 4%, transparent) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 50%, #000 30%, transparent 75%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 30%, transparent 75%);
+  z-index: -1;
+  opacity: 0.5;
+}
+.tqi-auth-headline {
+  font-size: clamp(2.25rem, 4.5vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+.tqi-auth-headline em {
+  font-style: italic;
+  font-weight: 400;
+  font-family: var(--font-display, "Instrument Serif", serif);
+  color: color-mix(in srgb, #FFD7B5 100%, #fff 0%);
+}
+.tqi-auth-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.85rem;
+  background: color-mix(in srgb, #fff 12%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 18%, transparent);
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  backdrop-filter: blur(8px);
+}
+.tqi-auth-form-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.5rem;
+  background: var(--background);
+}
+.tqi-auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2rem;
+  box-shadow: var(--shadow-md);
+}
+
+/* ============================================================
+   KBD KEY (used in shortcuts display)
+   ============================================================ */
+kbd.tqi-kbd {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  font-size: 10px; font-weight: 700; font-family: inherit;
+  background: var(--card); color: var(--text-secondary);
+  border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 5px;
+  line-height: 1;
+}
+
+/* ============================================================
+   PREMIUM DIVIDER (with optional label)
+   ============================================================ */
+.tqi-divider {
+  display: flex; align-items: center; gap: 0.75rem;
+  color: var(--text-muted); font-size: 0.6875rem;
+  text-transform: uppercase; letter-spacing: 0.1em; font-weight: 600;
+  margin: 0.5rem 0;
+}
+.tqi-divider::before, .tqi-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+/* ============================================================
+   LIVE STATUS PILL (animated)
+   ============================================================ */
+.tqi-live {
+  display: inline-flex; align-items: center; gap: 0.4rem;
+  font-size: 0.6875rem; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--success);
+}
+.tqi-live::before {
+  content: ""; width: 6px; height: 6px; border-radius: 999px;
+  background: var(--success);
+  animation: tqi-pulse-dot 1.6s var(--ease-in-out-cubic) infinite;
+}
+
+/* ============================================================
+   TABLE — refined zebra + hover
+   ============================================================ */
+.tqi-table tbody tr { transition: background var(--dur-instant) var(--ease-out-quart); }
+.tqi-table tbody tr:hover { background: var(--surface-hover); }
+
+/* ============================================================
+   TABULAR NUMBERS — apply to anything data-heavy
+   ============================================================ */
+.tqi-num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* ============================================================
+   ALERTS (inline form / status messages)
+   ============================================================ */
+.tqi-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.45;
+  animation: tqi-rise var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-alert-error {
+  background: var(--error-bg);
+  color: var(--error);
+  border-color: var(--error-border);
+}
+.tqi-alert-info {
+  background: var(--brand-light);
+  color: var(--text);
+  border-color: var(--brand-xlight);
+}
+.tqi-alert-info strong { color: var(--brand); }
+.tqi-alert-success {
+  background: var(--success-bg);
+  color: var(--success-fg);
+  border-color: var(--success-border);
+}
+
+/* ============================================================
+   SPINNER (used in buttons & inline loading)
+   ============================================================ */
+.tqi-spinner {
+  display: inline-block;
+  border-radius: 999px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  animation: tqi-spin 0.7s linear infinite;
+}
+@keyframes tqi-spin { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   ROLE PILLS (login quick-switch chips)
+   ============================================================ */
+.tqi-role-pill {
+  padding: 0.5rem 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-align: center;
+  background: var(--card);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  transition: all var(--dur-fast) var(--ease-out-quart);
+  cursor: pointer;
+}
+.tqi-role-pill:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.tqi-role-pill[data-active="true"] {
+  background: var(--brand-light);
+  color: var(--brand);
+  border-color: var(--brand);
+}
+
+/* ============================================================
+   LOGIN — EDITORIAL ASYMMETRIC STAGE
+   ============================================================ */
+.tqi-auth-stage-asym {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #07071a 0%, #1717B8 45%, #008C8C 100%);
+  color: #fff;
+  display: none;
+  isolation: isolate;
+  padding: clamp(2.25rem, 4vw, 3.5rem);
+}
+@media (min-width: 1024px) {
+  .tqi-auth-stage-asym { display: flex; flex-direction: column; }
+  .tqi-auth-stage-asym .tqi-auth-stage-canvas { display: flex; flex-direction: column; gap: 2.5rem; max-width: 38rem; }
+}
+.tqi-auth-stage-asym::before {
+  content: "";
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(900px 700px at 78% 18%, color-mix(in srgb, var(--brand-orange) 28%, transparent) 0%, transparent 50%),
+    radial-gradient(700px 500px at 8% 92%, color-mix(in srgb, #5B5BEF 40%, transparent) 0%, transparent 60%);
+  z-index: -2;
+}
+.tqi-auth-stage-asym::after {
+  content: "";
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(color-mix(in srgb, #fff 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, #fff 4%, transparent) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(circle at 50% 50%, #000 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, #000 30%, transparent 80%);
+  z-index: -1; opacity: 0.45;
+}
+.tqi-auth-canvas-num {
+  font-size: clamp(8rem, 22vw, 14rem);
+  line-height: 0.85;
+  font-weight: 800;
+  letter-spacing: -0.05em;
+  color: #fff;
+  opacity: 0.06;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+.tqi-auth-canvas-wordmark {
+  position: absolute;
+  bottom: -2.5rem;
+  left: -1.5rem;
+  font-family: var(--font-display, "Instrument Serif", serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: clamp(12rem, 28vw, 22rem);
+  line-height: 0.8;
+  color: #fff;
+  opacity: 0.05;
+  pointer-events: none;
+  user-select: none;
+  z-index: 0;
+}
+.tqi-auth-orb {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(110px);
+  pointer-events: none;
+  z-index: -1;
+}
+.tqi-auth-orb-1 { width: 380px; height: 380px; top: 12%; right: 8%; background: var(--brand-orange); opacity: 0.32; }
+.tqi-auth-orb-2 { width: 320px; height: 320px; bottom: 10%; left: 14%; background: #5B5BEF; opacity: 0.28; }
+.tqi-auth-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem 1.5rem;
+  padding: 1.25rem 0;
+  border-top: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #fff 12%, transparent);
+}
+.tqi-auth-stat {
+  display: flex; flex-direction: column;
+}
+.tqi-auth-stat-value {
+  font-size: clamp(1.375rem, 2vw, 1.625rem);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+.tqi-auth-stat-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+  margin-top: 0.3rem;
+}
+.tqi-auth-clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 0.4rem 0.75rem;
+  background: color-mix(in srgb, #fff 8%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 12%, transparent);
+  border-radius: 999px;
+  backdrop-filter: blur(8px);
+  color: rgba(255, 255, 255, 0.85);
+}
+.tqi-auth-clock-dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: #7CE7B0;
+  box-shadow: 0 0 0 4px color-mix(in srgb, #7CE7B0 25%, transparent);
+  animation: tqi-pulse-dot 1.6s var(--ease-in-out-cubic) infinite;
+}
+
+/* ============================================================
+   LOGIN — REFERENCE (cobalt + apricot) 50/50 split
+   Inspired by the "Creating Socially Responsible Leaders" composition.
+   Cobalt blue stage, dot-grid texture, apricot underline accent.
+   ============================================================ */
+:root {
+  --cobalt: #2743ff;
+  --cobalt-dark: #1b34c9;
+  --cobalt-deep: #14289c;
+  --apricot: #ffc95c;
+  --apricot-soft: #ffe4a3;
+  --login-ink: #0d1220;
+  --login-muted: #5b6478;
+  --login-border: #dfe2ea;
+}
+
+.tqi-login-shell {
+  display: grid;
+  grid-template-columns: 1fr;
+  min-height: 100dvh;
+  background: var(--background);
+}
+@media (min-width: 1024px) {
+  .tqi-login-shell { grid-template-columns: 1fr 1fr; }
+}
+
+/* ---- Left stage (cobalt) ---- */
+.tqi-login-stage {
+  position: relative;
+  overflow: hidden;
+  display: none;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(2rem, 4vw, 3.5rem);
+  background: linear-gradient(160deg, var(--cobalt) 0%, var(--cobalt-dark) 60%, var(--cobalt-deep) 100%);
+  color: #fff;
+  isolation: isolate;
+  min-height: 100dvh;
+}
+@media (min-width: 1024px) { .tqi-login-stage { display: flex; } }
+
+.tqi-login-stage .tqi-dot-grid {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.18) 1px, transparent 1px);
+  background-size: 24px 24px;
+  opacity: 0.55;
+  mask-image: radial-gradient(ellipse at 50% 50%, #000 25%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, #000 25%, transparent 80%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.tqi-login-stage .tqi-stage-orb {
+  position: absolute;
+  width: 420px; height: 420px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 201, 92, 0.45) 0%, transparent 70%);
+  filter: blur(60px);
+  top: -10%;
+  right: -8%;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.tqi-login-stage .tqi-stage-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 100%;
+  gap: 2rem;
+}
+
+.tqi-login-headline {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  font-size: clamp(2.5rem, 5.6vw, 4.25rem);
+  color: #fff;
+  text-wrap: balance;
+  margin: 0;
+}
+@media (max-width: 1280px) {
+  .tqi-login-headline { font-size: clamp(2.25rem, 5vw, 3.5rem); }
+}
+@media (max-width: 1100px) {
+  .tqi-login-headline { font-size: clamp(2rem, 4.6vw, 3rem); }
+}
+
+.tqi-apricot-underline {
+  position: relative;
+  display: inline-block;
+  color: #fff;
+  white-space: nowrap;
+}
+.tqi-apricot-underline::after {
+  content: "";
+  position: absolute;
+  left: -0.06em;
+  right: -0.06em;
+  bottom: 0.06em;
+  height: 0.22em;
+  background: var(--apricot);
+  z-index: -1;
+  border-radius: 2px;
+  transform: skewX(-6deg);
+}
+
+.tqi-login-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(8px);
+  width: max-content;
+}
+
+.tqi-login-sub {
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.78);
+  max-width: 32rem;
+  margin-top: 1rem;
+}
+
+/* ---- Testimonial card ---- */
+.tqi-testimonial {
+  position: relative;
+  z-index: 2;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 18px;
+  padding: 1.25rem 1.4rem;
+  max-width: 30rem;
+  backdrop-filter: blur(8px);
+}
+.tqi-testimonial-stars {
+  display: inline-flex;
+  gap: 2px;
+  color: var(--apricot);
+  margin-bottom: 0.6rem;
+}
+.tqi-testimonial-quote {
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: #fff;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.85rem 0;
+}
+.tqi-testimonial-author {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.tqi-testimonial-avatar {
+  width: 36px; height: 36px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.02em;
+}
+.tqi-testimonial-name {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.1;
+}
+.tqi-testimonial-meta {
+  font-size: 0.6875rem;
+  color: rgba(255, 255, 255, 0.65);
+  margin-top: 2px;
+}
+
+/* ---- Trust row (CONNECT | EXPLORE | SHARE | LEAD) ---- */
+.tqi-trust-row {
+  position: relative;
+  z-index: 2;
+}
+.tqi-trust-row-eyebrow {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 0.6rem;
+}
+.tqi-trust-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.tqi-trust-pill {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+/* ---- Right form side ---- */
+.tqi-login-form-side {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem;
+  background: var(--background);
+  min-height: 100dvh;
+}
+
+.tqi-login-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2.25rem;
+  box-shadow: var(--shadow-md);
+}
+@media (max-width: 480px) {
+  .tqi-login-card { padding: 1.5rem; border-radius: 18px; }
+}
+
+.tqi-login-h1 {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+  color: var(--login-ink);
+  margin: 0;
+}
+.tqi-login-sub2 {
+  font-size: 0.8125rem;
+  color: var(--login-muted);
+  margin-top: 0.4rem;
+  line-height: 1.5;
+}
+
+.tqi-login-input {
+  width: 100%;
+  height: 46px;
+  padding: 0 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  background: #fff;
+  color: var(--login-ink);
+  border: 1px solid var(--login-border);
+  border-radius: 10px;
+  transition: border-color 180ms var(--ease-out-quart), box-shadow 180ms var(--ease-out-quart);
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+}
+.tqi-login-input::placeholder { color: var(--login-muted); opacity: 0.7; }
+.tqi-login-input:focus {
+  outline: none;
+  border-color: var(--cobalt);
+  box-shadow: 0 0 0 4px rgba(39, 67, 255, 0.14);
+}
+
+.tqi-login-input-wrap {
+  position: relative;
+}
+.tqi-login-input-wrap .tqi-login-input { padding-left: 2.4rem; padding-right: 2.4rem; }
+.tqi-login-input-icon {
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--login-muted);
+  pointer-events: none;
+}
+.tqi-login-input-action {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px; height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--login-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: color 180ms var(--ease-out-quart);
+}
+.tqi-login-input-action:hover { color: var(--cobalt); }
+
+.tqi-login-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--login-ink);
+  margin-bottom: 0.4rem;
+  letter-spacing: -0.005em;
+}
+
+.tqi-login-primary {
+  width: 100%;
+  height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #fff;
+  background: var(--cobalt);
+  border-radius: 10px;
+  border: 1px solid var(--cobalt);
+  cursor: pointer;
+  transition: background 180ms var(--ease-out-quart), transform 180ms var(--ease-out-quart), box-shadow 180ms var(--ease-out-quart);
+  box-shadow: 0 4px 14px -4px rgba(39, 67, 255, 0.45);
+}
+.tqi-login-primary:hover:not(:disabled) {
+  background: var(--cobalt-dark);
+  border-color: var(--cobalt-dark);
+  box-shadow: 0 8px 22px -6px rgba(39, 67, 255, 0.55);
+}
+.tqi-login-primary:active:not(:disabled) { transform: translateY(1px); }
+.tqi-login-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.tqi-login-secondary-text {
+  font-size: 0.75rem;
+  color: var(--login-muted);
+  text-align: center;
+  margin-top: 1rem;
+}
+.tqi-login-secondary-text a {
+  color: var(--cobalt);
+  font-weight: 600;
+  text-decoration: none;
+}
+.tqi-login-secondary-text a:hover { text-decoration: underline; }
+
+/* ---- Method toggle (Password / OTP) ---- */
+.tqi-login-method {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 4px;
+  margin-bottom: 1rem;
+}
+.tqi-login-method-btn {
+  height: 36px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--login-muted);
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 180ms var(--ease-out-quart), color 180ms var(--ease-out-quart);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.tqi-login-method-btn[data-active="true"] {
+  background: #fff;
+  color: var(--login-ink);
+  box-shadow: 0 1px 2px rgba(14, 17, 24, 0.06), 0 0 0 1px var(--border);
+}
+
+/* ---- Role quick pills ---- */
+.tqi-login-roles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+.tqi-login-role {
+  height: 38px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--login-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 180ms var(--ease-out-quart);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0.5rem;
+  text-align: center;
+  line-height: 1.1;
+}
+.tqi-login-role:hover {
+  background: #fff;
+  color: var(--login-ink);
+  border-color: var(--border-strong);
+}
+.tqi-login-role[data-active="true"] {
+  background: rgba(39, 67, 255, 0.08);
+  color: var(--cobalt);
+  border-color: var(--cobalt);
+}
+
+.tqi-login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 1rem 0 0.6rem;
+  color: var(--login-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+.tqi-login-divider::before, .tqi-login-divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+/* Inline link button used inside the login form (e.g. "Forgot?") */
+.tqi-login-link {
+  background: transparent;
+  border: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--cobalt);
+  cursor: pointer;
+  transition: color 160ms var(--ease-out-quart), background 160ms var(--ease-out-quart);
+}
+.tqi-login-link:hover:not(:disabled) {
+  color: var(--cobalt-dark);
+  background: color-mix(in srgb, var(--cobalt) 8%, transparent);
+}
+.tqi-login-link:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.tqi-login-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--login-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.tqi-login-checkbox input { accent-color: var(--cobalt); width: 14px; height: 14px; }
+
+/* ---- Mobile collapse for the new login ---- */
+@media (max-width: 1023px) {
+  .tqi-login-form-side { padding: 1.5rem 1rem; }
+}
+@media (max-width: 480px) {
+  .tqi-login-form-side { padding: 1rem 0.875rem; }
+  .tqi-login-h1 { font-size: 1.5rem; }
+}
+
+/* ============================================================
+   LOGIN — MOBILE BRAND STRIP + CLEAN MOBILE FORM
+   On mobile, the cobalt stage is hidden. Instead we surface a
+   compact cobalt brand strip at the very top of the form-side so
+   the logo + wordmark stay visible at every viewport. The card
+   itself goes borderless and tighter — proper SaaS feel.
+   ============================================================ */
+
+/* Mobile brand strip — only on < 1024px */
+.tqi-login-mobile-strip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, var(--cobalt) 0%, var(--cobalt-dark) 100%);
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.tqi-login-mobile-strip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.22) 1px, transparent 1px);
+  background-size: 16px 16px;
+  opacity: 0.4;
+  pointer-events: none;
+  z-index: 0;
+}
+.tqi-login-mobile-strip > * { position: relative; z-index: 1; }
+.tqi-login-mobile-strip-name {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #fff;
+  line-height: 1.1;
+}
+.tqi-login-mobile-strip-meta {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.78);
+  margin-top: 2px;
+}
+
+@media (min-width: 1024px) {
+  .tqi-login-mobile-strip { display: none; }
+}
+
+/* On mobile, the form-side hosts the strip + the (now borderless) card */
+@media (max-width: 1023px) {
+  .tqi-login-form-side {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: 0;
+    background: var(--background);
+  }
+  .tqi-login-card {
+    max-width: none;
+    width: 100%;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+    padding: 1.5rem 1.25rem 2rem;
+    background: var(--card);
+  }
+}
+@media (max-width: 480px) {
+  .tqi-login-card { padding: 1.25rem 1rem 1.75rem; }
+}
+
+/* Mobile-only brand mark inside the card */
+.tqi-login-card-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+}
+.tqi-login-card-brand-name {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-size: 0.9375rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--login-ink);
+  line-height: 1.1;
+}
+.tqi-login-card-brand-meta {
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--login-muted);
+  margin-top: 2px;
+}
+@media (min-width: 1024px) {
+  .tqi-login-card-brand { display: none; }
+}
+
+/* On mobile, the h1 sits above the method toggle without the
+   extra sub text and the role-hint alert — keeps the card light. */
+@media (max-width: 1023px) {
+  .tqi-login-h1 { font-size: 1.5rem; }
+  .tqi-login-sub2 { font-size: 0.75rem; margin-top: 0.3rem; }
+  .tqi-login-method { margin-top: 1rem !important; }
+  .tqi-login-primary { height: 48px; }
+  .tqi-login-input { height: 48px; }
+  .tqi-login-roles { margin-top: 0.6rem; }
+  .tqi-login-secondary-text { margin-top: 0.85rem; font-size: 0.6875rem; }
+  .tqi-login-divider { margin: 0.85rem 0 0.5rem; }
+}
+
+/* On mobile, hide the "keep me signed in" verbose copy */
+@media (max-width: 640px) {
+  .tqi-login-checkbox { font-size: 0.6875rem; }
+}
+
+/* Smallest phones — even tighter */
+@media (max-width: 380px) {
+  .tqi-login-card { padding: 1rem 0.875rem 1.5rem; }
+  .tqi-login-h1 { font-size: 1.35rem; }
+  .tqi-login-mobile-strip { padding: 0.85rem 1rem; }
+}
+
+/* ============================================================
+   MOBILE UTILITIES — touch targets, stack, table compact
+   ============================================================ */
+.tqi-touch { min-height: 44px; min-width: 44px; }
+.tqi-stack-mobile { display: flex; flex-direction: row; gap: 0.5rem; }
+@media (max-width: 640px) {
+  .tqi-stack-mobile { flex-direction: column; }
+}
+.tqi-table-compact th,
+.tqi-table-compact td { padding: 0.5rem 0.625rem; font-size: 0.75rem; }
+@media (max-width: 768px) {
+  .tqi-table-compact th,
+  .tqi-table-compact td { padding: 0.4375rem 0.5rem; font-size: 0.6875rem; }
+}
+.tqi-hide-mobile { display: initial; }
+.tqi-show-mobile { display: none; }
+@media (max-width: 640px) {
+  .tqi-hide-mobile { display: none !important; }
+  .tqi-show-mobile { display: initial; }
+}
+@media (max-width: 480px) {
+  .tqi-input-premium { height: 44px; font-size: 0.875rem; }
+  .tqi-btn-primary,
+  .tqi-btn-outline,
+  .tqi-btn-ghost { min-height: 44px; }
+  .tqi-cta,
+  .tqi-cta-secondary { min-height: 44px; }
+}
+
+/* ============================================================
+   MOBILE MEDIA OVERRIDES — existing components
+   ============================================================ */
+@media (max-width: 1024px) {
+  .tqi-auth-stage { display: none !important; }
+  .tqi-auth-form-side { padding: 1.25rem 1rem; }
+  .tqi-auth-card { max-width: none; padding: 1.5rem; border-radius: 18px; }
+  .tqi-auth-headline { font-size: clamp(1.75rem, 6vw, 2.5rem); }
+}
+@media (max-width: 640px) {
+  .tqi-auth-card { padding: 1.25rem; border-radius: 16px; }
+  .tqi-auth-form-side { padding: 1rem 0.875rem; }
+  .tqi-auth-headline { font-size: 1.75rem; }
+}
+@media (max-width: 640px) {
+  .tqi-palette {
+    max-width: 100vw !important;
+    width: 100vw !important;
+    margin-top: 0 !important;
+    border-radius: 0 !important;
+    max-height: 100dvh;
+  }
+  .tqi-palette-backdrop { padding: 0; align-items: flex-start; }
+}
+@media (max-width: 768px) {
+  .modal, .drawer {
+    max-width: 100vw !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    border-radius: 0 !important;
+    top: 0 !important;
+    left: 0 !important;
+    transform: none !important;
+  }
+  .drawer { right: 0 !important; bottom: 0 !important; }
+}
+@media (max-width: 640px) {
+  .tqi-kpi { padding: 0.75rem 0.875rem; }
+  .tqi-kpi-label { font-size: 0.6875rem; }
+  .tqi-kpi-value { font-size: 1.5rem; }
+}
+@media (max-width: 640px) {
+  .tqi-page-hero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.25rem 1rem;
+    gap: 0.875rem;
+  }
+  .tqi-page-hero::before { display: none; }
+  .tqi-page-hero h1 { font-size: 1.375rem !important; }
+  .tqi-page-hero .tqi-cta-secondary,
+  .tqi-page-hero .tqi-cta { width: 100%; justify-content: center; }
+}
+@media (max-width: 640px) {
+  .tqi-section-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+  .tqi-section-header > .tqi-chip { align-self: flex-start; }
+}
+
+/* ============================================================
+   MOBILE NAVIGATION DRAWER (slide-in)
+   ============================================================ */
+.tqi-drawer-backdrop {
+  position: fixed; inset: 0; z-index: 60;
+  background: color-mix(in srgb, var(--text) 50%, transparent);
+  backdrop-filter: blur(6px);
+  animation: tqi-fade var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-drawer {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 70;
+  width: min(88vw, 320px);
+  background: var(--card);
+  border-right: 1px solid var(--border);
+  box-shadow: 24px 0 60px -20px color-mix(in srgb, var(--text) 30%, transparent);
+  transform: translateX(-100%);
+  transition: transform var(--dur-medium) var(--ease-out-quart);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.tqi-drawer[data-open="true"] { transform: translateX(0); }
+.tqi-drawer-handle {
+  width: 36px; height: 4px;
+  background: var(--border-strong);
+  border-radius: 999px;
+  margin: 8px auto 4px;
+}
+
+/* ============================================================
+   MOBILE SHEET (bottom sheet for filters / mobile menus)
+   ============================================================ */
+.tqi-sheet-backdrop {
+  position: fixed; inset: 0; z-index: 80;
+  background: color-mix(in srgb, var(--text) 45%, transparent);
+  backdrop-filter: blur(6px);
+  animation: tqi-fade var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 90;
+  max-height: 85dvh;
+  background: var(--card);
+  border-top-left-radius: 20px;
+  border-top-right-radius: 20px;
+  border-top: 1px solid var(--border);
+  box-shadow: 0 -20px 60px -20px color-mix(in srgb, var(--text) 25%, transparent);
+  display: flex; flex-direction: column;
+  transform: translateY(100%);
+  transition: transform var(--dur-medium) var(--ease-out-quart);
+  overflow: hidden;
+}
+.tqi-sheet[data-open="true"] { transform: translateY(0); }
+.tqi-sheet-handle {
+  width: 40px; height: 4px;
+  background: var(--border-strong);
+  border-radius: 999px;
+  margin: 8px auto 0;
+  flex-shrink: 0;
+}
+.tqi-sheet-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.75rem 1rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.tqi-sheet-body { flex: 1; overflow-y: auto; padding: 1rem; }
+.tqi-sheet-footer {
+  display: flex; gap: 0.5rem; justify-content: flex-end;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   RESPONSIVE TABLE — card variant for mobile
+   ============================================================ */
+.tqi-rtable-cards { display: none; }
+.tqi-rtable-table { display: block; }
+@media (max-width: 768px) {
+  .tqi-rtable-cards { display: flex; flex-direction: column; gap: 0.625rem; }
+  .tqi-rtable-table { display: none; }
+}
+.tqi-rtable-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.875rem;
+  display: flex; flex-direction: column; gap: 0.5rem;
+  box-shadow: var(--shadow-xs);
+  transition: border-color var(--dur-fast) var(--ease-out-quart),
+              transform var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-rtable-card:active { transform: scale(0.99); }
+.tqi-rtable-card:hover { border-color: var(--border-strong); }
+.tqi-rtable-card-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text);
+}
+.tqi-rtable-card-row .label {
+  font-size: 0.6875rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+  min-width: 88px;
+}
+.tqi-rtable-card-head {
+  display: flex; align-items: center; gap: 0.625rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.125rem;
+}
+.tqi-rtable-card-title {
+  font-size: 0.9375rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tqi-rtable-card-actions {
+  display: flex; gap: 0.375rem; justify-content: flex-end;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.25rem;
+}
+
+/* ============================================================
+   MOBILE SEARCH OVERLAY (tap to expand from header)
+   ============================================================ */
+.tqi-mobile-search {
+  position: fixed; inset: 0; z-index: 80;
+  background: var(--background);
+  display: flex; flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0);
+}
+.tqi-mobile-search-header {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.625rem 0.875rem;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   LIGHT VIEW POLISH — small filter chips, segmented controls
+   Bump to touch-friendly 40px height on mobile
+   ============================================================ */
+@media (max-width: 640px) {
+  .tqi-segmented {
+    min-height: 40px;
+  }
+  .tqi-segmented > button,
+  .tqi-segmented > a {
+    min-height: 40px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+  }
+}
+
+/* ============================================================
+   HEAVY MODALS — full-screen on mobile (custom modal divs)
+   Add class `tqi-modal-mobile-full` to the parent backdrop div
+   ============================================================ */
+@media (max-width: 768px) {
+  .tqi-modal-mobile-full {
+    padding: 0 !important;
+    align-items: stretch !important;
+  }
+  .tqi-modal-mobile-full > .tqi-modal-panel {
+    max-width: 100% !important;
+    width: 100% !important;
+    max-height: 100dvh !important;
+    height: 100dvh !important;
+    border-radius: 0 !important;
+  }
+}
+
+/* ============================================================
+   REDUCED MOTION RESPECT
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .tqi-rise, .tqi-rise-sm, .tqi-fade, .tqi-pop,
+  .tqi-stagger > *,
+  .tqi-live::before, .tqi-skeleton::after {
+    animation: none !important;
+  }
+  .tqi-cta, .tqi-cta-secondary, .tqi-card, .tqi-kpi {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   AWWWARDS-TIER ENHANCEMENTS
+   - Double-Bezel variants
+   - Scroll-reveal IntersectionObserver hook (used via .tqi-reveal)
+   - Macro-whitespace section padding
+   - Phosphor Light icon font hint
+   - Button-in-Button icon pill
+   - Glass-island floating surfaces
+   ============================================================ */
+
+/* ---- Double-Bezel variants ---- */
+.tqi-bezel-tight {
+  position: relative;
+  background: var(--surface-tint);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1px;
+}
+.tqi-bezel-tight > .tqi-bezel-core {
+  background: var(--card);
+  border-radius: 13px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 50%, transparent);
+  overflow: hidden;
+}
+.tqi-bezel-loose {
+  position: relative;
+  background: var(--surface-tint);
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  padding: 1px;
+}
+.tqi-bezel-loose > .tqi-bezel-core {
+  background: var(--card);
+  border-radius: 27px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 60%, transparent);
+  overflow: hidden;
+}
+.dark .tqi-bezel-tight > .tqi-bezel-core,
+.dark .tqi-bezel-loose > .tqi-bezel-core {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 5%, transparent);
+}
+
+/* ---- Scroll reveal (IntersectionObserver) ---- */
+@keyframes tqi-reveal-rise {
+  from { opacity: 0; transform: translateY(20px) scale(0.985); filter: blur(6px); }
+  to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+.tqi-reveal {
+  opacity: 0;
+  will-change: opacity, transform, filter;
+}
+.tqi-reveal.is-visible {
+  animation: tqi-reveal-rise var(--dur-cinematic) var(--ease-out-expo) both;
+}
+
+/* ---- Macro-whitespace section padding ---- */
+.tqi-section-pad {
+  padding-top: clamp(2.5rem, 6vw, 4.5rem);
+  padding-bottom: clamp(2.5rem, 6vw, 4.5rem);
+}
+.tqi-section-pad-lg {
+  padding-top: clamp(4rem, 10vw, 6rem);
+  padding-bottom: clamp(4rem, 10vw, 6rem);
+}
+.tqi-section-pad-xl {
+  padding-top: clamp(5rem, 12vw, 8rem);
+  padding-bottom: clamp(5rem, 12vw, 8rem);
+}
+
+/* ---- Phosphor Light icon base (applies to all icons rendered) ---- */
+.tqi-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.tqi-icon-weight-light { font-weight: 300; }
+
+/* Eyebrow / kicker — the microscopic pill badge that sits above a headline */
+.tqi-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.35rem 0.7rem 0.35rem 0.5rem;
+  border-radius: 999px;
+  background: var(--brand-light);
+  color: var(--brand);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  border: 1px solid var(--brand-xlight);
+}
+.tqi-eyebrow-dot {
+  width: 6px; height: 6px; border-radius: 999px;
+  background: var(--brand);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand) 18%, transparent);
+}
+.tqi-eyebrow-on-dark {
+  background: color-mix(in srgb, #fff 12%, transparent);
+  color: #fff;
+  border-color: color-mix(in srgb, #fff 18%, transparent);
+  backdrop-filter: blur(8px);
+}
+.tqi-eyebrow-on-dark .tqi-eyebrow-dot {
+  background: var(--apricot);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--apricot) 22%, transparent);
+}
+
+/* ---- Button-in-Button icon pill (the Awwwards trailing arrow) ---- */
+.tqi-cta-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin-left: 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 20%, transparent);
+  transition: transform var(--dur-fast) var(--ease-out-back),
+              background var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-cta:hover .tqi-cta-pill,
+.tqi-btn-arrow:hover .tqi-cta-pill {
+  transform: translate(2px, -1px) scale(1.06);
+  background: color-mix(in srgb, currentColor 32%, transparent);
+}
+
+/* ---- Glass-island floating surface (used for floating nav, floating CTAs) ---- */
+.tqi-glass-island {
+  background: color-mix(in srgb, var(--card) 75%, transparent);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 40%, transparent) inset,
+    0 12px 32px -12px color-mix(in srgb, var(--text) 16%, transparent),
+    0 4px 8px -4px color-mix(in srgb, var(--text) 6%, transparent);
+}
+.dark .tqi-glass-island {
+  background: color-mix(in srgb, var(--card) 70%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #fff 6%, transparent) inset,
+    0 12px 32px -12px rgba(0, 0, 0, 0.55);
+}
+
+/* ---- Hamburger morph (the rotating X) ---- */
+.tqi-hamburger {
+  position: relative;
+  width: 22px;
+  height: 16px;
+  display: inline-block;
+}
+.tqi-hamburger span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 1.5px;
+  background: currentColor;
+  border-radius: 2px;
+  transition: transform var(--dur-base) var(--ease-out-quart),
+              top var(--dur-base) var(--ease-out-quart),
+              opacity var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-hamburger span:nth-child(1) { top: 0; }
+.tqi-hamburger span:nth-child(2) { top: 7px; width: 70%; }
+.tqi-hamburger span:nth-child(3) { top: 14px; }
+.tqi-hamburger[data-open="true"] span:nth-child(1) {
+  top: 7px;
+  transform: rotate(45deg);
+}
+.tqi-hamburger[data-open="true"] span:nth-child(2) {
+  opacity: 0;
+  transform: translateX(-12px);
+}
+.tqi-hamburger[data-open="true"] span:nth-child(3) {
+  top: 7px;
+  transform: rotate(-45deg);
+}
+
+/* ---- Magnetic button wrapper (apply group + transform on hover) ---- */
+.tqi-magnetic {
+  transition: transform var(--dur-base) var(--ease-out-quart);
+}
+.tqi-magnetic:hover {
+  transform: translateY(-1px);
+}
+
+/* ---- Spotlight border (subtle, premium, on hovered premium cards) ---- */
+.tqi-spotlight {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.tqi-spotlight::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: radial-gradient(
+    360px circle at var(--spot-x, 50%) var(--spot-y, 50%),
+    color-mix(in srgb, var(--brand) 35%, transparent),
+    transparent 45%
+  );
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out-quart);
+  pointer-events: none;
+  z-index: 0;
+}
+.tqi-spotlight:hover::before { opacity: 1; }
+.tqi-spotlight > * { position: relative; z-index: 1; }
+
+/* ---- Subtle grain overlay (only on dark surfaces, pointer-events none) ---- */
+.tqi-grain {
+  position: relative;
+  isolation: isolate;
+}
+.tqi-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.04;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+}
+
+/* ---- Premium divider with label that breathes ---- */
+.tqi-divider-soft {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  margin: 1.25rem 0;
+}
+.tqi-divider-soft::before,
+.tqi-divider-soft::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--border) 50%, transparent 100%);
+}
+
+/* ---- Tilt card (apply data-tilt for premium hero cards) ---- */
+.tqi-tilt {
+  transition: transform var(--dur-slow) var(--ease-out-quart);
+  will-change: transform;
+}
+.tqi-tilt:hover {
+  transform: perspective(1200px) rotateX(1.5deg) rotateY(-1.5deg) scale(1.01);
+}
+
+/* ---- Number ticker (for KPI hero numbers — animated counter) ---- */
+.tqi-num-hero {
+  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  background: linear-gradient(180deg, var(--text) 0%, color-mix(in srgb, var(--text) 70%, var(--brand)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---- Floating label (a premium alt to plain form labels) ---- */
+.tqi-field-floating {
+  position: relative;
+}
+.tqi-field-floating .tqi-input-premium {
+  padding-top: 1.1rem;
+  padding-bottom: 0.4rem;
+  height: 54px;
+}
+.tqi-field-floating label {
+  position: absolute;
+  top: 50%;
+  left: 0.875rem;
+  transform: translateY(-50%);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: top var(--dur-fast) var(--ease-out-quart),
+              font-size var(--dur-fast) var(--ease-out-quart),
+              color var(--dur-fast) var(--ease-out-quart);
+}
+.tqi-field-floating .tqi-input-premium:focus + label,
+.tqi-field-floating .tqi-input-premium:not(:placeholder-shown) + label {
+  top: 0.65rem;
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+/* ---- Page section headings (the eyebrow + title pattern) ---- */
+.tqi-section-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.875rem;
+}
+.tqi-section-rule {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, var(--border) 0%, transparent 100%);
+}
+
+/* ---- Soft drop-zone for the canvas (used in editor screens) ---- */
+.tqi-canvas {
+  background:
+    radial-gradient(1200px 600px at 0% 0%, color-mix(in srgb, var(--brand) 4%, transparent), transparent 60%),
+    var(--card);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-2xl);
+  padding: 2rem;
+}
+
+/* ---- Cubic-bezier for premium in/out ---- */
+@keyframes tqi-mask-rise {
+  from { clip-path: inset(0 0 100% 0); opacity: 0; }
+  to   { clip-path: inset(0 0 0 0); opacity: 1; }
+}
+.tqi-mask-rise {
+  animation: tqi-mask-rise var(--dur-cinematic) var(--ease-out-expo) both;
+}
+
+/* ---- Live status pill (animated, premium) ---- */
+.tqi-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 22%, transparent);
+  animation: tqi-pulse-dot 1.6s var(--ease-in-out-cubic) infinite;
+}
+
+/* ============================================================
+   Awwwards-tier motion primitives (keyframe library)
+   ============================================================ */
+
+@keyframes tqi-palette-in {
+  0% { opacity: 0; transform: translateY(-12px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes tqi-fade-in {
+  0% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes tqi-reveal-up {
+  0% { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tqi-modal-in {
+  0% { opacity: 0; transform: translateY(20px) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes tqi-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(0.4deg); }
+}
+
+/* `.tqi-reveal` is the base class for any scroll-entry element. The
+   IntersectionObserver hook adds `.is-visible` once the element
+   crosses the viewport threshold. The fallback `:not(.is-visible)`
+   state keeps content visible if JS hasn't hydrated yet. */
+.tqi-reveal {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity var(--dur-slow, 720ms) var(--ease-out-quart),
+              transform var(--dur-slow, 720ms) var(--ease-out-quart);
+  will-change: opacity, transform;
+}
+.tqi-reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tqi-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Item-level stagger for menu / nav reveals */
+.tqi-reveal-item {
+  opacity: 0;
+  transform: translateY(6px);
+  animation: tqi-reveal-up var(--dur-base, 320ms) var(--ease-out-quart) both;
 }
 

@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from './ui/select';
 import { ActionButton } from './ui/action-button';
-import { Plus, Search, BookOpen, CheckCircle2, Clock, AlertTriangle, FileText, X } from 'lucide-react';
+import { Plus, Search, BookOpen, CheckCircle2, Clock, AlertTriangle, FileText, X } from './ui/icons';
 
 interface LessonPlanViewProps {
   lessonPlans: LessonPlan[];
@@ -557,7 +557,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
       {/* LESSON PLAN TABLE */}
       <div className="bg-white border border-slate-200 rounded-md shadow-xs overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse text-xs">
+          <table className="tqi-table-compact w-full text-left border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider text-[11px]">
                 <th className="py-2.5 px-3.5">Date &amp; Module</th>

@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from './ui/select';
 import { ActionButton } from './ui/action-button';
+import { ResponsiveTable } from './ui/ResponsiveTable';
 
 interface StudentsViewProps {
   students: Student[];
@@ -1057,82 +1058,138 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
-      {/* 2. TABLE VIEW */}
+      {/* 2. TABLE VIEW (responsive: table on desktop, cards on mobile) */}
       {(viewMode === 'all' || viewMode === 'boys' || viewMode === 'girls') && (
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <table className="w-full text-left border-collapse">
-            <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
-              <tr>
-                <th className="px-5 py-3.5">Code</th>
-                <th className="px-5 py-3.5">Student Name</th>
-                <th className="px-5 py-3.5">Gender</th>
-                <th className="px-5 py-3.5">Standard</th>
-                <th className="px-5 py-3.5">Parent / Guardian</th>
-                <th className="px-5 py-3.5">Phone</th>
-                <th className="px-5 py-3.5">Status</th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
-              {(viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents).length ===
-              0 ? (
-                <tr>
-                  <td colSpan={8} className="px-5 py-12 text-center text-gray-400">
-                    No students found matching the selected filters.
-                  </td>
-                </tr>
-              ) : (
-                (viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents).map(
-                  (student) => (
-                    <tr
-                      key={student.id}
-                      onClick={() => setViewingStudent(student)}
-                      className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
-                    >
-                      <td className="px-5 py-3.5 font-mono text-gray-400">{student.code}</td>
-                      <td className="px-5 py-3.5 font-bold text-gray-900 dark:text-white">{student.name}</td>
-                      <td className="px-5 py-3.5">
-                        <Badge color={student.gender === 'male' ? 'primary' : 'warning'} size="sm">
-                          {student.gender === 'male' ? '👦 Boy' : '👧 Girl'}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300 font-medium">
-                        {student.standard}th Standard
-                      </td>
-                      <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">{student.parentName || '—'}</td>
-                      <td className="px-5 py-3.5 font-mono text-gray-500 dark:text-gray-400">{student.phone}</td>
-                      <td className="px-5 py-3.5">
-                        <Badge color={student.status === 'active' ? 'success' : 'light'} size="sm">
-                          {student.status === 'active' ? 'Active' : 'Inactive'}
-                        </Badge>
-                      </td>
-                      <td className="px-5 py-3.5 text-right">
-                        <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => handleEditStudent(student)}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition"
-                            title="Edit"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">edit</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setStudentToDelete(student)}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition"
-                            title="Delete"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">delete</span>
-                          </button>
-                        </div>
+        <ResponsiveTable
+          items={(viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents)}
+          getKey={(s) => s.id}
+          renderTable={() => (
+            <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+              <table className="w-full text-left border-collapse">
+                <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
+                  <tr>
+                    <th className="px-5 py-3.5">Code</th>
+                    <th className="px-5 py-3.5">Student Name</th>
+                    <th className="px-5 py-3.5">Gender</th>
+                    <th className="px-5 py-3.5">Standard</th>
+                    <th className="px-5 py-3.5">Parent / Guardian</th>
+                    <th className="px-5 py-3.5">Phone</th>
+                    <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
+                  {(viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents).length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="px-5 py-12 text-center text-gray-400">
+                        No students found matching the selected filters.
                       </td>
                     </tr>
-                  )
-                )
-              )}
-            </tbody>
-          </table>
-        </div>
+                  ) : (
+                    (viewMode === 'boys' ? boyStudents : viewMode === 'girls' ? girlStudents : filteredRosterStudents).map(
+                      (student) => (
+                        <tr
+                          key={student.id}
+                          onClick={() => setViewingStudent(student)}
+                          className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors cursor-pointer"
+                        >
+                          <td className="px-5 py-3.5 font-mono text-gray-400">{student.code}</td>
+                          <td className="px-5 py-3.5 font-bold text-gray-900 dark:text-white">{student.name}</td>
+                          <td className="px-5 py-3.5">
+                            <Badge color={student.gender === 'male' ? 'primary' : 'warning'} size="sm">
+                              {student.gender === 'male' ? '👦 Boy' : '👧 Girl'}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300 font-medium">
+                            {student.standard}th Standard
+                          </td>
+                          <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400">{student.parentName || '—'}</td>
+                          <td className="px-5 py-3.5 font-mono text-gray-500 dark:text-gray-400">{student.phone}</td>
+                          <td className="px-5 py-3.5">
+                            <Badge color={student.status === 'active' ? 'success' : 'light'} size="sm">
+                              {student.status === 'active' ? 'Active' : 'Inactive'}
+                            </Badge>
+                          </td>
+                          <td className="px-5 py-3.5 text-right">
+                            <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                onClick={() => handleEditStudent(student)}
+                                className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition"
+                                title="Edit"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">edit</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setStudentToDelete(student)}
+                                className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition"
+                                title="Delete"
+                              >
+                                <span className="material-symbols-outlined text-[16px]">delete</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+          renderCard={(student) => (
+            <ResponsiveTable.Card onClick={() => setViewingStudent(student)}>
+              <ResponsiveTable.CardHead>
+                <div
+                  className="h-9 w-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0"
+                  style={{
+                    background: student.gender === 'male' ? 'var(--brand-light)' : 'var(--brand-orange-light, #FFF1E5)',
+                    color: student.gender === 'male' ? 'var(--brand)' : 'var(--brand-orange)',
+                  }}
+                >
+                  {student.avatarLetter}
+                </div>
+                <ResponsiveTable.CardTitle>{student.name}</ResponsiveTable.CardTitle>
+                <Badge
+                  color={student.status === 'active' ? 'success' : 'light'}
+                  size="sm"
+                >
+                  {student.status === 'active' ? 'Active' : 'Inactive'}
+                </Badge>
+              </ResponsiveTable.CardHead>
+              <ResponsiveTable.CardRow label="Code" value={<span className="font-mono">{student.code}</span>} />
+              <ResponsiveTable.CardRow label="Standard" value={`${student.standard}th`} />
+              <ResponsiveTable.CardRow label="Parent" value={student.parentName || '—'} />
+              <ResponsiveTable.CardRow label="Phone" value={<span className="font-mono">{student.phone}</span>} />
+              <ResponsiveTable.CardActions>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); handleEditStudent(student); }}
+                  className="tqi-touch inline-flex items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition"
+                  style={{ height: 36, color: 'var(--brand)', background: 'var(--brand-light)' }}
+                >
+                  <span className="material-symbols-outlined text-[14px]">edit</span>
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setStudentToDelete(student); }}
+                  className="tqi-touch inline-flex items-center gap-1 rounded-md px-2.5 text-xs font-semibold transition"
+                  style={{ height: 36, color: 'var(--error, #ba1a1a)', background: 'var(--error-bg, #FEF3F2)' }}
+                >
+                  <span className="material-symbols-outlined text-[14px]">delete</span>
+                  Delete
+                </button>
+              </ResponsiveTable.CardActions>
+            </ResponsiveTable.Card>
+          )}
+          emptyState={
+            <div className="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 p-10 text-center text-sm text-gray-400">
+              No students found matching the selected filters.
+            </div>
+          }
+        />
       )}
 
       {/* ==========================================

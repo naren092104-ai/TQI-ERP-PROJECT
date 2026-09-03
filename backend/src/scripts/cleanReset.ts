@@ -78,10 +78,9 @@ async function runCleanReset() {
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES
        ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-gmail', 'Super Admin', 'admin@gmail.com', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
+       ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
        ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), must_change_password = FALSE, status = 'ACTIVE'`,
-      [passwordHash, passwordHash, passwordHash],
+      [passwordHash, passwordHash],
     );
 
     console.log('\n======================================================');
