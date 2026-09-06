@@ -44,12 +44,27 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         state VARCHAR(255) NULL,
         code VARCHAR(64) NULL,
         college_name VARCHAR(255) NULL,
+        college_id VARCHAR(64) NULL,
         spoc_name VARCHAR(255) NULL,
         spoc_mobile VARCHAR(50) NULL,
         admin_id VARCHAR(64) NULL,
         status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
+  {
+    name: 'colleges',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS colleges (
+        id VARCHAR(64) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        district VARCHAR(255) NULL,
+        status ENUM('ACTIVE','INACTIVE') NOT NULL DEFAULT 'ACTIVE',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_colleges_name_district (name, district)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `,
   },
@@ -93,6 +108,7 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         dob DATE NULL,
         standard VARCHAR(100) NULL,
         cluster_id VARCHAR(64) NOT NULL,
+        college_id VARCHAR(64) NULL,
         panchayat_id VARCHAR(64) NOT NULL,
         village_id VARCHAR(64) NOT NULL,
         parent_name VARCHAR(255) NULL,
@@ -115,6 +131,7 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         email VARCHAR(255) NULL,
         phone VARCHAR(50) NULL,
         cluster_id VARCHAR(64) NOT NULL,
+        college_id VARCHAR(64) NULL,
         panchayat_id VARCHAR(64) NULL,
         village_id VARCHAR(64) NULL,
         department VARCHAR(255) NULL,
@@ -456,6 +473,22 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
     `,
   },
   {
+    name: 'password_reset_tokens',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id VARCHAR(64) PRIMARY KEY,
+        user_id VARCHAR(64) NOT NULL,
+        token_hash VARCHAR(128) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_password_reset_token_hash (token_hash),
+        INDEX idx_password_reset_user (user_id),
+        INDEX idx_password_reset_expiry (expires_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
+  {
     name: 'academic_setup',
     ddl: `
       CREATE TABLE IF NOT EXISTS academic_setup (
@@ -592,6 +625,10 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'clusters', column: 'spoc_name', definition: 'VARCHAR(255) NULL' },
   { table: 'clusters', column: 'spoc_mobile', definition: 'VARCHAR(50) NULL' },
   { table: 'clusters', column: 'admin_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'clusters', column: 'college_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'students', column: 'college_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'volunteers', column: 'college_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'volunteers', column: 'created_by', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'title', definition: 'VARCHAR(255) NULL' },
   { table: 'sessions', column: 'academic_year', definition: 'VARCHAR(50) NULL' },
   { table: 'sessions', column: 'day_number', definition: 'INT NULL' },
@@ -602,6 +639,14 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'sessions', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'day_id', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'clusterId', definition: 'VARCHAR(64) NULL' },
+  { table: 'attendance_sessions', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'lesson_plans', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'session_photos', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'finance_entries', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'approvals', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'session_reports', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'date_change_requests', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'session_submissions', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'time', definition: 'VARCHAR(50) NULL' },
   { table: 'sessions', column: 'endTime', definition: 'VARCHAR(50) NULL' },
   { table: 'sessions', column: 'status', definition: 'VARCHAR(64) NULL' },
@@ -674,6 +719,17 @@ export async function initDatabaseSchema(): Promise<void> {
     } catch (err: any) {
       // Ignore column alter warnings if already handled
     }
+  }
+
+  try {
+    const [legacyClusters] = await pool.query<any[]>("SELECT id, college_name, district FROM clusters WHERE (college_id IS NULL OR college_id = '') AND college_name IS NOT NULL AND TRIM(college_name) <> ''");
+    for (const cluster of legacyClusters) {
+      const collegeId = `college-legacy-${cluster.id}`;
+      await pool.query('INSERT INTO colleges (id, name, district) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), district = VALUES(district)', [collegeId, cluster.college_name, cluster.district]);
+      await pool.query('UPDATE clusters SET college_id = ? WHERE id = ?', [collegeId, cluster.id]);
+    }
+  } catch (err: any) {
+    console.warn('[DB WARNING] Could not backfill college mappings:', err.message);
   }
 
   try {

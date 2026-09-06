@@ -1,6 +1,9 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { TabType, Session, Panchayat, Volunteer, Cluster } from '../types';
 import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { EmptyState } from './ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -8,8 +11,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { ActionButton } from './ui/action-button';
-import { Search, X, Calendar, Lock, Trash2, ArrowRight } from './ui/icons';
+import {
+  Calendar,
+  ArrowLeft,
+  Search,
+  Plus,
+  Edit3,
+  Trash2,
+  Eye,
+  X,
+  CaretLeft,
+  CaretRight,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  BookOpen,
+  MapPin,
+  Users,
+  Building2,
+  CalendarCheck,
+} from './ui/icons';
 
 interface SessionsViewProps {
   sessions: Session[];
@@ -35,1621 +56,1146 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   onUpdateSession,
   onDeleteSession,
   onRequestDateChange,
-  canManageSchedule = false,
   userRole = 'Super Admin',
 }) => {
   const isClusterAdmin = userRole === 'Cluster Admin';
-  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(isClusterAdmin ? sessions[0]?.clusterId || null : null);
+
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPanchayat, setSelectedPanchayat] = useState('all');
-  const [selectedVillage, setSelectedVillage] = useState('all');
-  const [selectedStatus, setSelectedStatus] = useState('all');
-  const [selectedModule, setSelectedModule] = useState('all');
-  const [selectedVolunteer, setSelectedVolunteer] = useState('all');
+  const [selectedClusterId, setSelectedClusterId] = useState<string>('all');
+  const [showClusterCards, setShowClusterCards] = useState(true);
+  const [selectedDay, setSelectedDay] = useState<string>('all');
+  const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('all');
   const [filterDate, setFilterDate] = useState('');
-  const [showMoreFilters, setShowMoreFilters] = useState(false);
 
-  // Modals / Drawers
-  const [isNewModalOpen, setIsNewModalOpen] = useState(false);
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [activeSessionDetail, setActiveSessionDetail] = useState<Session | null>(null);
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Modals
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingSession, setEditingSession] = useState<Session | null>(null);
+  const [viewingSession, setViewingSession] = useState<Session | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [dateChangeSession, setDateChangeSession] = useState<Session | null>(null);
+  const [newDateValue, setNewDateValue] = useState('');
   const [dateChangeReason, setDateChangeReason] = useState('');
-  const [dateChangeNewDate, setDateChangeNewDate] = useState('');
-  const [dateDrafts, setDateDrafts] = useState<Record<string, string>>({});
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDateDrafts((current) => {
-      const next = { ...current };
-      sessions.forEach((session) => {
-        if (!(session.id in next)) next[session.id] = session.date || '';
-      });
-      return next;
-    });
-  }, [sessions]);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 4000);
+  };
 
-  // Form State for Create / Edit Session
+  const moduleOptions = [
+    'Spoken English & Communication',
+    'STEM & Robotics Foundations',
+    'Digital Literacy & Computers',
+    'Leadership & Problem Solving',
+    'Art, Drama & Creative Expression',
+    'Mathematics Olympiad & Logic',
+    'Environmental Science & Ecology',
+    'Career Guidance & Mentorship',
+  ];
+
+  // Form State
   const [formData, setFormData] = useState({
-    id: '',
-    code: '',
     name: '',
-    moduleId: 'M-103',
-    module: 'Spoken English',
-    day: 'Saturday',
+    clusterId: clusters[0]?.id || '',
+    dayNumber: 1,
     date: new Date().toISOString().split('T')[0],
-    panchayatId: panchayats[0]?.id || 'vedakkattamaduvu',
-    panchayatName: panchayats[0]?.name || 'Vedakkattamaduvu',
-    villageName: panchayats[0]?.villages[0]?.name || 'Ammapettai',
-    volunteerId: volunteers[0]?.id || 'vol-1',
-    volunteerName: volunteers[0]?.name || 'Bala',
-    sessionType: 'Academic' as 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation',
-    description: '',
+    module: 'Spoken English & Communication',
+    panchayatId: panchayats[0]?.id || '',
+    villageName: panchayats[0]?.villages[0]?.name || '',
+    volunteerId: volunteers[0]?.id || '',
     status: 'Scheduled' as Session['status'],
+    description: '',
   });
 
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const formVillages = useMemo(() => {
+    if (!formData.panchayatId) return [];
+    const p = panchayats.find((item) => item.id === formData.panchayatId);
+    return p?.villages || [];
+  }, [panchayats, formData.panchayatId]);
 
-  // Dynamic list of villages based on selected panchayat in filter
-  const currentFilterVillages = useMemo(() => {
-    if (selectedPanchayat === 'all') {
-      const allVillages: { id: string; name: string }[] = [];
-      panchayats.forEach((p) => {
-        p.villages?.forEach((v) => {
-          if (!allVillages.some((existing) => existing.name === v.name)) {
-            allVillages.push({ id: v.id, name: v.name });
-          }
-        });
-      });
-      return allVillages;
-    }
-    const found = panchayats.find((p) => p.id === selectedPanchayat);
-    return found?.villages || [];
-  }, [selectedPanchayat, panchayats]);
-
-  // Dynamic list of villages based on selected panchayat in modal form
-  const modalVillages = useMemo(() => {
-    const found = panchayats.find((p) => p.id === formData.panchayatId);
-    return found?.villages || [];
-  }, [formData.panchayatId, panchayats]);
-
-  // Helper text extractors
-  const getSessionTitle = (s?: Session): string => {
-    if (!s) return 'Untitled Session';
-    return s.name || s.title || s.code || 'Untitled Session';
-  };
-
-  const getSessionModule = (s?: Session): string => {
-    if (!s) return 'General';
-    return s.module || s.moduleId || 'General Module';
-  };
-
-  const getSessionVolunteer = (s?: Session): string => {
-    if (!s || !s.volunteerName || s.volunteerName === 'Unassigned') return 'Unassigned';
-    return s.volunteerName;
-  };
+  // KPI Calculations
+  const stats = useMemo(() => {
+    const total = sessions.length;
+    const completed = sessions.filter((s) => s.status === 'Completed').length;
+    const upcoming = sessions.filter((s) => s.status === 'Scheduled' || s.status === 'In Progress').length;
+    const dateChangesPending = sessions.filter(
+      (s) => s.status === 'Needs Attention' || s.status === 'Action Req.' || s.status === 'Pending Review'
+    ).length;
+    return { total, completed, upcoming, dateChangesPending };
+  }, [sessions]);
 
   // Filtered Sessions
   const filteredSessions = useMemo(() => {
     return sessions.filter((s) => {
-      const title = getSessionTitle(s).toLowerCase();
-      const mod = getSessionModule(s).toLowerCase();
-      const vill = (s.villageName || '').toLowerCase();
-      const vol = (s.volunteerName || '').toLowerCase();
-      const pan = (s.panchayatName || '').toLowerCase();
-      const search = searchTerm.toLowerCase().trim();
-
+      const q = searchTerm.toLowerCase().trim();
       const matchSearch =
-        !search ||
-        title.includes(search) ||
-        mod.includes(search) ||
-        vill.includes(search) ||
-        vol.includes(search) ||
-        pan.includes(search) ||
-        (s.code || '').toLowerCase().includes(search);
+        !q ||
+        (s.name || '').toLowerCase().includes(q) ||
+        (s.title || '').toLowerCase().includes(q) ||
+        (s.module || '').toLowerCase().includes(q) ||
+        (s.panchayatName || '').toLowerCase().includes(q) ||
+        (s.villageName || '').toLowerCase().includes(q) ||
+        (s.volunteerName || '').toLowerCase().includes(q) ||
+        (s.clusterName || '').toLowerCase().includes(q) ||
+        (s.code || '').toLowerCase().includes(q);
 
-      const matchPanchayat =
-        selectedPanchayat === 'all' || s.panchayatId === selectedPanchayat;
+      if (!matchSearch) return false;
+      if (selectedClusterId !== 'all' && s.clusterId !== selectedClusterId) return false;
+      if (selectedDay !== 'all') {
+        const dayNum = parseInt(selectedDay, 10);
+        if (s.dayNumber !== dayNum && s.day !== `Day ${dayNum}`) return false;
+      }
+      if (selectedStatus !== 'all' && s.status !== selectedStatus) return false;
+      if (selectedPanchayatId !== 'all' && s.panchayatId !== selectedPanchayatId) return false;
+      if (filterDate && s.date !== filterDate) return false;
 
-      const matchVillage =
-        selectedVillage === 'all' ||
-        (s.villageName || '').toLowerCase() === selectedVillage.toLowerCase();
-
-      const matchStatus =
-        selectedStatus === 'all' ||
-        s.status.toLowerCase() === selectedStatus.toLowerCase() ||
-        (selectedStatus === 'Needs Attention' && (s.status === 'Needs Attention' || s.status === 'Action Req.'));
-
-      const matchModule =
-        selectedModule === 'all' ||
-        mod.includes(selectedModule.toLowerCase()) ||
-        s.moduleId === selectedModule;
-
-      const matchVolunteer =
-        selectedVolunteer === 'all' ||
-        s.volunteerId === selectedVolunteer ||
-        (s.volunteerName || '').toLowerCase() === selectedVolunteer.toLowerCase();
-
-      const matchDate = !filterDate || s.date === filterDate;
-
-      return (
-        matchSearch &&
-        matchPanchayat &&
-        matchVillage &&
-        matchStatus &&
-        matchModule &&
-        matchVolunteer &&
-        matchDate
-      );
+      return true;
     });
-  }, [
-    sessions,
-    searchTerm,
-    selectedPanchayat,
-    selectedVillage,
-    selectedStatus,
-    selectedModule,
-    selectedVolunteer,
-    filterDate,
-  ]);
+  }, [sessions, searchTerm, selectedClusterId, selectedDay, selectedStatus, selectedPanchayatId, filterDate]);
 
-  // Quick Summary Counts
-  const upcomingCount = sessions.filter(
-    (s) => s.status === 'Scheduled' || s.status === 'In Progress'
-  ).length;
-  const scheduledCount = sessions.filter((s) => s.status === 'Scheduled').length;
-  const completedCount = sessions.filter((s) => s.status === 'Completed').length;
-  const needsAttentionCount = sessions.filter(
-    (s) => s.status === 'Needs Attention' || s.status === 'Action Req.' || s.volunteerName === 'Unassigned'
-  ).length;
+  const totalPages = Math.ceil(filteredSessions.length / pageSize) || 1;
+  const paginatedSessions = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredSessions.slice(start, start + pageSize);
+  }, [filteredSessions, currentPage, pageSize]);
 
-  // Next Session spotlight item
-  const nextSession = useMemo(() => {
-    const scheduled = sessions.filter((s) => s.status === 'Scheduled');
-    if (scheduled.length > 0) return scheduled[0];
-    return sessions[0] || null;
-  }, [sessions]);
+  const visibleClusters = useMemo(
+    () => isClusterAdmin ? clusters.filter((cluster) => sessions.some((session) => session.clusterId === cluster.id) || cluster.id === clusters[0]?.id) : clusters,
+    [clusters, sessions, isClusterAdmin]
+  );
 
-  const visibleClusters = useMemo(() => {
-    const allowed = isClusterAdmin ? clusters.filter((cluster) => cluster.id === sessions[0]?.clusterId) : clusters;
-    return allowed.filter((cluster) => sessions.some((session) => session.clusterId === cluster.id));
-  }, [clusters, isClusterAdmin, sessions]);
+  if (showClusterCards) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Sessions Schedule &amp; Management</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Choose a cluster to view and manage its sessions.</p>
+        </div>
+        {visibleClusters.length === 0 ? (
+          <EmptyState icon={Building2} title="No clusters available" description="Clusters will appear here when they are configured." />
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {visibleClusters.map((cluster) => {
+              const clusterSessions = sessions.filter((session) => session.clusterId === cluster.id);
+              const completed = clusterSessions.filter((session) => session.status === 'Completed').length;
+              const upcoming = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'In Progress').length;
+              return (
+                <button
+                  key={cluster.id}
+                  type="button"
+                  onClick={() => { setSelectedClusterId(cluster.id); setShowClusterCards(false); setCurrentPage(1); }}
+                  className="text-left rounded-lg border border-border bg-card p-5 shadow-xs transition hover:border-primary/50 hover:shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h2 className="font-bold text-foreground">{cluster.name}</h2>
+                      <p className="mt-1 text-sm font-medium text-foreground">{cluster.collegeName || 'College not assigned'}</p>
+                      <p className="text-xs text-muted-foreground">{cluster.district}, {cluster.state || 'Tamil Nadu'}</p>
+                    </div>
+                    <Badge variant="success">Active</Badge>
+                  </div>
+                  <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
+                    <div className="rounded-md bg-muted/40 p-2"><strong className="block text-base text-foreground">{clusterSessions.length}</strong><span className="text-muted-foreground">Sessions</span></div>
+                    <div className="rounded-md bg-muted/40 p-2"><strong className="block text-base text-foreground">{completed}</strong><span className="text-muted-foreground">Completed</span></div>
+                    <div className="rounded-md bg-muted/40 p-2"><strong className="block text-base text-foreground">{upcoming}</strong><span className="text-muted-foreground">Upcoming</span></div>
+                  </div>
+                  <div className="mt-4 flex items-center justify-end gap-1 text-sm font-semibold text-primary">View Sessions <span aria-hidden="true">→</span></div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
-  const daysUntil = (date: string) => {
-    if (!date) return null;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(`${date}T00:00:00`);
-    const difference = Math.round((target.getTime() - today.getTime()) / 86400000);
-    return difference === 0 ? 'Today' : difference > 0 ? `In ${difference} days` : `${Math.abs(difference)} days ago`;
-  };
-
-  const renderClusterSchedule = (cluster: Cluster) => {
-    const clusterSessions = sessions.filter((session) => session.clusterId === cluster.id);
-    const completed = clusterSessions.filter((session) => session.status === 'Completed').length;
-    const scheduled = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'In Progress').length;
-    const pending = clusterSessions.filter((session) => !session.date || session.status === 'Pending' || session.status === 'Draft').length;
-    const upcoming = clusterSessions
-      .filter((session) => session.date && session.status !== 'Completed')
-      .sort((a, b) => a.date.localeCompare(b.date))[0];
-    return { clusterSessions, completed, scheduled, pending, upcoming, remaining: Math.max(0, clusterSessions.length - completed) };
-  };
-
-  // Clear all filters
-  const handleClearFilters = () => {
-    setSearchTerm('');
-    setSelectedPanchayat('all');
-    setSelectedVillage('all');
-    setSelectedStatus('all');
-    setSelectedModule('all');
-    setSelectedVolunteer('all');
-    setFilterDate('');
-  };
-
-  // Open Create Modal
-  const handleOpenNewModal = () => {
-    setIsEditMode(false);
-    setFormErrors({});
-    const defaultP = panchayats[0];
+  const handleOpenAdd = () => {
+    setEditingSession(null);
+    const p = panchayats[0];
     setFormData({
-      id: '',
-      code: `M-${Math.floor(100 + Math.random() * 900)}`,
-      name: '',
-      moduleId: 'M-103',
-      module: 'Spoken English',
-      day: 'Saturday',
+      name: `Day 1 Spoken English Session`,
+      clusterId: clusters[0]?.id || '',
+      dayNumber: 1,
       date: new Date().toISOString().split('T')[0],
-      panchayatId: defaultP?.id || 'vedakkattamaduvu',
-      panchayatName: defaultP?.name || 'Vedakkattamaduvu',
-      villageName: defaultP?.villages[0]?.name || 'Ammapettai',
-      volunteerId: volunteers[0]?.id || 'vol-1',
-      volunteerName: volunteers[0]?.name || 'Bala',
-      sessionType: 'Academic',
-      description: '',
+      module: 'Spoken English & Communication',
+      panchayatId: p?.id || '',
+      villageName: p?.villages[0]?.name || '',
+      volunteerId: volunteers[0]?.id || '',
       status: 'Scheduled',
+      description: '',
     });
-    setIsNewModalOpen(true);
+    setIsModalOpen(true);
   };
 
-  // Open Edit Modal
-  const handleOpenEditModal = (session: Session) => {
-    setIsEditMode(true);
-    setFormErrors({});
+  const handleOpenEdit = (session: Session) => {
+    setEditingSession(session);
     setFormData({
-      id: session.id,
-      code: session.code || `M-103`,
       name: session.name || session.title || '',
-      moduleId: session.moduleId || 'M-103',
-      module: session.module || 'Spoken English',
-      day: session.day || 'Saturday',
-      date: session.date || '',
+      clusterId: session.clusterId || clusters[0]?.id || '',
+      dayNumber: session.dayNumber || 1,
+      date: session.date || new Date().toISOString().split('T')[0],
+      module: session.module || 'Spoken English & Communication',
       panchayatId: session.panchayatId || (panchayats[0]?.id || ''),
-      panchayatName: session.panchayatName || (panchayats[0]?.name || ''),
       villageName: session.villageName || '',
       volunteerId: session.volunteerId || '',
-      volunteerName: session.volunteerName || 'Unassigned',
-      sessionType: session.sessionType || 'Academic',
-      description: session.description || '',
       status: session.status || 'Scheduled',
+      description: session.description || '',
     });
-    setIsNewModalOpen(true);
+    setIsModalOpen(true);
   };
 
-  // Handle Form Change
-  const handlePanchayatSelectChange = (pId: string) => {
-    const found = panchayats.find((p) => p.id === pId);
-    if (found) {
-      setFormData((prev) => ({
-        ...prev,
-        panchayatId: found.id,
-        panchayatName: found.name,
-        villageName: found.villages[0]?.name || 'Main Center',
-      }));
-    }
-  };
-
-  const handleVolunteerSelectChange = (vId: string) => {
-    if (vId === 'unassigned') {
-      setFormData((prev) => ({
-        ...prev,
-        volunteerId: '',
-        volunteerName: 'Unassigned',
-      }));
-      return;
-    }
-    const found = volunteers.find((v) => v.id === vId);
-    if (found) {
-      setFormData((prev) => ({
-        ...prev,
-        volunteerId: found.id,
-        volunteerName: found.name,
-      }));
-    }
-  };
-
-  // Validate & Submit
-  const handleFormSubmit = (asDraft = false) => {
-    const errors: Record<string, string> = {};
-
+  const handleSaveSession = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!formData.name.trim()) {
-      errors.name = 'Session topic is required.';
-    }
-    if (!formData.villageName.trim()) {
-      errors.villageName = 'Please select a village.';
-    }
-    if (!formData.volunteerName.trim() || formData.volunteerName === 'Unassigned') {
-      if (!asDraft) {
-        errors.volunteer = 'Please select a volunteer.';
-      }
-    }
-    if (!formData.date.trim()) {
-      errors.date = 'Please select a valid date.';
-    }
-
-    if (Object.keys(errors).length > 0) {
-      setFormErrors(errors);
+      alert('Please enter a session name.');
       return;
     }
 
-    const finalStatus: Session['status'] = asDraft
-      ? 'Draft'
-      : formData.status || 'Scheduled';
+    const p = panchayats.find((item) => item.id === formData.panchayatId);
+    const v = volunteers.find((item) => item.id === formData.volunteerId);
+    const c = clusters.find((item) => item.id === formData.clusterId);
 
-    if (isEditMode && formData.id) {
-      onUpdateSession(formData.id, {
+    if (editingSession) {
+      const payload: Partial<Session> = {
         name: formData.name.trim(),
         title: formData.name.trim(),
-        code: formData.code,
-        moduleId: formData.moduleId,
-        module: formData.module,
-        day: formData.day,
+        clusterId: formData.clusterId,
+        clusterName: c?.name || editingSession.clusterName || 'Cluster',
+        dayNumber: formData.dayNumber,
+        day: `Day ${formData.dayNumber}`,
         date: formData.date,
+        module: formData.module,
         panchayatId: formData.panchayatId,
-        panchayatName: formData.panchayatName,
+        panchayatName: p?.name || editingSession.panchayatName || 'Panchayat',
         villageName: formData.villageName,
         volunteerId: formData.volunteerId,
-        volunteerName: formData.volunteerName,
-        sessionType: formData.sessionType,
+        volunteerName: v?.name || editingSession.volunteerName || 'Unassigned',
+        status: formData.status,
         description: formData.description,
-        status: finalStatus,
-      });
-      if (activeSessionDetail?.id === formData.id) {
-        setActiveSessionDetail((prev) => (prev ? { ...prev, ...formData, status: finalStatus } : null));
-      }
+      };
+      onUpdateSession(editingSession.id, payload);
+      showToast(`Updated session: ${formData.name}`);
     } else {
-      const newSession: Omit<Session, 'id'> = {
-        code: formData.code || `M-${Math.floor(100 + Math.random() * 900)}`,
+      onAddSession({
         name: formData.name.trim(),
         title: formData.name.trim(),
-        moduleId: formData.moduleId,
-        module: formData.module,
-        day: formData.day,
+        code: `SES-${Math.floor(100 + Math.random() * 900)}`,
+        clusterId: formData.clusterId,
+        clusterName: c?.name || 'Cluster',
+        dayNumber: formData.dayNumber,
+        day: `Day ${formData.dayNumber}`,
         date: formData.date,
+        module: formData.module,
         panchayatId: formData.panchayatId,
-        panchayatName: formData.panchayatName,
+        panchayatName: p?.name || 'Panchayat',
         villageName: formData.villageName,
         volunteerId: formData.volunteerId,
-        volunteerName: formData.volunteerName,
-        sessionType: formData.sessionType,
-        description: formData.description || 'Weekly student holistic development learning session.',
-        status: finalStatus,
-        spoc: formData.volunteerName,
-        financer: 'Cluster Fund',
-      };
-      onAddSession(newSession);
+        volunteerName: v?.name || 'Unassigned',
+        status: formData.status,
+        description: formData.description,
+      });
+      showToast(`Scheduled new session: ${formData.name}`);
     }
 
-    setIsNewModalOpen(false);
+    setIsModalOpen(false);
+    setEditingSession(null);
   };
 
-  // CSV Export Function
-  const handleExportCSV = () => {
-    if (filteredSessions.length === 0) {
-      alert('No session data available to export.');
+  const handleConfirmDelete = () => {
+    if (!sessionToDelete) return;
+    if (onDeleteSession) {
+      onDeleteSession(sessionToDelete.id);
+    }
+    showToast(`Session deleted successfully`);
+    setSessionToDelete(null);
+    if (viewingSession?.id === sessionToDelete.id) {
+      setViewingSession(null);
+    }
+  };
+
+  const handleOpenDateChange = (session: Session) => {
+    setDateChangeSession(session);
+    setNewDateValue(session.date || '');
+    setDateChangeReason('');
+  };
+
+  const handleSubmitDateChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dateChangeSession) return;
+    if (!newDateValue) {
+      alert('Please select the new requested date.');
       return;
     }
-    const headers = [
-      'Session Code',
-      'Topic',
-      'Module',
-      'Date',
-      'Day',
-      'Panchayat',
-      'Village',
-      'Assigned Volunteer',
-      'Status',
-      'Session Type',
-    ];
-
-    const rows = filteredSessions.map((s) => [
-      `"${s.code || ''}"`,
-      `"${(s.name || s.title || '').replace(/"/g, '""')}"`,
-      `"${(s.module || s.moduleId || '').replace(/"/g, '""')}"`,
-      `"${s.date}"`,
-      `"${s.day || ''}"`,
-      `"${s.panchayatName}"`,
-      `"${s.villageName}"`,
-      `"${s.volunteerName}"`,
-      `"${s.status}"`,
-      `"${s.sessionType || 'Academic'}"`,
-    ]);
-
-    const csvContent =
-      'data:text/csv;charset=utf-8,' +
-      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute(
-      'download',
-      `TQI_Sessions_Dharmapuri_${new Date().toISOString().split('T')[0]}.csv`
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const activeClusterId = selectedClusterId || (isClusterAdmin ? sessions[0]?.clusterId || null : null);
-  const activeCluster = clusters.find((cluster) => cluster.id === activeClusterId);
-
-  if (!activeClusterId) {
-    return (
-      <div className="w-full space-y-6">
-        <div><h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Sessions</h1><p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Cluster-wise 8-day session progress</p></div>
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
-          {visibleClusters.map((cluster) => {
-            const summary = renderClusterSchedule(cluster);
-            return <button key={cluster.id} type="button" onClick={() => setSelectedClusterId(cluster.id)} className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-theme-xs transition hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-brand-700">
-              <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900 group-hover:text-brand-500 dark:text-white">{cluster.name}</h2><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{cluster.collegeName || cluster.name}</p></div><ArrowRight className="h-5 w-5 text-gray-400 transition group-hover:translate-x-1 group-hover:text-brand-500" /></div>
-              <p className="mt-4 text-xs text-gray-500">SPOC: <span className="font-semibold text-gray-800 dark:text-gray-200">{cluster.spocName || cluster.adminName || 'Not assigned'}</span></p>
-              <p className="text-xs text-gray-500">{cluster.spocMobile || cluster.adminPhone || 'No phone'}</p>
-              <div className="mt-5 grid grid-cols-4 gap-2 border-t border-gray-100 pt-4 text-center dark:border-gray-800"><div><p className="text-[10px] uppercase text-gray-400">Total</p><p className="mt-1 font-bold text-gray-900 dark:text-white">{summary.clusterSessions.length}</p></div><div><p className="text-[10px] uppercase text-gray-400">Done</p><p className="mt-1 font-bold text-emerald-600">{summary.completed}</p></div><div><p className="text-[10px] uppercase text-gray-400">Scheduled</p><p className="mt-1 font-bold text-brand-600">{summary.scheduled}</p></div><div><p className="text-[10px] uppercase text-gray-400">Pending</p><p className="mt-1 font-bold text-amber-600">{summary.pending}</p></div></div>
-              <div className="mt-4 rounded-lg bg-gray-50 p-3 dark:bg-white/[0.04]"><p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Next Session</p>{summary.upcoming ? <><p className="mt-1 text-sm font-bold text-gray-900 dark:text-white">{summary.upcoming.date}</p><p className="text-xs text-gray-500">{daysUntil(summary.upcoming.date)}</p></> : <p className="mt-1 text-sm text-gray-500">No scheduled date</p>}</div>
-              <p className="mt-4 text-sm font-semibold text-brand-500">{summary.remaining > 0 ? `${summary.remaining} days left to complete` : 'Completed'}</p>
-            </button>;
-          })}
-        </div>
-        {visibleClusters.length === 0 && <div className="rounded-xl border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">No clusters or sessions available for this academic year.</div>}
-      </div>
-    );
-  }
-
-  if (activeClusterId && activeCluster) {
-    const summary = renderClusterSchedule(activeCluster);
-    return (
-      <div className="w-full space-y-6">
-        <button type="button" onClick={() => setSelectedClusterId(null)} className="text-sm font-semibold text-brand-500 hover:text-brand-600">← Back to Clusters</button>
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{activeCluster.name}</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{activeCluster.collegeName || activeCluster.name} · SPOC: {activeCluster.spocName || activeCluster.adminName || 'Not assigned'} · {activeCluster.spocMobile || activeCluster.adminPhone || 'No phone'}</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-          {[['Total Days', summary.clusterSessions.length], ['Completed Days', summary.completed], ['Scheduled Days', summary.scheduled], ['Pending Days', summary.pending], ['Days Left To Complete', summary.remaining]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"><p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</p><p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{value}</p></div>)}
-        </div>
-        <div><h2 className="text-xl font-bold text-gray-900 dark:text-white">8-Day Session Schedule</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{summary.clusterSessions.map((session) => <article key={session.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"><p className="text-xs font-bold uppercase tracking-wider text-gray-500">Day {session.dayNumber}</p><h3 className="mt-2 min-h-12 text-base font-bold text-gray-900 dark:text-white">{session.name}</h3><div className="mt-3">{renderStatusBadge(session.status)}</div>{session.date ? <><p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-200">📅 {session.date}</p><p className="mt-1 text-xs text-gray-500">{session.status === 'Completed' ? 'Completed' : daysUntil(session.date)}</p></> : <p className="mt-3 text-sm text-gray-500">Not planned</p>}<button type="button" onClick={() => onNavigate('attendance', session.id)} className="mt-4 text-sm font-semibold text-brand-500">View →</button></article>)}</div></div>
-      </div>
-    );
-  }
-
-  // Render Status Badge
-  function renderStatusBadge(status: string) {
-    switch (status) {
-      case 'Scheduled':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
-            Scheduled
-          </span>
-        );
-      case 'In Progress':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
-            In Progress
-          </span>
-        );
-      case 'Completed':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>
-            Completed
-          </span>
-        );
-      case 'Needs Attention':
-      case 'Action Req.':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
-            Needs Attention
-          </span>
-        );
-      case 'Cancelled':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-400"></span>
-            Cancelled
-          </span>
-        );
-      case 'Draft':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-slate-500"></span>
-            Draft
-          </span>
-        );
+    if (!dateChangeReason.trim()) {
+      alert('Please specify the reason for this date reschedule.');
+      return;
     }
-  }
+
+    if (onRequestDateChange) {
+      await onRequestDateChange(
+        dateChangeSession.id,
+        dateChangeSession.date,
+        newDateValue,
+        dateChangeReason
+      );
+    } else {
+      onUpdateSession(dateChangeSession.id, {
+        date: newDateValue,
+        status: 'Action Req.',
+      });
+    }
+
+    showToast(`Reschedule request submitted for ${dateChangeSession.name}`);
+    setDateChangeSession(null);
+  };
 
   return (
-    <div className="w-full space-y-6">
-      {/* 1. Cardless Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6">
+      {/* 1. Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Sessions
-            </h1>
-            <Badge color="primary" size="sm">
-              {filteredSessions.length} Total
-            </Badge>
-          </div>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Plan, coordinate, and track village learning modules and attendance across clusters.
+          <button type="button" onClick={() => { setShowClusterCards(true); setSelectedClusterId('all'); }} className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+            <ArrowLeft className="h-3.5 w-3.5" /> Back to clusters
+          </button>
+          <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+            Sessions Schedule &amp; Management
+          </h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Monitor and coordinate teaching sessions across all clusters, village learning hubs, and volunteers.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => onNavigate('date-change-requests')}
+            className="gap-1.5 text-xs font-semibold"
           >
-            <span>Export CSV</span>
-          </button>
+            <CalendarCheck className="h-3.5 w-3.5" />
+            <span>Date Change Requests ({stats.dateChangesPending})</span>
+          </Button>
+
+          <Button
+            size="sm"
+            onClick={handleOpenAdd}
+            className="gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Schedule Session</span>
+          </Button>
         </div>
       </div>
 
-      {/* 2. Compact Metric Cards (counts & status only) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Upcoming</div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{upcomingCount}</div>
+      {/* 2. KPI Summary Stat Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Calendar className="h-3.5 w-3.5 text-primary" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Total Sessions</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tracking-tight text-foreground">{stats.total}</p>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="text-xs font-semibold uppercase tracking-wider text-brand-500">Scheduled</div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{scheduledCount}</div>
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Completed</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{stats.completed}</p>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="text-xs font-semibold uppercase tracking-wider text-success-500">Completed</div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{completedCount}</div>
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Clock className="h-3.5 w-3.5 text-blue-600" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Upcoming</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tracking-tight text-blue-600 dark:text-blue-400">{stats.upcoming}</p>
         </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="text-xs font-semibold uppercase tracking-wider text-error-500">Needs Attention</div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{needsAttentionCount}</div>
+
+        <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+            <span className="text-[11px] font-semibold uppercase tracking-wider">Reschedule Requests</span>
+          </div>
+          <p className="mt-2 text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">{stats.dateChangesPending}</p>
         </div>
       </div>
 
-      {/* NEXT SESSION Spotlight Section */}
-      {nextSession && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-brand-500 bg-brand-50 dark:bg-brand-500/10 px-2 py-0.5 rounded-lg">
-                  Next Session
-                </span>
-                {renderStatusBadge(nextSession.status)}
-              </div>
-              <h3 className="text-base font-bold text-gray-900 dark:text-white">
-                {getSessionTitle(nextSession)}
-                {nextSession.code && (
-                  <span className="ml-2 font-mono text-xs font-normal text-gray-400">
-                    ({nextSession.code})
-                  </span>
-                )}
-              </h3>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 font-medium">
-                <span>{nextSession.date || 'Not planned'}</span>
-                <span>Panchayat: <strong className="text-gray-800 dark:text-gray-200">{nextSession.panchayatName}</strong></span>
-                <span>Village: <strong className="text-gray-800 dark:text-gray-200">{nextSession.villageName}</strong></span>
-                <span>Volunteer: <strong className="text-brand-500">{getSessionVolunteer(nextSession)}</strong></span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setActiveSessionDetail(nextSession)}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-              >
-                View
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('lesson-plan', nextSession.lessonPlanId || nextSession.id)}
-                className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-900/40 dark:bg-brand-500/10 dark:text-brand-400 transition"
-              >
-                Lesson Plan
-              </button>
-              <button
-                type="button"
-                onClick={() => onNavigate('attendance', nextSession.id)}
-                className="rounded-xl bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
-              >
-                Attendance
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. Cardless Search + Filter Row */}
-      <div className="space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {/* Search bar */}
-          <div className="relative">
-            <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Search session, module, village or volunteer..."
-              className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-            />
-            {searchTerm && (
-              <button
-                type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-
-          {/* Panchayat filter */}
-          <div>
-            <Select
-              value={selectedPanchayat || "all"}
-              onValueChange={(val) => {
-                setSelectedPanchayat(val);
-                setSelectedVillage('all');
-              }}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Panchayats" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Panchayats</SelectItem>
-                {panchayats.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Village filter */}
-          <div>
-            <Select
-              value={selectedVillage || "all"}
-              onValueChange={(val) => setSelectedVillage(val)}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Villages" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Villages</SelectItem>
-                {currentFilterVillages.map((v) => (
-                  <SelectItem key={v.id} value={v.name}>
-                    {v.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Status Filter + More Filters Toggle */}
-          <div className="flex items-center gap-2">
-            <div className="flex-1">
-              <Select
-                value={selectedStatus || "all"}
-                onValueChange={(val) => setSelectedStatus(val)}
-              >
-                <SelectTrigger className="h-9 text-xs">
-                  <SelectValue placeholder="All Statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="Scheduled">Scheduled</SelectItem>
-                  <SelectItem value="In Progress">In Progress</SelectItem>
-                  <SelectItem value="Completed">Completed</SelectItem>
-                  <SelectItem value="Needs Attention">Needs Attention</SelectItem>
-                  <SelectItem value="Draft">Draft</SelectItem>
-                  <SelectItem value="Cancelled">Cancelled</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setShowMoreFilters(!showMoreFilters)}
-              className={`rounded-xl border px-3 py-2 text-xs font-semibold transition shadow-theme-xs flex items-center gap-1 shrink-0 ${
-                showMoreFilters || selectedModule !== 'all' || selectedVolunteer !== 'all' || filterDate
-                  ? 'border-brand-500 bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400'
-                  : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[15px]">tune</span>
-              <span>Filter</span>
-            </button>
-          </div>
+      {/* 3. Filter Bar */}
+      <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchTerm}
+            onChange={(e) => {
+              setSearchTerm(e.target.value);
+              setCurrentPage(1);
+            }}
+            placeholder="Search by session title, module, village, volunteer..."
+            className="h-9 pl-8 text-xs"
+          />
         </div>
 
-        {/* Secondary Expandable Filters */}
-        {showMoreFilters && (
-          <div className="pt-3 border-t border-gray-100 dark:border-gray-800 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-4 gap-3 items-center">
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
-                Module
-              </label>
-              <Select
-                value={selectedModule}
-                onValueChange={(val) => setSelectedModule(val)}
-              >
-                <SelectTrigger className="w-full h-8 text-xs">
-                  <SelectValue placeholder="All Modules" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Modules</SelectItem>
-                  <SelectItem value="Spoken English">Spoken English</SelectItem>
-                  <SelectItem value="Basic Math">Basic Math</SelectItem>
-                  <SelectItem value="Life Skills">Life Skills</SelectItem>
-                  <SelectItem value="Digital Literacy">Digital Literacy</SelectItem>
-                  <SelectItem value="Science">Science</SelectItem>
-                  <SelectItem value="Financial Literacy">Financial Literacy</SelectItem>
-                </SelectContent>
-              </Select>
+        {/* Cluster Filter */}
+        <div className="w-44">
+          <Select
+            value={selectedClusterId}
+            onValueChange={(val) => {
+              setSelectedClusterId(val);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="All Clusters" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Clusters</SelectItem>
+              {clusters.map((c) => (
+                <SelectItem key={c.id} value={c.id}>
+                  {c.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Day Filter */}
+        <div className="w-32">
+          <Select
+            value={selectedDay}
+            onValueChange={(val) => {
+              setSelectedDay(val);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="All Days" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Days</SelectItem>
+              {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                <SelectItem key={d} value={String(d)}>
+                  Day {d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Status Filter */}
+        <div className="w-36">
+          <Select
+            value={selectedStatus}
+            onValueChange={(val) => {
+              setSelectedStatus(val);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="Scheduled">Scheduled</SelectItem>
+              <SelectItem value="In Progress">In Progress</SelectItem>
+              <SelectItem value="Completed">Completed</SelectItem>
+              <SelectItem value="Needs Attention">Needs Attention</SelectItem>
+              <SelectItem value="Cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Date Filter */}
+        <div className="w-36">
+          <Input
+            type="date"
+            value={filterDate}
+            onChange={(e) => {
+              setFilterDate(e.target.value);
+              setCurrentPage(1);
+            }}
+            className="h-9 text-xs"
+            title="Filter by session date"
+          />
+        </div>
+
+        {(searchTerm ||
+          selectedClusterId !== 'all' ||
+          selectedDay !== 'all' ||
+          selectedStatus !== 'all' ||
+          selectedPanchayatId !== 'all' ||
+          filterDate) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setSearchTerm('');
+              setSelectedClusterId('all');
+              setSelectedDay('all');
+              setSelectedStatus('all');
+              setSelectedPanchayatId('all');
+              setFilterDate('');
+              setCurrentPage(1);
+            }}
+            className="h-9 px-2 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Reset
+          </Button>
+        )}
+      </div>
+
+      {/* 4. Enterprise Session Table */}
+      <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
+              <tr>
+                <th className="w-14 px-4 py-3 text-center">S.No</th>
+                <th className="px-4 py-3">Cluster</th>
+                <th className="px-4 py-3 text-center">Cycle Day</th>
+                <th className="px-4 py-3">Session Date</th>
+                <th className="px-4 py-3">Module &amp; Curriculum</th>
+                <th className="px-4 py-3">Panchayat &amp; Village</th>
+                <th className="px-4 py-3">Volunteer Mentor</th>
+                <th className="px-4 py-3 text-center">Status</th>
+                <th className="px-4 py-3 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {paginatedSessions.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-12">
+                    <EmptyState
+                      icon={Calendar}
+                      title="No sessions scheduled"
+                      description={
+                        searchTerm || selectedClusterId !== 'all'
+                          ? 'Try adjusting your filters or search terms.'
+                          : 'Schedule your first teaching session to begin academic operations.'
+                      }
+                      actionLabel="+ Schedule Session"
+                      onAction={handleOpenAdd}
+                    />
+                  </td>
+                </tr>
+              ) : (
+                paginatedSessions.map((session, idx) => {
+                  const sNo = (currentPage - 1) * pageSize + idx + 1;
+                  const dayNum = session.dayNumber || parseInt(session.day?.replace(/\D/g, '') || '1', 10);
+                  const isCompleted = session.status === 'Completed';
+
+                  return (
+                    <tr
+                      key={session.id}
+                      className="transition-colors hover:bg-muted/30"
+                    >
+                      <td className="px-4 py-3 text-center font-mono text-muted-foreground">
+                        {sNo}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-semibold text-foreground">
+                          {session.clusterName || 'Main Cluster'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge variant="default" size="sm">
+                          Day {dayNum}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-mono text-xs font-semibold text-foreground flex items-center gap-1.5">
+                          <Calendar className="h-3.5 w-3.5 text-primary" />
+                          <span>{session.date || '—'}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-semibold text-foreground">
+                          {session.name || session.title}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground">
+                          {session.module || 'Spoken English'}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{session.panchayatName || '—'}</div>
+                        <div className="text-[11px] text-muted-foreground flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          <span>{session.villageName || '—'}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                            {(session.volunteerName || 'U').charAt(0)}
+                          </div>
+                          <span className="text-foreground font-medium">
+                            {session.volunteerName || 'Unassigned'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <Badge
+                          variant={
+                            session.status === 'Completed'
+                              ? 'success'
+                              : session.status === 'In Progress'
+                              ? 'info'
+                              : session.status === 'Needs Attention' || session.status === 'Action Req.'
+                              ? 'warning'
+                              : session.status === 'Cancelled'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                          size="sm"
+                        >
+                          {session.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => setViewingSession(session)}
+                            title="View Details"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={() => handleOpenEdit(session)}
+                            title="Edit Session"
+                          >
+                            <Edit3 className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
+                            onClick={() => handleOpenDateChange(session)}
+                            title="Request Date Reschedule"
+                          >
+                            <CalendarCheck className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                            onClick={() => setSessionToDelete(session)}
+                            title="Delete Session"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Table Pagination Footer */}
+        {filteredSessions.length > 0 && (
+          <div className="flex flex-col items-center justify-between gap-3 border-t border-border px-4 py-3 sm:flex-row text-xs">
+            <div className="text-muted-foreground">
+              Showing{' '}
+              <span className="font-semibold text-foreground">
+                {(currentPage - 1) * pageSize + 1}
+              </span>{' '}
+              to{' '}
+              <span className="font-semibold text-foreground">
+                {Math.min(currentPage * pageSize, filteredSessions.length)}
+              </span>{' '}
+              of{' '}
+              <span className="font-semibold text-foreground">
+                {filteredSessions.length}
+              </span>{' '}
+              sessions
             </div>
 
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
-                Volunteer
-              </label>
-              <Select
-                value={selectedVolunteer}
-                onValueChange={(val) => setSelectedVolunteer(val)}
+            <div className="flex items-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
               >
-                <SelectTrigger className="w-full h-8 text-xs">
-                  <SelectValue placeholder="All Volunteers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Volunteers</SelectItem>
-                  {volunteers.map((v) => (
-                    <SelectItem key={v.id} value={v.name}>
-                      {v.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-semibold text-gray-500 dark:text-gray-400 uppercase mb-1">
-                Date
-              </label>
-              <input
-                type="date"
-                value={filterDate}
-                onChange={(e) => setFilterDate(e.target.value)}
-                className="w-full rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-              />
-            </div>
-
-            <div className="flex items-end justify-end pt-5">
-              <button
-                type="button"
-                onClick={handleClearFilters}
-                className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+                <CaretLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="px-2 text-xs font-medium text-foreground">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
               >
-                Clear Filters
-              </button>
+                <CaretRight className="h-3.5 w-3.5" />
+              </Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* 4. Cardless TailAdmin Session Table */}
-      <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="tqi-table-compact w-full text-left border-collapse">
-            <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
-              <tr>
-                <th className="px-5 py-3.5">Session Date</th>
-                <th className="px-5 py-3.5">Session Topic &amp; Module</th>
-                <th className="px-5 py-3.5">Panchayat &amp; Village</th>
-                <th className="px-5 py-3.5">Volunteer</th>
-                <th className="px-5 py-3.5">Status</th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
-              {filteredSessions.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-12 text-center text-gray-400">
-                    No sessions match your filter criteria.
-                  </td>
-                </tr>
-              ) : (
-                filteredSessions.map((session) => (
-                  <tr
-                    key={session.id}
-                    className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors group"
-                  >
-                    {/* Session date */}
-                    <td className="px-5 py-3.5 whitespace-nowrap">
-                      <div className="font-bold text-gray-900 dark:text-white">{session.date || 'Not planned'}</div>
-                      {session.date && <div className="text-[11px] text-gray-400 mt-0.5">Locked</div>}
-                    </td>
-
-                    {/* Topic & Module */}
-                    <td className="px-5 py-3.5">
-                      <div className="font-bold text-gray-900 dark:text-white group-hover:text-brand-500 transition-colors">
-                        {getSessionTitle(session)}
-                      </div>
-                      <div className="text-[11px] text-gray-400 mt-0.5">
-                        <span className="font-mono text-gray-500 dark:text-gray-300">
-                          {session.code || session.moduleId || 'M-103'}
-                        </span>
-                        <span> &middot; {getSessionModule(session)}</span>
-                      </div>
-                    </td>
-
-                    {/* Panchayat & Village */}
-                    <td className="px-5 py-3.5">
-                      <div className="font-semibold text-gray-800 dark:text-gray-200">{session.panchayatName}</div>
-                      <div className="text-[11px] text-gray-400">{session.villageName}</div>
-                    </td>
-
-                    {/* Volunteer */}
-                    <td className="px-5 py-3.5">
-                      {session.volunteerName && session.volunteerName !== 'Unassigned' ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-brand-50 text-brand-500 text-[10px] font-bold flex items-center justify-center dark:bg-brand-500/10 dark:text-brand-400">
-                            {session.volunteerName.charAt(0)}
-                          </div>
-                          <span className="font-medium text-gray-900 dark:text-white">{session.volunteerName}</span>
-                        </div>
-                      ) : (
-                        <Badge color="light" size="sm">
-                          Unassigned
-                        </Badge>
-                      )}
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-5 py-3.5 whitespace-nowrap">
-                      <Badge
-                        color={
-                          session.status === 'Completed'
-                            ? 'success'
-                            : session.status === 'In Progress'
-                            ? 'warning'
-                            : session.status === 'Needs Attention'
-                            ? 'error'
-                            : 'primary'
-                        }
-                        size="sm"
-                      >
-                        {session.status}
-                      </Badge>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-5 py-3.5 text-right whitespace-nowrap">
-                      <div className="inline-flex items-center justify-end gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setActiveSessionDetail(session)}
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                          title="View Session"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">visibility</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onNavigate('lesson-plan', session.lessonPlanId || session.id)}
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                          title="Lesson Plan"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">menu_book</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onNavigate('attendance', session.id)}
-                          className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                          title="Attendance"
-                        >
-                          <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
-                        </button>
-
-                        {isClusterAdmin && (onRequestDateChange || !session.date) && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDateChangeSession(session);
-                              setDateChangeNewDate(session.date || '');
-                              setDateChangeReason('');
-                            }}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                            title={session.date ? 'Request Date Change' : 'Confirm Session Date'}
-                          >
-                            <Calendar className="h-4 w-4" />
-                          </button>
-                        )}
-
-                        {['Submitted', 'Pending Review', 'Approved', 'Completed'].includes(session.status) ? (
-                          <button
-                            type="button"
-                            disabled
-                            className="rounded-lg p-1.5 text-gray-300 dark:text-gray-600 cursor-not-allowed"
-                            title="Session submitted - editing disabled"
-                          >
-                            <Lock className="h-4 w-4" />
-                          </button>
-                        ) : !isClusterAdmin ? (
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEditModal(session)}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                            title="Edit"
-                          >
-                            <span className="material-symbols-outlined text-[16px]">edit</span>
-                          </button>
-                        ) : null}
-
-                        {onDeleteSession && (
-                          <button
-                            type="button"
-                            onClick={() => setSessionToDelete(session)}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* CREATE / EDIT SESSION MODAL (Clean Drawer / Modal) */}
-      {isNewModalOpen && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-2xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
-            {/* Modal Header */}
-            <div className="px-5 py-3.5 border-b border-slate-200 flex items-center justify-between bg-slate-50/50 rounded-t-xl">
+      {/* 5. Add / Edit Session Modal */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h2 className="text-base font-bold text-slate-900">
-                  {isEditMode ? 'Edit Session' : 'Create New Session'}
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Fill in the details to schedule learning activity in your cluster.
+                <h3 className="text-base font-bold text-foreground">
+                  {editingSession ? 'Edit Scheduled Session' : 'Schedule Academic Session'}
+                </h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Set cycle day, session date, curriculum module, and assigned village learning hub.
                 </p>
               </div>
-              <button
-                onClick={() => setIsNewModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-
-            {/* Modal Body / Form */}
-            <div className="p-5 overflow-y-auto space-y-4 text-xs">
-              {/* Row 1: Topic & Module */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Session Topic <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.name}
-                    onChange={(e) => {
-                      setFormData({ ...formData, name: e.target.value });
-                      if (formErrors.name) setFormErrors({ ...formErrors, name: '' });
-                    }}
-                    placeholder="e.g. Spoken English — Module 3"
-                    className={`w-full px-3 py-2 border rounded-md text-xs focus:outline-none focus:border-[#0B3D91] ${
-                      formErrors.name ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}
-                  />
-                  {formErrors.name && (
-                    <p className="text-[11px] text-rose-600 mt-1">{formErrors.name}</p>
-                  )}
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Curriculum Module
-                  </label>
-                  <Select
-                    value={formData.module}
-                    onValueChange={(mod) => {
-                      let modId = 'M-103';
-                      if (mod === 'Basic Math') modId = 'M-301';
-                      if (mod === 'Life Skills') modId = 'M-102';
-                      if (mod === 'Digital Literacy') modId = 'D-004';
-                      if (mod === 'Science') modId = 'S-201';
-                      if (mod === 'Financial Literacy') modId = 'F-101';
-                      setFormData({ ...formData, module: mod, moduleId: modId });
-                    }}
-                  >
-                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
-                      <SelectValue placeholder="Select Module" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Spoken English">Spoken English (M-103)</SelectItem>
-                      <SelectItem value="Basic Math">Basic Math (M-301)</SelectItem>
-                      <SelectItem value="Life Skills">Life Skills (M-102)</SelectItem>
-                      <SelectItem value="Digital Literacy">Digital Literacy (D-004)</SelectItem>
-                      <SelectItem value="Science">Science (S-201)</SelectItem>
-                      <SelectItem value="Financial Literacy">Financial Literacy (F-101)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Row 2: Session date */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Date <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={formData.date}
-                    onChange={(e) => {
-                      setFormData({ ...formData, date: e.target.value });
-                      if (formErrors.date) setFormErrors({ ...formErrors, date: '' });
-                    }}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                  />
-                  {formErrors.date && (
-                    <p className="text-[11px] text-rose-600 mt-1">{formErrors.date}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Day of Week
-                  </label>
-                  <Select
-                    value={formData.day}
-                    onValueChange={(val) => setFormData({ ...formData, day: val })}
-                  >
-                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
-                      <SelectValue placeholder="Select Day" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Saturday">Saturday</SelectItem>
-                      <SelectItem value="Sunday">Sunday</SelectItem>
-                      <SelectItem value="Monday">Monday</SelectItem>
-                      <SelectItem value="Tuesday">Tuesday</SelectItem>
-                      <SelectItem value="Wednesday">Wednesday</SelectItem>
-                      <SelectItem value="Thursday">Thursday</SelectItem>
-                      <SelectItem value="Friday">Friday</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-              </div>
-
-              {/* Row 3: Panchayat & Village */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Panchayat Cluster Hub <span className="text-rose-500">*</span>
-                  </label>
-                  <Select
-                    value={formData.panchayatId}
-                    onValueChange={(val) => handlePanchayatSelectChange(val)}
-                  >
-                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
-                      <SelectValue placeholder="Select Panchayat" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {panchayats.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Village / Learning Center <span className="text-rose-500">*</span>
-                  </label>
-                  <Select
-                    value={formData.villageName}
-                    onValueChange={(val) => {
-                      setFormData({ ...formData, villageName: val });
-                      if (formErrors.villageName) setFormErrors({ ...formErrors, villageName: '' });
-                    }}
-                  >
-                    <SelectTrigger className={`w-full h-9 text-xs ${
-                      formErrors.villageName ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}>
-                      <SelectValue placeholder="Select Village Center" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modalVillages.map((v) => (
-                        <SelectItem key={v.id} value={v.name}>
-                          {v.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {formErrors.villageName && (
-                    <p className="text-[11px] text-rose-600 mt-1">{formErrors.villageName}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 4: Volunteer & Type & Status */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Assigned Volunteer <span className="text-rose-500">*</span>
-                  </label>
-                  <Select
-                    value={formData.volunteerId || (formData.volunteerName === 'Unassigned' ? 'unassigned' : '')}
-                    onValueChange={(val) => {
-                      handleVolunteerSelectChange(val);
-                      if (formErrors.volunteer) setFormErrors({ ...formErrors, volunteer: '' });
-                    }}
-                  >
-                    <SelectTrigger className={`w-full h-9 text-xs ${
-                      formErrors.volunteer ? 'border-rose-400 bg-rose-50/30' : 'border-slate-300'
-                    }`}>
-                      <SelectValue placeholder="Select Volunteer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="unassigned">-- Unassigned (Needs Attention) --</SelectItem>
-                      {volunteers.map((v) => (
-                        <SelectItem key={v.id} value={v.id}>
-                          {v.name} ({v.department?.split(' ')[0] || 'Mentor'})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {formErrors.volunteer && (
-                    <p className="text-[11px] text-rose-600 mt-1">{formErrors.volunteer}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Session Type
-                  </label>
-                  <Select
-                    value={formData.sessionType}
-                    onValueChange={(val) =>
-                      setFormData({
-                        ...formData,
-                        sessionType: val as 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation',
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
-                      <SelectValue placeholder="Session Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Academic">Academic Core</SelectItem>
-                      <SelectItem value="Life Skills">Life Skills &amp; Habits</SelectItem>
-                      <SelectItem value="Assessment">Assessment &amp; Review</SelectItem>
-                      <SelectItem value="Orientation">Orientation &amp; Games</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Initial Status
-                  </label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(val) =>
-                      setFormData({ ...formData, status: val as Session['status'] })
-                    }
-                  >
-                    <SelectTrigger className="w-full h-9 text-xs border-slate-300">
-                      <SelectValue placeholder="Status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Scheduled">Scheduled</SelectItem>
-                      <SelectItem value="In Progress">In Progress</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                      <SelectItem value="Needs Attention">Needs Attention</SelectItem>
-                      <SelectItem value="Draft">Draft</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Row 5: Description */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Description / Lesson Objective Note
-                </label>
-                <textarea
-                  rows={2}
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  placeholder="Outline key learning goals, expected activity or required kit..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                />
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between rounded-b-xl">
               <button
                 type="button"
-                onClick={() => setIsNewModalOpen(false)}
-                className="px-3.5 py-1.5 border border-slate-300 text-slate-700 hover:bg-white text-xs font-semibold rounded-md transition-colors cursor-pointer"
+                onClick={() => setIsModalOpen(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
               >
-                Cancel
+                <X className="h-4 w-4" />
               </button>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleFormSubmit(true)}
-                  className="px-3.5 py-1.5 border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold rounded-md transition-colors cursor-pointer"
-                >
-                  Save Draft
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFormSubmit(false)}
-                  className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
-                >
-                  {isEditMode ? 'Update Session' : 'Create Session'}
-                </button>
-              </div>
             </div>
+
+            <form onSubmit={handleSaveSession} className="mt-4 space-y-4 text-xs">
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Session Title *
+                  </label>
+                  <Input
+                    type="text"
+                    required
+                    placeholder="e.g. Day 1 Spoken English & Self Introductions"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Cluster *
+                    </label>
+                    <Select
+                      value={formData.clusterId}
+                      onValueChange={(val) => setFormData({ ...formData, clusterId: val })}
+                      disabled={isClusterAdmin}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Cluster" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clusters.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Cycle Day *
+                    </label>
+                    <Select
+                      value={String(formData.dayNumber)}
+                      onValueChange={(val) => setFormData({ ...formData, dayNumber: parseInt(val, 10) || 1 })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                          <SelectItem key={d} value={String(d)}>
+                            Day {d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Session Date (Date only) *
+                    </label>
+                    <Input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Curriculum Module *
+                    </label>
+                    <Select
+                      value={formData.module}
+                      onValueChange={(val) => setFormData({ ...formData, module: val })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Module" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {moduleOptions.map((mod) => (
+                          <SelectItem key={mod} value={mod}>
+                            {mod}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Target Panchayat *
+                    </label>
+                    <Select
+                      value={formData.panchayatId}
+                      onValueChange={(val) => {
+                        const targetPan = panchayats.find((p) => p.id === val);
+                        setFormData({
+                          ...formData,
+                          panchayatId: val,
+                          villageName: targetPan?.villages[0]?.name || '',
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Panchayat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {panchayats.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Target Village *
+                    </label>
+                    <Select
+                      value={formData.villageName}
+                      onValueChange={(val) => setFormData({ ...formData, villageName: val })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Village" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {formVillages.map((v) => (
+                          <SelectItem key={v.id || v.name} value={v.name}>
+                            {v.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Assigned Volunteer Mentor
+                    </label>
+                    <Select
+                      value={formData.volunteerId}
+                      onValueChange={(val) => setFormData({ ...formData, volunteerId: val })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Volunteer" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {volunteers.map((vol) => (
+                          <SelectItem key={vol.id} value={vol.id}>
+                            {vol.name} ({vol.department?.slice(0, 15)}...)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Status
+                    </label>
+                    <Select
+                      value={formData.status}
+                      onValueChange={(val: any) => setFormData({ ...formData, status: val })}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Scheduled">Scheduled</SelectItem>
+                        <SelectItem value="In Progress">In Progress</SelectItem>
+                        <SelectItem value="Completed">Completed</SelectItem>
+                        <SelectItem value="Needs Attention">Needs Attention</SelectItem>
+                        <SelectItem value="Cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  {editingSession ? 'Update Session' : 'Schedule Session'}
+                </Button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* SESSION DETAIL MODAL / DRAWER */}
-      {activeSessionDetail && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-4 bg-gray-900/70 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-3xl w-full max-h-[92vh] flex flex-col my-auto animate-in fade-in zoom-in-95 duration-150">
-            {/* Detail Header */}
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/70 rounded-t-xl flex items-start justify-between gap-4">
+      {/* 6. Date Change Request Modal */}
+      {dateChangeSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-mono font-bold bg-[#0B3D91]/10 text-[#0B3D91] px-2 py-0.5 rounded">
-                    {activeSessionDetail.code || 'M-103'}
-                  </span>
-                  {renderStatusBadge(activeSessionDetail.status)}
-                </div>
-                <h2 className="text-lg font-bold text-slate-900">
-                  {getSessionTitle(activeSessionDetail)}
-                </h2>
-                <p className="text-xs text-slate-500">
-                  Module: {getSessionModule(activeSessionDetail)} • {activeSessionDetail.sessionType || 'Academic Session'}
+                <h3 className="text-base font-bold text-foreground">Request Date Reschedule</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Propose a new date for {dateChangeSession.name || `Day ${dateChangeSession.dayNumber}`}.
                 </p>
               </div>
-
-              <button
-                onClick={() => setActiveSessionDetail(null)}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-200 transition-colors"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-
-            {/* Detail Body */}
-            <div className="p-6 overflow-y-auto space-y-5 text-xs">
-              {/* Field Operations Workflow Steps Indicator */}
-              <div className="bg-slate-50 border border-slate-200 rounded-md p-3.5">
-                <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-                  Session Delivery Workflow
-                </div>
-                <div className="flex items-center justify-between text-[11px] font-medium text-slate-600 overflow-x-auto pb-1 gap-2">
-                  <div className="flex items-center gap-1 shrink-0 text-emerald-700 font-bold">
-                    <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
-                    <span>1. Created</span>
-                  </div>
-                  <span className="text-slate-300">→</span>
-                  <div className="flex items-center gap-1 shrink-0 text-emerald-700 font-bold">
-                    <span className="material-symbols-outlined text-[16px] text-emerald-600">check_circle</span>
-                    <span>2. Scheduled</span>
-                  </div>
-                  <span className="text-slate-300">→</span>
-                  <div className={`flex items-center gap-1 shrink-0 ${activeSessionDetail.status === 'Completed' || activeSessionDetail.status === 'In Progress' ? 'text-emerald-700 font-bold' : 'text-slate-500'}`}>
-                    <span className="material-symbols-outlined text-[16px]">
-                      {activeSessionDetail.status === 'Completed' ? 'check_circle' : 'pending'}
-                    </span>
-                    <span>3. Conduct</span>
-                  </div>
-                  <span className="text-slate-300">→</span>
-                  <div className={`flex items-center gap-1 shrink-0 ${activeSessionDetail.status === 'Completed' ? 'text-emerald-700 font-bold' : 'text-slate-500'}`}>
-                    <span className="material-symbols-outlined text-[16px]">
-                      {activeSessionDetail.status === 'Completed' ? 'check_circle' : 'fact_check'}
-                    </span>
-                    <span>4. Attendance</span>
-                  </div>
-                  <span className="text-slate-300">→</span>
-                  <div className={`flex items-center gap-1 shrink-0 ${activeSessionDetail.status === 'Completed' ? 'text-emerald-700 font-bold' : 'text-slate-500'}`}>
-                    <span className="material-symbols-outlined text-[16px]">
-                      {activeSessionDetail.status === 'Completed' ? 'check_circle' : 'photo_camera'}
-                    </span>
-                    <span>5. Completed</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Core Information Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border border-slate-200 rounded-md p-3.5">
-                <div>
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 block">
-                    Schedule Date
-                  </span>
-                  <span className="font-bold text-slate-800 text-xs mt-0.5 block">
-                    {activeSessionDetail.date} ({activeSessionDetail.day || 'Sat'})
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 block">
-                    Panchayat &amp; Village
-                  </span>
-                  <span className="font-bold text-slate-800 text-xs mt-0.5 block">
-                    {activeSessionDetail.panchayatName}
-                  </span>
-                  <span className="text-slate-500 text-[11px]">
-                    {activeSessionDetail.villageName}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 block">
-                    Assigned Volunteer
-                  </span>
-                  <span className="font-bold text-[#0B3D91] text-xs mt-0.5 block">
-                    {getSessionVolunteer(activeSessionDetail)}
-                  </span>
-                </div>
-              </div>
-
-              {/* Description */}
-              {activeSessionDetail.description && (
-                <div className="bg-slate-50 border border-slate-200 rounded-md p-3.5 space-y-1">
-                  <span className="text-[10px] font-semibold uppercase text-slate-500 tracking-wider">
-                    Session Description
-                  </span>
-                  <p className="text-slate-700 leading-relaxed">
-                    {activeSessionDetail.description}
-                  </p>
-                </div>
-              )}
-
-              {/* Linked Modules: Lesson Plan + Attendance + Photos */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                {/* Lesson Plan Card */}
-                <div className="border border-slate-200 rounded-md p-3.5 bg-white space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-[#0B3D91]">
-                        menu_book
-                      </span>
-                      Lesson Plan
-                    </span>
-                    <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">
-                      Linked
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    Step-by-step 90-minute curriculum with worksheets and group drills.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setActiveSessionDetail(null);
-                      onNavigate('lesson-plan', activeSessionDetail.lessonPlanId || activeSessionDetail.id);
-                    }}
-                    className="w-full py-1.5 text-center text-xs font-semibold text-[#0B3D91] bg-blue-50 hover:bg-blue-100 rounded transition-colors cursor-pointer"
-                  >
-                    Open Lesson Plan &gt;
-                  </button>
-                </div>
-
-                {/* Attendance Card */}
-                <div className="border border-slate-200 rounded-md p-3.5 bg-white space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-[#FF7A00]">
-                        how_to_reg
-                      </span>
-                      Attendance
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                      {activeSessionDetail.attendanceCount || 0}/{activeSessionDetail.totalStudents || 25} Students
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    Mark student presence, task completion, and behavioral remarks.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setActiveSessionDetail(null);
-                      onNavigate('attendance', activeSessionDetail.id);
-                    }}
-                    className="w-full py-1.5 text-center text-xs font-semibold text-[#FF7A00] bg-orange-50 hover:bg-orange-100 rounded transition-colors cursor-pointer"
-                  >
-                    Mark Attendance &gt;
-                  </button>
-                </div>
-
-                {/* Session Photos Card */}
-                <div className="border border-slate-200 rounded-md p-3.5 bg-white space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-800 flex items-center gap-1.5">
-                      <span className="material-symbols-outlined text-[16px] text-emerald-600">
-                        photo_library
-                      </span>
-                      Field Photos
-                    </span>
-                    <span className="text-[10px] font-semibold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                      {activeSessionDetail.photos?.length || 1} Media
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-500">
-                    Activity documentation and classroom verification media.
-                  </p>
-                  <button
-                    onClick={() => {
-                      setActiveSessionDetail(null);
-                      onNavigate('session-photos', activeSessionDetail.id);
-                    }}
-                    className="w-full py-1.5 text-center text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded transition-colors cursor-pointer"
-                  >
-                    Upload / View Photos &gt;
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Detail Footer Actions */}
-            <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between gap-2 rounded-b-xl">
-              <button
-                onClick={() => setActiveSessionDetail(null)}
-                className="px-4 py-1.5 border border-slate-300 text-slate-700 hover:bg-white text-xs font-semibold rounded-md transition-colors cursor-pointer"
-              >
-                Back to Sessions
-              </button>
-
-              <div className="flex items-center gap-2">
-                {activeSessionDetail.status !== 'Completed' && (
-                  <button
-                    onClick={() => {
-                      onUpdateSession(activeSessionDetail.id, { status: 'Completed' });
-                      setActiveSessionDetail((prev) => (prev ? { ...prev, status: 'Completed' } : null));
-                    }}
-                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
-                  >
-                    Mark as Completed
-                  </button>
-                )}
-
-                {activeSessionDetail.status !== 'Completed' && (
-                  <button
-                    onClick={() => {
-                      const s = activeSessionDetail;
-                      setActiveSessionDetail(null);
-                      handleOpenEditModal(s);
-                    }}
-                    className="px-3.5 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs transition-colors cursor-pointer"
-                  >
-                    Edit Session
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* DELETE CONFIRMATION MODAL */}
-      {sessionToDelete && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm">
-          <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-md w-full p-5 space-y-4">
-            <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center">
-              <span className="material-symbols-outlined text-[22px]">delete_forever</span>
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">Delete Learning Session</h3>
-              <p className="text-xs text-slate-600 mt-1">
-                Are you sure you want to remove &quot;{getSessionTitle(sessionToDelete)}&quot; from the timetable? This action cannot be undone.
-              </p>
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setSessionToDelete(null)}
-                className="px-3.5 py-1.5 border border-slate-300 text-slate-700 text-xs font-semibold rounded-md hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => {
-                  if (onDeleteSession) onDeleteSession(sessionToDelete.id);
-                  setSessionToDelete(null);
-                }}
-                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold rounded-md shadow-xs"
-              >
-                Confirm Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* REQUEST DATE CHANGE MODAL */}
-      {dateChangeSession && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm">
-          <div className="bg-white rounded-md border border-slate-200 shadow-sm max-w-md w-full p-5 space-y-4">
-            <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
-              <Calendar className="h-5 w-5" />
-            </div>
-            <div>
-              <h3 className="text-base font-bold text-slate-900">{dateChangeSession.date ? 'Request Date Change' : 'Confirm Session Date'}</h3>
-              <p className="text-xs text-slate-600 mt-1">
-                {dateChangeSession.date
-                  ? <>Submit a date change request for &quot;{getSessionTitle(dateChangeSession)}&quot;.</>
-                  : <>Choose the date for &quot;{getSessionTitle(dateChangeSession)}&quot;.</>}
-              </p>
-            </div>
-            <div className="space-y-3">
-              <div>
-                {dateChangeSession.date && <>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Current Date</label>
-                  <input
-                    type="text"
-                    readOnly
-                    value={dateChangeSession.date}
-                    className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-md text-xs text-slate-500"
-                  />
-                </>}
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Session Date</label>
-                <input
-                  type="date"
-                  value={dateChangeNewDate}
-                  onChange={(e) => setDateChangeNewDate(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                />
-              </div>
-              {dateChangeSession.date && <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for change</label>
-                <textarea
-                  rows={3}
-                  value={dateChangeReason}
-                  onChange={(e) => setDateChangeReason(e.target.value)}
-                  placeholder="Explain why the date needs to be changed..."
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                />
-              </div>}
-            </div>
-            <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 type="button"
                 onClick={() => setDateChangeSession(null)}
-                className="px-3.5 py-1.5 border border-slate-300 text-slate-700 text-xs font-semibold rounded-md hover:bg-slate-50 cursor-pointer"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!dateChangeNewDate) {
-                    alert('Please select a date.');
-                  } else if (!dateChangeSession.date) {
-                    onUpdateSession(dateChangeSession.id, { date: dateChangeNewDate, status: 'Scheduled' });
-                    setDateChangeSession(null);
-                  } else if (onRequestDateChange && dateChangeReason) {
-                    await onRequestDateChange(
-                      dateChangeSession.id,
-                      dateChangeSession.date || '',
-                      dateChangeNewDate,
-                      dateChangeReason
-                    );
-                    setDateChangeSession(null);
-                  } else alert('Please provide a reason for the date change.');
-                }}
-                className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs cursor-pointer"
-              >
-                {dateChangeSession.date ? 'Submit Request' : 'Confirm Date'}
+                <X className="h-4 w-4" />
               </button>
             </div>
+
+            <form onSubmit={handleSubmitDateChange} className="mt-4 space-y-4 text-xs">
+              <div>
+                <span className="text-muted-foreground block mb-1">Current Date:</span>
+                <span className="font-mono font-bold text-foreground text-sm">{dateChangeSession.date || 'Not set'}</span>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">
+                  New Requested Date *
+                </label>
+                <Input
+                  type="date"
+                  required
+                  value={newDateValue}
+                  onChange={(e) => setNewDateValue(e.target.value)}
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">
+                  Reason for Reschedule *
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="e.g. Village school hall unavailable due to local panchayat elections..."
+                  value={dateChangeReason}
+                  onChange={(e) => setDateChangeReason(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setDateChangeSession(null)}>
+                  Cancel
+                </Button>
+                <Button type="submit">
+                  Submit Reschedule Request
+                </Button>
+              </div>
+            </form>
           </div>
+        </div>
+      )}
+
+      {/* 7. View Session Details Modal */}
+      {viewingSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-base font-bold text-foreground">{viewingSession.name || viewingSession.title}</h3>
+                <p className="text-xs text-muted-foreground">Session ID: {viewingSession.code || viewingSession.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingSession(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3 rounded-md border border-border bg-muted/20 p-3">
+                <div>
+                  <span className="text-muted-foreground block">Cycle Day:</span>
+                  <span className="font-semibold text-foreground">Day {viewingSession.dayNumber || 1}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Session Date:</span>
+                  <span className="font-mono font-semibold text-foreground">{viewingSession.date || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Cluster:</span>
+                  <span className="font-semibold text-foreground">{viewingSession.clusterName || 'Main Cluster'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Module:</span>
+                  <span className="font-semibold text-foreground">{viewingSession.module || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Panchayat:</span>
+                  <span className="font-semibold text-foreground">{viewingSession.panchayatName || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Village Center:</span>
+                  <span className="font-semibold text-foreground">{viewingSession.villageName || '—'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Assigned Volunteer:</span>
+                  <span className="font-semibold text-foreground">{viewingSession.volunteerName || 'Unassigned'}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block">Status:</span>
+                  <Badge variant="default" size="sm">
+                    {viewingSession.status}
+                  </Badge>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setViewingSession(null);
+                      onNavigate('attendance');
+                    }}
+                  >
+                    Attendance Roster →
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setViewingSession(null);
+                      onNavigate('session-photos');
+                    }}
+                  >
+                    Session Photos →
+                  </Button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const toEdit = viewingSession;
+                      setViewingSession(null);
+                      handleOpenEdit(toEdit);
+                    }}
+                  >
+                    Edit Session
+                  </Button>
+                  <Button size="sm" onClick={() => setViewingSession(null)}>
+                    Close
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. Delete Confirmation Modal */}
+      {sessionToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-foreground">Delete Scheduled Session?</h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  Are you sure you want to remove <strong className="text-foreground">{sessionToDelete.name || sessionToDelete.title}</strong>? This will detach any associated session logs.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setSessionToDelete(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleConfirmDelete}
+              >
+                Delete Session
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-md bg-foreground px-4 py-3 text-xs font-semibold text-background shadow-lg animate-in fade-in slide-in-from-bottom-2">
+          <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+          <span>{toastMessage}</span>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="ml-2 text-muted-foreground hover:text-background"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
     </div>
   );
 };
-
-

@@ -4,11 +4,14 @@ import {
   DayPhotoSummary,
   Panchayat,
   ZipProgressState,
-  ZipGenerationStage,
   TabType,
   Cluster,
 } from '../types';
 import { apiUrl } from '../utils/api';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { EmptyState } from './ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -16,54 +19,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Search, X } from './ui/icons';
+import {
+  Calendar,
+  Search,
+  Plus,
+  Trash2,
+  Eye,
+  X,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  MapPin,
+  Building2,
+  Clock,
+  Sparkle,
+  Image as ImageIcon,
+} from './ui/icons';
 
 interface SessionPhotosViewProps {
   panchayats: Panchayat[];
   clusters?: Cluster[];
   authToken?: string;
+  selectedAcademicYearId?: string;
   userRole?: 'Cluster Admin' | 'Super Admin';
   currentCluster?: string;
   onNavigate?: (tab: TabType, targetId?: string) => void;
   onRoleChange?: (role: 'Cluster Admin' | 'Super Admin') => void;
 }
 
-
 export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   panchayats = [],
   clusters = [],
   authToken,
-  userRole = 'Cluster Admin',
+  selectedAcademicYearId,
+  userRole = 'Super Admin',
   currentCluster = 'Dharmapuri',
   onNavigate,
-  onRoleChange,
 }) => {
-  // State
-  const [activeRole, setActiveRole] = useState<'Cluster Admin' | 'Super Admin'>(userRole);
   const [selectedCluster, setSelectedCluster] = useState<string>(
-    userRole === 'Cluster Admin' ? 'Dharmapuri' : 'all'
+    userRole === 'Cluster Admin' ? currentCluster : 'all'
   );
   const [selectedDayTab, setSelectedDayTab] = useState<number | 'all'>('all');
-  const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [selectedPanchayat, setSelectedPanchayat] = useState<string>('all');
   const [selectedVillage, setSelectedVillage] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Photos Collection (Fetched from Backend API)
+  // Photos Collection
   const [photos, setPhotos] = useState<SessionPhotoItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Modals & Active Selections
-  const [selectedPhoto, setSelectedPhoto] = useState<SessionPhotoItem | null>(null);
+  // Selection & Modals
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [previewPhoto, setPreviewPhoto] = useState<SessionPhotoItem | null>(null);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [uploadDayTarget, setUploadDayTarget] = useState<number>(1);
-  const [viewDayModal, setViewDayModal] = useState<number | null>(null);
   const [photoToDelete, setPhotoToDelete] = useState<SessionPhotoItem | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
 
   // ZIP Generation & Download State
   const [downloadingZipKey, setDownloadingZipKey] = useState<string | null>(null);
-  const [completedZipKey, setCompletedZipKey] = useState<string | null>(null);
   const [zipProgress, setZipProgress] = useState<ZipProgressState>({
     stage: 'idle',
     message: '',
@@ -74,44 +89,23 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadTitle, setUploadTitle] = useState<string>('Interactive Learning Workshop');
   const [uploadDay, setUploadDay] = useState<number>(1);
-  const [uploadPanchayat, setUploadPanchayat] = useState<string>(panchayats[0]?.id || 'vedakkattamaduvu');
-  const [uploadVillage, setUploadVillage] = useState<string>('Ammapettai');
+  const [uploadPanchayat, setUploadPanchayat] = useState<string>(panchayats[0]?.id || '');
+  const [uploadVillage, setUploadVillage] = useState<string>(panchayats[0]?.villages[0]?.name || '');
   const [uploadDate, setUploadDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [uploadUploader, setUploadUploader] = useState<string>('Rahul K.');
+  const [uploadUploader, setUploadUploader] = useState<string>('Cluster Mentor');
   const [uploadCaption, setUploadCaption] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const showClusterLanding = activeRole === 'Super Admin' && selectedCluster === 'all';
-  const photoClusters = useMemo(() => {
-    const known = clusters.map((cluster) => ({ id: cluster.id, name: cluster.name }));
-    const knownIds = new Set(known.map((cluster) => cluster.id.toLowerCase()));
-    photos.forEach((photo) => {
-      if (!knownIds.has(photo.clusterId.toLowerCase())) {
-        known.push({ id: photo.clusterId, name: photo.clusterName || photo.clusterId });
-        knownIds.add(photo.clusterId.toLowerCase());
-      }
-    });
-    return known;
-  }, [clusters, photos]);
-
-  // Sync role changes
-  useEffect(() => {
-    setActiveRole(userRole);
-    if (userRole === 'Cluster Admin') {
-      setSelectedCluster('Dharmapuri');
-    } else {
-      setSelectedCluster('all');
-    }
-  }, [userRole]);
 
   // Fetch photos from server
   const fetchPhotos = async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const clusterParam = activeRole === 'Cluster Admin' ? 'dharmapuri' : selectedCluster.toLowerCase();
-      const res = await fetch(apiUrl(`/api/session-photos?cluster=${clusterParam}&role=${encodeURIComponent(activeRole)}`), {
+      const clusterParam = userRole === 'Cluster Admin' ? currentCluster.toLowerCase() : selectedCluster.toLowerCase();
+      const yearParam = selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : '';
+      const res = await fetch(apiUrl(`/api/session-photos?cluster=${clusterParam}&role=${encodeURIComponent(userRole)}${yearParam}`), {
         cache: 'no-store',
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
@@ -119,7 +113,6 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         throw new Error(`Server returned ${res.status}`);
       }
       const data = await res.json();
-
       if (data.success && Array.isArray(data.photos)) {
         setPhotos(data.photos);
       } else {
@@ -127,7 +120,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       }
     } catch (err: any) {
       console.error('Failed to load photos:', err);
-      setLoadError('Failed to connect to backend server for photos. Retrying...');
+      setLoadError('Failed to connect to backend server for photos.');
     } finally {
       setIsLoading(false);
     }
@@ -135,7 +128,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
 
   useEffect(() => {
     fetchPhotos();
-  }, [activeRole, selectedCluster, authToken]);
+  }, [userRole, selectedCluster, authToken, selectedAcademicYearId]);
 
   // Dynamic villages for filter
   const currentFilterVillages = useMemo(() => {
@@ -154,138 +147,83 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     return found?.villages || [];
   }, [selectedPanchayat, panchayats]);
 
-  // Update upload village when upload panchayat changes
-  useEffect(() => {
-    const selectedP = panchayats.find((p) => p.id === uploadPanchayat || p.name === uploadPanchayat);
-    if (selectedP && selectedP.villages && selectedP.villages.length > 0) {
-      setUploadVillage(selectedP.villages[0].name);
-    }
-  }, [uploadPanchayat, panchayats]);
+  // Dynamic villages for upload modal
+  const uploadVillages = useMemo(() => {
+    if (!uploadPanchayat) return [];
+    const p = panchayats.find((item) => item.id === uploadPanchayat || item.name === uploadPanchayat);
+    return p?.villages || [];
+  }, [panchayats, uploadPanchayat]);
 
   // Days 1 through 8 Summary
-  const daySummaries: DayPhotoSummary[] = useMemo(() => {
+  const daySummaries = useMemo(() => {
     const targetClusterPhotos = photos.filter(
       (p) =>
-        activeRole === 'Cluster Admin' ||
+        userRole === 'Cluster Admin' ||
         selectedCluster === 'all' ||
         p.clusterId.toLowerCase() === selectedCluster.toLowerCase()
     );
 
-    const summaries: DayPhotoSummary[] = [];
-
-    for (let day = 1; day <= 8; day++) {
+    return [1, 2, 3, 4, 5, 6, 7, 8].map((day) => {
       const dayPhotos = targetClusterPhotos.filter((p) => p.dayNumber === day);
-      const uniquePanchayats = new Set(dayPhotos.map((p) => p.panchayatId)).size;
-      const targetCount = 50;
-
-      summaries.push({
+      return {
         dayNumber: day,
-        dayLabel: `Day ${day}`,
-        date: `2026-08-${15 + day}`,
         photosCount: dayPhotos.length,
-        targetCount,
-        panchayatCoverage: uniquePanchayats,
-        featuredPhotos: dayPhotos.slice(0, 4),
-      });
-    }
+      };
+    });
+  }, [photos, selectedCluster, userRole]);
 
-    return summaries;
-  }, [photos, selectedCluster, activeRole]);
-
-  // Filtered Photos for Gallery View
+  // Filtered Photos for Gallery
   const filteredPhotos = useMemo(() => {
     return photos.filter((p) => {
-      // Cluster filter
       const matchCluster =
-        activeRole === 'Cluster Admin'
-          ? p.clusterId.toLowerCase() === 'dharmapuri'
+        userRole === 'Cluster Admin'
+          ? p.clusterId.toLowerCase() === currentCluster.toLowerCase()
           : selectedCluster === 'all' || p.clusterId.toLowerCase() === selectedCluster.toLowerCase();
 
-      // Day Tab filter
       const matchDay = selectedDayTab === 'all' || p.dayNumber === selectedDayTab;
 
-      // Panchayat filter
       const matchPanchayat =
         selectedPanchayat === 'all' ||
         p.panchayatId.toLowerCase() === selectedPanchayat.toLowerCase() ||
         p.panchayatName.toLowerCase() === selectedPanchayat.toLowerCase();
 
-      // Village filter
       const matchVillage =
         selectedVillage === 'all' ||
         (p.villageName || '').toLowerCase() === selectedVillage.toLowerCase();
 
-      // Search Query
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
-        p.sessionTitle.toLowerCase().includes(q) ||
-        p.panchayatName.toLowerCase().includes(q) ||
-        p.villageName.toLowerCase().includes(q) ||
-        p.uploadedBy.toLowerCase().includes(q) ||
-        p.originalFilename.toLowerCase().includes(q);
+        (p.sessionTitle || '').toLowerCase().includes(q) ||
+        (p.panchayatName || '').toLowerCase().includes(q) ||
+        (p.villageName || '').toLowerCase().includes(q) ||
+        (p.uploadedBy || '').toLowerCase().includes(q) ||
+        (p.caption || '').toLowerCase().includes(q) ||
+        (p.originalFilename || '').toLowerCase().includes(q);
 
       return matchCluster && matchDay && matchPanchayat && matchVillage && matchSearch;
     });
-  }, [photos, selectedCluster, activeRole, selectedDayTab, selectedPanchayat, selectedVillage, searchQuery]);
+  }, [photos, selectedCluster, userRole, selectedDayTab, selectedPanchayat, selectedVillage, searchQuery, currentCluster]);
 
-  // ==========================================
-  // ZIP DOWNLOAD HANDLER WITH REAL PROGRESS
-  // ==========================================
-  const handleDownloadZip = async (
-    type: 'day' | 'cluster-all-days' | 'all-clusters' | 'filtered',
-    dayNumber?: number
-  ) => {
-    // Unique key to track button state and prevent double-clicks
-    const key =
-      type === 'day'
-        ? `day-${dayNumber}`
-        : type === 'cluster-all-days'
-        ? `cluster-${selectedCluster}`
-        : type === 'all-clusters'
-        ? 'all-clusters'
-        : 'filtered';
-
-    if (downloadingZipKey) {
-      console.warn('Another ZIP download is already in progress.');
-      return;
-    }
-
+  // ZIP Download Handler
+  const handleDownloadZip = async (type: 'day' | 'cluster-all-days' | 'all-clusters' | 'filtered', dayNumber?: number) => {
+    const key = type === 'day' ? `day-${dayNumber}` : type === 'filtered' ? 'filtered' : 'all';
+    if (downloadingZipKey) return;
     setDownloadingZipKey(key);
-    setCompletedZipKey(null);
 
-    // Stepped Progress Simulation
-    setZipProgress({
-      stage: 'preparing',
-      message: 'Preparing ZIP request...',
-      progressPercent: 15,
-    });
+    setZipProgress({ stage: 'preparing', message: 'Preparing archive request...', progressPercent: 20 });
 
     try {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 200));
+      setZipProgress({ stage: 'collecting', message: 'Gathering photographic records...', progressPercent: 50 });
 
-      setZipProgress({
-        stage: 'collecting',
-        message: 'Collecting original session photos from storage...',
-        progressPercent: 40,
-      });
+      await new Promise((r) => setTimeout(r, 200));
+      setZipProgress({ stage: 'creating', message: 'Compressing into high-resolution ZIP...', progressPercent: 80 });
 
-      await new Promise((r) => setTimeout(r, 300));
-
-      setZipProgress({
-        stage: 'creating',
-        message: 'Generating compressed ZIP archive on backend...',
-        progressPercent: 70,
-      });
-
-      // Construct URL parameters
       const params = new URLSearchParams();
       params.append('type', type);
-      params.append(
-        'cluster',
-        activeRole === 'Cluster Admin' ? 'dharmapuri' : selectedCluster
-      );
-      params.append('userRole', activeRole);
+      params.append('cluster', userRole === 'Cluster Admin' ? currentCluster : selectedCluster);
+      params.append('userRole', userRole);
 
       if (type === 'day' && dayNumber) {
         params.append('dayNumber', String(dayNumber));
@@ -296,32 +234,12 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       }
 
       const zipUrl = apiUrl(`/api/session-photos/download-zip?${params.toString()}`);
-
-      setZipProgress({
-        stage: 'downloading',
-        message: 'Streaming ZIP package to your device...',
-        progressPercent: 90,
-      });
-
-      // Perform Fetch to trigger download
       const response = await fetch(zipUrl);
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => ({}));
-        throw new Error(
-          errorJson.error || 'Unable to create the ZIP file. Please try again.'
-        );
+        throw new Error('Unable to create ZIP archive.');
       }
 
-      // Extract filename from header
-      let downloadFilename = 'TQI_Session_Photos.zip';
-      const disposition = response.headers.get('Content-Disposition');
-      if (disposition && disposition.includes('filename=')) {
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) {
-          downloadFilename = match[1];
-        }
-      }
-
+      let downloadFilename = `TQI_Session_Photos_${selectedCluster}_${Date.now()}.zip`;
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -332,43 +250,22 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // Success State
-      setZipProgress({
-        stage: 'completed',
-        message: 'ZIP downloaded successfully.',
-        progressPercent: 100,
-        zipFilename: downloadFilename,
-      });
-      setCompletedZipKey(key);
-
-      // Auto clear progress banner after 4 seconds
-      setTimeout(() => {
-        setZipProgress({
-          stage: 'idle',
-          message: '',
-          progressPercent: 0,
-        });
-      }, 4000);
+      setZipProgress({ stage: 'completed', message: 'ZIP archive downloaded successfully.', progressPercent: 100 });
+      setTimeout(() => setZipProgress({ stage: 'idle', message: '', progressPercent: 0 }), 4000);
     } catch (err: any) {
       console.error('ZIP download failed:', err);
-      setZipProgress({
-        stage: 'error',
-        message: err.message || 'Unable to create the ZIP file. Please try again.',
-        progressPercent: 0,
-        errorMessage: err.message || 'Unable to create the ZIP file. Please try again.',
-      });
+      setZipProgress({ stage: 'error', message: err.message || 'Failed to download ZIP.', progressPercent: 0 });
+      setTimeout(() => setZipProgress({ stage: 'idle', message: '', progressPercent: 0 }), 4000);
     } finally {
       setDownloadingZipKey(null);
     }
   };
 
-  // ==========================================
-  // SINGLE PHOTO ACTIONS
-  // ==========================================
   const handleDownloadSinglePhoto = (photo: SessionPhotoItem) => {
-    const downloadUrl = apiUrl(`/api/session-photos/${photo.id}/download`);
+    const downloadUrl = photo.fileUrl || apiUrl(`/api/session-photos/${photo.id}/download`);
     const link = document.createElement('a');
     link.href = downloadUrl;
+    link.target = '_blank';
     link.download = photo.originalFilename || `Photo_${photo.id}.jpg`;
     document.body.appendChild(link);
     link.click();
@@ -385,18 +282,45 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         throw new Error('Failed to delete photo.');
       }
       setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+      setSelectedPhotoIds((prev) => prev.filter((id) => id !== photo.id));
       setPhotoToDelete(null);
-      if (selectedPhoto && selectedPhoto.id === photo.id) {
-        setSelectedPhoto(null);
-      }
+      if (previewPhoto?.id === photo.id) setPreviewPhoto(null);
     } catch (err) {
       alert('Failed to delete photo. Please try again.');
     }
   };
 
-  // ==========================================
-  // PHOTO UPLOAD HANDLER
-  // ==========================================
+  const handleBulkDelete = async () => {
+    try {
+      for (const id of selectedPhotoIds) {
+        await fetch(apiUrl(`/api/session-photos/${id}`), {
+          method: 'DELETE',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        });
+      }
+      setPhotos((prev) => prev.filter((p) => !selectedPhotoIds.includes(p.id)));
+      setSelectedPhotoIds([]);
+      setShowBulkDeleteConfirm(false);
+    } catch (err) {
+      alert('Failed to delete selected photos.');
+    }
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedPhotoIds.length === filteredPhotos.length) {
+      setSelectedPhotoIds([]);
+    } else {
+      setSelectedPhotoIds(filteredPhotos.map((p) => p.id));
+    }
+  };
+
+  const handleToggleSelectPhoto = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedPhotoIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
+    );
+  };
+
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (uploadFiles.length === 0) {
@@ -419,7 +343,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     formData.append('panchayatName', foundP ? foundP.name : uploadPanchayat);
     formData.append('villageName', uploadVillage);
     formData.append('uploadedBy', uploadUploader);
-    formData.append('uploadedRole', activeRole);
+    formData.append('uploadedRole', userRole);
     formData.append('caption', uploadCaption);
 
     uploadFiles.forEach((file) => {
@@ -438,10 +362,10 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         throw new Error(data.error || 'Upload failed.');
       }
 
-
-      // Add new photos to local state
       if (data.photos && Array.isArray(data.photos)) {
         setPhotos((prev) => [...data.photos, ...prev]);
+      } else {
+        await fetchPhotos();
       }
 
       setShowUploadModal(false);
@@ -455,1000 +379,644 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     }
   };
 
-  // Quick Open Upload for specific day
-  const handleOpenUploadForDay = (day: number) => {
-    setUploadDay(day);
-    setShowUploadModal(true);
-  };
-
-  if (activeRole === 'Super Admin' && selectedCluster !== 'all' && selectedDayTab !== 'all') {
-    const selectedDayPhotos = photos.filter(
-      (photo) => photo.clusterId.toLowerCase() === selectedCluster.toLowerCase() && photo.dayNumber === selectedDayTab,
-    );
-
-    return (
-      <div className="space-y-6 max-w-7xl mx-auto pb-16 font-sans">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-5">
-          <div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mb-2">
-              <button type="button" onClick={() => setSelectedCluster('all')} className="hover:text-[#0B3D91]">Session Photos</button>
-              <span>/</span><span>{selectedCluster}</span><span>/</span><span className="font-semibold text-[#0B3D91]">Day {selectedDayTab}</span>
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900">{selectedCluster} - Day {selectedDayTab} Photos</h1>
-            <p className="text-sm text-slate-500 mt-1">Review the real photo records submitted for this day.</p>
+  return (
+    <div className="space-y-6">
+      {/* 1. Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              Session Photographs Archive
+            </h1>
+            <Badge variant="default" size="sm">
+              {filteredPhotos.length} Photos
+            </Badge>
           </div>
-          <button type="button" onClick={() => { setSelectedDayTab('all'); setExpandedDay(null); }} className="px-3 py-2 rounded-md bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700">Back to Days</button>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Curated visual evidence and activity documentation across Day 1–8 learning program cycles.
+          </p>
         </div>
 
-        <div className="flex items-center justify-between text-sm text-slate-600">
-          <span>{selectedDayPhotos.length} photo records</span>
-          <button type="button" disabled={!selectedDayPhotos.length} onClick={() => handleDownloadZip('day', selectedDayTab)} className="px-3 py-2 rounded-md bg-[#0B3D91] text-white text-xs font-bold disabled:bg-slate-200 disabled:text-slate-400">Download Day {selectedDayTab} ZIP</button>
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedPhotoIds.length > 0 && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setShowBulkDeleteConfirm(true)}
+              className="gap-1.5 text-xs font-semibold"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>Delete ({selectedPhotoIds.length})</span>
+            </Button>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleDownloadZip('filtered')}
+            disabled={downloadingZipKey !== null || filteredPhotos.length === 0}
+            className="gap-1.5 text-xs font-semibold"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>{downloadingZipKey === 'filtered' ? 'Preparing ZIP...' : 'Download ZIP'}</span>
+          </Button>
+
+          <Button
+            size="sm"
+            onClick={() => setShowUploadModal(true)}
+            className="gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Upload Photos</span>
+          </Button>
+        </div>
+      </div>
+
+      {/* ZIP Download Progress Alert */}
+      {zipProgress.stage !== 'idle' && (
+        <div className="rounded-lg border border-border bg-card p-4 shadow-sm animate-in fade-in-0">
+          <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
+            <span className="flex items-center gap-2">
+              <Download className="h-4 w-4 text-primary animate-bounce" />
+              <span>{zipProgress.message}</span>
+            </span>
+            <span className="font-mono text-muted-foreground">{zipProgress.progressPercent}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${zipProgress.progressPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 2. Cycle Day Progress Bar (Day 1 - Day 8) */}
+      <div className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((day) => {
+          const daySummary = daySummaries.find((d) => d.dayNumber === day);
+          const count = daySummary?.photosCount || 0;
+          const isSelected = selectedDayTab === day;
+
+          return (
+            <button
+              key={day}
+              type="button"
+              onClick={() => setSelectedDayTab(isSelected ? 'all' : day)}
+              className={`rounded-lg border p-2.5 text-left transition ${
+                isSelected
+                  ? 'border-primary bg-primary/5 text-primary ring-1 ring-primary/20'
+                  : 'border-border bg-card hover:bg-muted/40 text-foreground'
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold">Day {day}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                  count > 0 ? 'bg-primary/10 text-primary font-semibold' : 'text-muted-foreground'
+                }`}>
+                  {count}
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] text-muted-foreground truncate">
+                {count > 0 ? `${count} photos` : 'No photos'}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* 3. Filter Bar */}
+      <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search by caption, topic, village, uploader..."
+            className="h-9 pl-8 text-xs"
+          />
         </div>
 
-        {selectedDayPhotos.length === 0 ? (
-          <div className="py-20 text-center bg-white border border-slate-200 rounded-md text-sm text-slate-500">No photos are available for Day {selectedDayTab}.</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {selectedDayPhotos.map((photo) => (
-              <article key={photo.id} className="bg-white border border-slate-200 rounded-md p-4 shadow-xs">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0"><h2 className="text-sm font-bold text-slate-900 truncate">{photo.originalFilename}</h2><p className="text-xs text-slate-500 mt-1">{photo.caption || photo.sessionTitle}</p></div>
-                  <span className="text-[10px] font-bold px-2 py-1 rounded bg-blue-50 text-[#0B3D91]">Day {photo.dayNumber}</span>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">Uploaded by {photo.uploadedBy || 'Cluster Admin'}</div>
-                <div className="flex gap-2 mt-3"><a href={photo.fileUrl} target="_blank" rel="noreferrer" className="flex-1 text-center px-3 py-2 rounded-md bg-[#0B3D91] text-white text-xs font-bold">View Photos</a><a href={photo.fileUrl} target="_blank" rel="noreferrer" download className="px-3 py-2 rounded-md bg-slate-100 text-slate-700 text-xs font-bold">Download</a></div>
-              </article>
-            ))}
+        {userRole === 'Super Admin' && (
+          <div className="w-44">
+            <Select
+              value={selectedCluster}
+              onValueChange={(val) => setSelectedCluster(val)}
+            >
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="All Clusters" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Clusters</SelectItem>
+                {clusters.map((c) => (
+                  <SelectItem key={c.id} value={c.name}>
+                    {c.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
-      </div>
-    );
-  }
 
-  return (
-    <div className="w-full space-y-6 pb-16 font-sans">
-      {/* ==========================================
-          1. CARDLESS PAGE HEADER (MAIN HEADING ONLY)
-          ========================================== */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Session Photographs &amp; ZIP Archives
-            </h1>
-            <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 border border-brand-200 dark:bg-brand-950/40 dark:text-brand-400 dark:border-brand-800">
-              {selectedCluster}
-            </span>
-          </div>
-        </div>
-
-        {/* Header Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-          {/* Super Admin: Download All Clusters ZIP */}
-          {activeRole === 'Super Admin' && (
-            <button
-              id="download-all-clusters-zip-btn"
-              disabled={downloadingZipKey !== null}
-              onClick={() => handleDownloadZip('all-clusters')}
-              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
-                downloadingZipKey === 'all-clusters'
-                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                  : 'bg-success-600 hover:bg-success-700 text-white active:scale-[0.98]'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                {downloadingZipKey === 'all-clusters' ? 'sync' : 'folder_zip'}
-              </span>
-              {downloadingZipKey === 'all-clusters'
-                ? 'Creating ZIP...'
-                : completedZipKey === 'all-clusters'
-                ? 'Download All Clusters Again'
-                : 'Download All Clusters (ZIP)'}
-            </button>
-          )}
-
-          {/* Cluster Level: Download All 8 Days ZIP */}
-          <button
-            id="download-all-8-days-zip-btn"
-            disabled={downloadingZipKey !== null}
-            onClick={() => handleDownloadZip('cluster-all-days')}
-            className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
-              downloadingZipKey === `cluster-${selectedCluster}`
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
-            }`}
+        <div className="w-44">
+          <Select
+            value={selectedPanchayat}
+            onValueChange={(val) => {
+              setSelectedPanchayat(val);
+              setSelectedVillage('all');
+            }}
           >
-            <span className="material-symbols-outlined text-[18px]">
-              {downloadingZipKey === `cluster-${selectedCluster}` ? 'sync' : 'cloud_download'}
-            </span>
-            {downloadingZipKey === `cluster-${selectedCluster}`
-              ? 'Creating ZIP...'
-              : completedZipKey === `cluster-${selectedCluster}`
-              ? `Download ${selectedCluster} Again`
-              : `Download All 8 Days (${selectedCluster})`}
-          </button>
-
-          {/* Upload Photos Button */}
-          {activeRole !== 'Super Admin' && (
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-3.5 py-2 text-xs font-semibold shadow-theme-xs hover:opacity-90 transition active:scale-[0.98] cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[18px]">add_photo_alternate</span>
-              Upload Photos
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ==========================================
-          PROGRESS & FEEDBACK BANNER
-          ========================================== */}
-      {!showClusterLanding && zipProgress.stage !== 'idle' && (
-        <div
-          className={`rounded-2xl p-4 border transition-all ${
-            zipProgress.stage === 'error'
-              ? 'bg-rose-50 border-rose-200 text-rose-900'
-              : zipProgress.stage === 'completed'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-blue-50/90 border-blue-200 text-blue-950'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span
-                className={`material-symbols-outlined text-[24px] ${
-                  zipProgress.stage === 'error'
-                    ? 'text-rose-600'
-                    : zipProgress.stage === 'completed'
-                    ? 'text-emerald-600'
-                    : 'text-brand-500 animate-spin'
-                }`}
-              >
-                {zipProgress.stage === 'error'
-                  ? 'error'
-                  : zipProgress.stage === 'completed'
-                  ? 'check_circle'
-                  : 'progress_activity'}
-              </span>
-              <div>
-                <div className="font-bold text-sm">{zipProgress.message}</div>
-                {zipProgress.zipFilename && (
-                  <div className="text-xs text-gray-600 mt-0.5">
-                    Saved as <span className="font-mono font-semibold">{zipProgress.zipFilename}</span>
-                  </div>
-                )}
-                {zipProgress.errorMessage && (
-                  <div className="text-xs text-rose-700 mt-0.5 font-medium">
-                    {zipProgress.errorMessage}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {zipProgress.stage === 'completed' && (
-              <span className="text-xs font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-1 rounded-md">
-                Complete
-              </span>
-            )}
-          </div>
-
-          {/* Progress Bar */}
-          {zipProgress.stage !== 'error' && zipProgress.stage !== 'completed' && (
-            <div className="w-full bg-blue-100/80 h-1.5 rounded-full overflow-hidden mt-3">
-              <div
-                className="bg-brand-500 h-full transition-all duration-300 rounded-full"
-                style={{ width: `${zipProgress.progressPercent}%` }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ==========================================
-          SUPER ADMIN CLUSTER SELECTOR (IF SUPER ADMIN)
-          ========================================== */}
-      {activeRole === 'Super Admin' && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Super Admin Multi-Cluster View
-            </span>
-            <div className="text-sm font-semibold text-gray-900 dark:text-white">
-              Select Cluster to Inspect or Download:
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {['Dharmapuri', 'Salem', 'Krishnagiri'].map((cName) => (
-              <button
-                key={cName}
-                onClick={() => setSelectedCluster(cName)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                  selectedCluster.toLowerCase() === cName.toLowerCase()
-                    ? 'bg-brand-500 text-white shadow-theme-xs'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
-                }`}
-              >
-                {cName} Cluster
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {showClusterLanding && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">Session Photos - Clusters</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {photoClusters.map((cluster) => {
-              const clusterPhotos = photos.filter((photo) => photo.clusterId.toLowerCase() === cluster.id.toLowerCase());
-              const days = new Set(clusterPhotos.map((photo) => photo.dayNumber)).size;
-              return (
-                <button
-                  key={cluster.id}
-                  type="button"
-                  onClick={() => { setSelectedCluster(cluster.id); setSelectedDayTab('all'); }}
-                  className="text-left rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs hover:border-brand-500 hover:shadow-theme-sm transition-all dark:border-gray-800 dark:bg-white/[0.03]"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/40 text-brand-500 flex items-center justify-center"><span className="material-symbols-outlined">hub</span></div>
-                    <span className="text-xs font-bold text-brand-500">View cluster</span>
-                  </div>
-                  <h3 className="mt-5 text-base font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
-                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-xs">
-                    <span><strong className="block text-gray-900 dark:text-white">{days}/8</strong><em className="not-italic text-gray-500">Days</em></span>
-                    <span><strong className="block text-gray-900 dark:text-white">{clusterPhotos.length}</strong><em className="not-italic text-gray-500">Photos</em></span>
-                    <span><strong className="block text-gray-900 dark:text-white">{new Set(clusterPhotos.map((photo) => photo.panchayatId).filter(Boolean)).size}</strong><em className="not-italic text-gray-500">Panchayats</em></span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {photoClusters.length === 0 && <div className="py-14 text-center bg-white border border-gray-200 rounded-2xl text-sm text-gray-500">No session photo clusters found in MySQL.</div>}
-        </section>
-      )}
-
-      {/* ==========================================
-          SECTION 1: DAY 1 TO DAY 8 ALBUMS
-          ========================================== */}
-      <div className={showClusterLanding ? 'hidden' : 'space-y-4'}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-gray-900 dark:text-white">
-            Daily Session Albums ({selectedCluster})
-          </h2>
-          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-            Total Photos: <strong className="text-gray-900 dark:text-white">{photos.length}</strong>
-          </span>
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="All Panchayats" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Panchayats</SelectItem>
+              {panchayats.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {daySummaries.map((daySummary) => {
-            const isDayDownloading = downloadingZipKey === `day-${daySummary.dayNumber}`;
-            const isDayCompleted = completedZipKey === `day-${daySummary.dayNumber}`;
-
-            return (
-              <div
-                key={daySummary.dayNumber}
-                className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs hover:border-brand-500/40 transition-all flex flex-col justify-between dark:border-gray-800 dark:bg-white/[0.03]"
-              >
-                <div>
-                  {/* Card Header with Proper Gap between Day Label and Date */}
-                  <div className="flex items-center justify-between mb-2.5">
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        onClick={() => { setExpandedDay(expandedDay === daySummary.dayNumber ? null : daySummary.dayNumber); setSelectedDayTab(daySummary.dayNumber); }}
-                        className="font-bold text-sm text-gray-900 dark:text-white text-left hover:text-brand-500 transition-colors"
-                      >
-                        {daySummary.dayLabel}
-                      </button>
-                      <span className="text-[11px] text-gray-400 font-medium">
-                        {daySummary.date}
-                      </span>
-                    </div>
-
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        daySummary.photosCount > 0
-                          ? 'bg-success-50 text-success-700 border border-success-200 dark:bg-success-950/40 dark:text-success-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
-                      }`}
-                    >
-                      {daySummary.photosCount} Photos
-                    </span>
-                  </div>
-
-                  {/* Photo Thumbnails Preview */}
-                  <div className="grid grid-cols-4 gap-1.5 my-3">
-                    {daySummary.featuredPhotos.length > 0 ? (
-                      daySummary.featuredPhotos.map((p, pIdx) => (
-                        <div
-                          key={p.id || pIdx}
-                          onClick={() => setSelectedPhoto(p)}
-                          className="aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer hover:opacity-85 transition-opacity dark:border-gray-800"
-                        >
-                          <img
-                            src={p.fileUrl}
-                            alt={p.originalFilename}
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                      ))
-                    ) : (
-                      <div className="col-span-4 py-4 text-center text-xs text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                        No photos yet for this day
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex items-center justify-between font-medium">
-                    <span>Coverage: {daySummary.panchayatCoverage} Panchayats</span>
-                    <span>Target: {daySummary.targetCount}</span>
-                  </div>
-                </div>
-
-                {/* Card Action Buttons */}
-                <div className="pt-2.5 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-1.5">
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => {
-                        setExpandedDay(daySummary.dayNumber);
-                        setSelectedDayTab(daySummary.dayNumber);
-                        const element = document.getElementById('gallery-section');
-                        element?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                      className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">grid_view</span>
-                      View
-                    </button>
-
-                    {activeRole !== 'Super Admin' && (
-                      <button
-                        onClick={() => handleOpenUploadForDay(daySummary.dayNumber)}
-                        className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">upload</span>
-                        Upload
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Download ZIP Button */}
-                  <button
-                    id={`download-day-${daySummary.dayNumber}-zip-btn`}
-                    disabled={downloadingZipKey !== null || daySummary.photosCount === 0}
-                    onClick={() => handleDownloadZip('day', daySummary.dayNumber)}
-                    className={`w-full py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
-                      daySummary.photosCount === 0
-                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                        : isDayDownloading
-                        ? 'bg-brand-100 text-brand-700 cursor-wait'
-                        : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[16px]">
-                      {isDayDownloading ? 'sync' : 'folder_zip'}
-                    </span>
-                    {isDayDownloading
-                      ? 'Creating ZIP...'
-                      : isDayCompleted
-                      ? 'Download Again'
-                      : `Download Day ${daySummary.dayNumber} ZIP`}
-                  </button>
-
-                  {expandedDay === daySummary.dayNumber && (
-                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Day {daySummary.dayNumber} photo list</span>
-                        <button type="button" onClick={() => setExpandedDay(null)} className="text-[11px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">Close</button>
-                      </div>
-                      {daySummary.featuredPhotos.length === 0 ? (
-                        <div className="rounded-xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 px-3 py-3 text-xs text-gray-500">No photos or folders are available for this day.</div>
-                      ) : (
-                        daySummary.featuredPhotos.map((photo) => (
-                          <div key={photo.id} className="flex items-center justify-between gap-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-2.5 py-2">
-                            <div className="min-w-0"><div className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{photo.originalFilename}</div><div className="text-[10px] text-gray-400 truncate">{photo.caption || photo.sessionTitle}</div></div>
-                            <a href={photo.fileUrl} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 rounded-lg bg-brand-500 text-white text-[10px] font-semibold">View</a>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ==========================================
-          SECTION 2: PHOTO GALLERY
-          ========================================== */}
-      <div id="gallery-section" className={`${showClusterLanding ? 'hidden ' : ''}space-y-4 pt-2`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">Photo Gallery</h2>
-          </div>
-
-          {/* Filtered ZIP Download CTA */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-              Showing <strong className="text-gray-900 dark:text-white">{filteredPhotos.length}</strong> photos
-            </span>
-
-            <button
-              id="download-filtered-zip-btn"
-              disabled={downloadingZipKey !== null || filteredPhotos.length === 0}
-              onClick={() => handleDownloadZip('filtered')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
-                filteredPhotos.length === 0
-                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                  : downloadingZipKey === 'filtered'
-                  ? 'bg-gray-200 text-gray-600'
-                  : 'bg-success-600 hover:bg-success-700 text-white'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[16px]">
-                {downloadingZipKey === 'filtered' ? 'sync' : 'download'}
-              </span>
-              {downloadingZipKey === 'filtered' ? 'Creating ZIP...' : 'Download Filtered ZIP'}
-            </button>
-          </div>
-        </div>
-
-        {/* Day Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1">
-          <button
-            onClick={() => setSelectedDayTab('all')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedDayTab === 'all'
-                ? 'bg-slate-900 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
+        <div className="w-44">
+          <Select
+            value={selectedVillage}
+            onValueChange={(val) => setSelectedVillage(val)}
+            disabled={selectedPanchayat === 'all'}
           >
-            All Days ({photos.length})
-          </button>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((dNum) => {
-            const count = photos.filter((p) => p.dayNumber === dNum).length;
-            return (
-              <button
-                key={dNum}
-                onClick={() => setSelectedDayTab(dNum)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  selectedDayTab === dNum
-                    ? 'bg-[#0B3D91] text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Day {dNum} ({count})
-              </button>
-            );
-          })}
+            <SelectTrigger className="h-9 text-xs">
+              <SelectValue placeholder="All Villages" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Villages</SelectItem>
+              {currentFilterVillages.map((v) => (
+                <SelectItem key={v.id || v.name} value={v.name}>
+                  {v.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
-        {/* Filter Selectors Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-              Panchayat
-            </label>
-            <Select
-              value={selectedPanchayat || "all"}
-              onValueChange={(val) => {
-                setSelectedPanchayat(val);
-                setSelectedVillage('all');
-              }}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Panchayats" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Panchayats</SelectItem>
-                {panchayats.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        {filteredPhotos.length > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleToggleSelectAll}
+            className="h-9 text-xs"
+          >
+            {selectedPhotoIds.length === filteredPhotos.length ? 'Deselect All' : 'Select All'}
+          </Button>
+        )}
 
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-              Village Center
-            </label>
-            <Select
-              value={selectedVillage || "all"}
-              onValueChange={(val) => setSelectedVillage(val)}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Villages" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Villages</SelectItem>
-                {currentFilterVillages.map((v) => (
-                  <SelectItem key={v.id} value={v.name}>
-                    {v.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
-              Search by Topic, Village or Volunteer
-            </label>
-            <div className="relative">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search session title, volunteer name, file..."
-                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ==========================================
-          SECTION 3: PHOTO GALLERY GRID
-          (Every Photo has View, Download, Delete)
-          ========================================== */}
-      {isLoading ? (
-        <div className="py-20 text-center text-slate-500 bg-white rounded-md border border-slate-200">
-          <span className="material-symbols-outlined text-[32px] animate-spin text-[#0B3D91]">
-            progress_activity
-          </span>
-          <p className="text-xs font-semibold mt-2">Loading high-resolution session photos...</p>
-        </div>
-      ) : filteredPhotos.length === 0 ? (
-        <div className="py-16 text-center bg-white rounded-md border border-slate-200 p-6">
-          <span className="material-symbols-outlined text-[42px] text-slate-300 mb-2">
-            image_not_supported
-          </span>
-          <h3 className="font-bold text-slate-800 text-sm">No Photographs Match Your Filter</h3>
-          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            Try adjusting your search criteria, selecting another Day or uploading new session photos.
-          </p>
-          <button
+        {(searchQuery ||
+          selectedCluster !== (userRole === 'Cluster Admin' ? currentCluster : 'all') ||
+          selectedDayTab !== 'all' ||
+          selectedPanchayat !== 'all' ||
+          selectedVillage !== 'all') && (
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
+              setSearchQuery('');
+              setSelectedCluster(userRole === 'Cluster Admin' ? currentCluster : 'all');
               setSelectedDayTab('all');
               setSelectedPanchayat('all');
               setSelectedVillage('all');
-              setSearchQuery('');
             }}
-            className="mt-3 px-3 py-1.5 text-xs font-bold text-[#0B3D91] bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
+            className="h-9 px-2 text-xs text-muted-foreground hover:text-foreground"
           >
             Reset Filters
-          </button>
+          </Button>
+        )}
+      </div>
+
+      {/* 4. Photo Gallery Grid */}
+      {isLoading ? (
+        <div className="py-16 text-center text-xs text-muted-foreground">
+          <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent mb-2" />
+          <p>Loading session photographs...</p>
+        </div>
+      ) : filteredPhotos.length === 0 ? (
+        <div className="rounded-lg border border-border bg-card p-12 shadow-xs">
+          <EmptyState
+            icon={ImageIcon}
+            title="No photographs found"
+            description={
+              searchQuery || selectedDayTab !== 'all' || selectedPanchayat !== 'all'
+                ? 'Try adjusting your day cycle selection or clear current filters.'
+                : 'No session photographs have been uploaded yet for this educational cluster.'
+            }
+            actionLabel="+ Upload First Photo"
+            onAction={() => setShowUploadModal(true)}
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {filteredPhotos.map((photo) => (
-            <div
-              key={photo.id}
-              className="group bg-white rounded-md border border-slate-200 overflow-hidden shadow-xs hover:shadow-sm transition-all flex flex-col"
-            >
-              {/* Photo Display with Hover Overlay */}
-              <div className="relative aspect-[4/3] bg-slate-900 overflow-hidden cursor-pointer">
-                <img
-                  src={photo.fileUrl}
-                  alt={photo.sessionTitle}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  referrerPolicy="no-referrer"
-                  onClick={() => setSelectedPhoto(photo)}
-                />
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {filteredPhotos.map((photo) => {
+            const isSelected = selectedPhotoIds.includes(photo.id);
 
-                {/* Day Badge */}
-                <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70  text-white text-[10px] font-bold">
-                  Day {photo.dayNumber}
-                </div>
+            return (
+              <div
+                key={photo.id}
+                onClick={() => setPreviewPhoto(photo)}
+                className={`group relative flex flex-col justify-between overflow-hidden rounded-lg border bg-card shadow-xs transition hover:shadow-md cursor-pointer ${
+                  isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+                }`}
+              >
+                {/* Photo Thumbnail */}
+                <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+                  <img
+                    src={photo.fileUrl || '/logo.png'}
+                    alt={photo.caption || photo.sessionTitle}
+                    loading="lazy"
+                    className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                    onError={(e) => {
+                      (e.target as HTMLElement).style.display = 'none';
+                    }}
+                  />
 
-                {/* Original File Size */}
-                <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/70  text-white text-[10px] font-mono">
-                  {Math.round((photo.fileSize || 50000) / 1024)} KB
-                </div>
+                  {/* Top Overlay Badges & Checkbox */}
+                  <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/50 to-transparent">
+                    <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
+                      Day {photo.dayNumber}
+                    </Badge>
 
-                {/* Hover Quick Actions */}
-                <div className="absolute inset-0  from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 text-white">
-                  <p className="text-xs font-bold leading-tight line-clamp-1">{photo.sessionTitle}</p>
-                  <p className="text-[11px] text-slate-200 mt-0.5">
-                    {photo.panchayatName} â€¢ {photo.villageName}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
                     <button
+                      type="button"
+                      onClick={(e) => handleToggleSelectPhoto(photo.id, e)}
+                      className={`flex h-6 w-6 items-center justify-center rounded border transition ${
+                        isSelected
+                          ? 'border-primary bg-primary text-primary-foreground'
+                          : 'border-white/60 bg-black/40 text-transparent hover:border-white'
+                      }`}
+                    >
+                      <CheckCircle2 className="h-4 w-4" />
+                    </button>
+                  </div>
+
+                  {/* Hover Quick Actions */}
+                  <div className="absolute inset-0 flex items-center justify-center gap-2 bg-black/40 opacity-0 transition group-hover:opacity-100">
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="h-8 w-8 rounded-full bg-white/90 text-foreground hover:bg-white"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setSelectedPhoto(photo);
+                        setPreviewPhoto(photo);
                       }}
-                      className="px-2 py-1 bg-white20 hover:bg-white30  rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      title="View High-Res"
                     >
-                      <span className="material-symbols-outlined text-[14px]">visibility</span>
-                      View
-                    </button>
-                    <button
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="h-8 w-8 rounded-full bg-white/90 text-foreground hover:bg-white"
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDownloadSinglePhoto(photo);
                       }}
-                      className="px-2 py-1 bg-[#0B3D91] hover:bg-[#082a66] rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
+                      title="Download Photo"
                     >
-                      <span className="material-symbols-outlined text-[14px]">download</span>
-                      Download
-                    </button>
+                      <Download className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="icon"
+                      className="h-8 w-8 rounded-full bg-white/90 text-red-600 hover:bg-white"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPhotoToDelete(photo);
+                      }}
+                      title="Delete Photo"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Photo Card Details */}
+                <div className="p-3 space-y-1.5">
+                  <h4 className="text-xs font-semibold text-foreground truncate" title={photo.caption || photo.sessionTitle}>
+                    {photo.caption || photo.sessionTitle}
+                  </h4>
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                    <span className="flex items-center gap-1 truncate max-w-[140px]">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      <span className="truncate">{photo.villageName || photo.panchayatName}</span>
+                    </span>
+                    <span className="font-mono text-[10px]">{photo.date || '—'}</span>
+                  </div>
+                  <div className="pt-1.5 border-t border-border flex items-center justify-between text-[10px] text-muted-foreground">
+                    <span className="truncate">By {photo.uploadedBy || 'Cluster Admin'}</span>
+                    <span className="font-mono">{photo.clusterName || 'Cluster'}</span>
                   </div>
                 </div>
               </div>
-
-              {/* Photo Card Footer Details */}
-              <div className="p-3 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="font-bold text-xs text-slate-900 line-clamp-1">
-                    {photo.sessionTitle}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    {photo.panchayatName} â€¢ {photo.villageName}
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
-                    <span>By {photo.uploadedBy}</span>
-                    <span>{photo.date}</span>
-                  </div>
-                </div>
-
-                {/* 3 Explicit Action Buttons: [View] [Download] [Delete] */}
-                <div className="mt-3 pt-2.5 border-t border-slate-100 grid grid-cols-3 gap-1 text-[11px] font-semibold">
-                  <button
-                    onClick={() => setSelectedPhoto(photo)}
-                    className="py-1 px-1.5 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="View Full Resolution"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">visibility</span>
-                    View
-                  </button>
-
-                  <button
-                    onClick={() => handleDownloadSinglePhoto(photo)}
-                    className="py-1 px-1.5 text-[#0B3D91] bg-blue-50 hover:bg-blue-100 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="Download Original File"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">download</span>
-                    Download
-                  </button>
-
-                  <button
-                    onClick={() => setPhotoToDelete(photo)}
-                    className="py-1 px-1.5 text-rose-700 bg-rose-50 hover:bg-rose-100 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="Delete Photo"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">delete</span>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
-      {/* ==========================================
-          MODAL 1: HIGH RESOLUTION LIGHTBOX MODAL
-          ========================================== */}
-      {selectedPhoto && (
-        <div
-          className="fixed inset-0 bg-gray-950/90 backdrop-blur-sm z-[99999] flex items-center justify-center p-4"
-          onClick={() => setSelectedPhoto(null)}
-        >
-          <div
-            className="relative max-w-5xl w-full bg-slate-900 border border-slate-700 rounded-md overflow-hidden shadow-sm animate-[fadeIn_0.2s_ease-out] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex justify-between items-center text-white">
+      {/* 5. Lightbox Modal */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0">
+          <div className="relative w-full max-w-3xl overflow-hidden rounded-lg border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border p-3.5">
               <div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 bg-[#0B3D91] rounded text-[10px] font-bold">
-                    Day {selectedPhoto.dayNumber}
-                  </span>
-                  <h3 className="text-sm sm:text-base font-bold">{selectedPhoto.sessionTitle}</h3>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {selectedPhoto.panchayatName} â€¢ {selectedPhoto.villageName} â€¢ {selectedPhoto.date}
+                <h3 className="text-sm font-bold text-foreground truncate max-w-lg">
+                  {previewPhoto.caption || previewPhoto.sessionTitle}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Day {previewPhoto.dayNumber} &middot; {previewPhoto.villageName} &middot; {previewPhoto.clusterName}
                 </p>
               </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDownloadSinglePhoto(selectedPhoto)}
-                  className="px-3 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white rounded-md text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">download</span>
-                  Download Original
-                </button>
-                <button
-                  onClick={() => setSelectedPhoto(null)}
-                  className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white"
-                >
-                  <span className="material-symbols-outlined text-[20px]">close</span>
-                </button>
-              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* High-res Image Preview */}
-            <div className="max-h-[68vh] bg-black/90 flex items-center justify-center p-2">
+            <div className="relative max-h-[65vh] w-full overflow-hidden bg-black/95 flex items-center justify-center">
               <img
-                src={selectedPhoto.fileUrl}
-                alt={selectedPhoto.sessionTitle}
-                className="max-h-[65vh] w-auto max-w-full object-contain rounded"
-                referrerPolicy="no-referrer"
+                src={previewPhoto.fileUrl || '/logo.png'}
+                alt={previewPhoto.caption || previewPhoto.sessionTitle}
+                className="max-h-[65vh] w-auto object-contain"
               />
             </div>
 
-            {/* Modal Footer Metadata */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-4">
-                <span>
-                  Uploaded by: <strong className="text-white">{selectedPhoto.uploadedBy}</strong>
-                </span>
-                <span>
-                  Filename: <strong className="text-white font-mono">{selectedPhoto.originalFilename}</strong>
-                </span>
-                <span>
-                  Size: <strong className="text-white font-mono">{Math.round((selectedPhoto.fileSize || 50000) / 1024)} KB</strong>
-                </span>
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 border-t border-border bg-muted/20 text-xs">
+              <div className="text-muted-foreground">
+                Uploaded by <strong className="text-foreground">{previewPhoto.uploadedBy}</strong> on {previewPhoto.date}
               </div>
 
-              <button
-                onClick={() => {
-                  setPhotoToDelete(selectedPhoto);
-                }}
-                className="text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
-                Delete Photo
-              </button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDownloadSinglePhoto(previewPhoto)}
+                  className="gap-1.5"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download</span>
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => {
+                    const toDel = previewPhoto;
+                    setPreviewPhoto(null);
+                    setPhotoToDelete(toDel);
+                  }}
+                  className="gap-1.5"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>Delete</span>
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ==========================================
-          MODAL 2: UPLOAD MULTIPLE SESSION PHOTOS
-          ========================================== */}
+      {/* 6. Upload Photos Modal */}
       {showUploadModal && (
-        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-md shadow-sm w-full max-w-xl overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Upload Session Photographs</h2>
-                <p className="text-xs text-slate-500">
-                  Upload original high-resolution camera images for session archiving.
+                <h3 className="text-base font-bold text-foreground">Upload Session Photographs</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Attach activity evidence for teaching modules and village centers.
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowUploadModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
               >
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                <X className="h-4 w-4" />
               </button>
             </div>
 
-            <form onSubmit={handleUploadSubmit} className="p-6 space-y-4 text-xs">
-              {uploadError && (
-                <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-md font-medium">
-                  {uploadError}
-                </div>
-              )}
+            <form onSubmit={handleUploadSubmit} className="mt-4 space-y-4 text-xs">
+              <div className="space-y-3">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Cycle Day *
+                    </label>
+                    <Select
+                      value={String(uploadDay)}
+                      onValueChange={(val) => setUploadDay(parseInt(val, 10) || 1)}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                          <SelectItem key={d} value={String(d)}>
+                            Day {d}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              {/* Target Day & Session Title */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Session Date *
+                    </label>
+                    <Input
+                      type="date"
+                      required
+                      value={uploadDate}
+                      onChange={(e) => setUploadDate(e.target.value)}
+                    />
+                  </div>
+                </div>
+
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Session Day *</label>
-                  <Select
-                    value={String(uploadDay)}
-                    onValueChange={(val) => setUploadDay(parseInt(val, 10))}
-                  >
-                    <SelectTrigger className="w-full h-10 text-xs font-semibold bg-slate-50 border-slate-200">
-                      <SelectValue placeholder="Select Day" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                        <SelectItem key={d} value={String(d)}>
-                          Day {d}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Session Title *</label>
-                  <input
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Session Title / Activity *
+                  </label>
+                  <Input
                     type="text"
                     required
+                    placeholder="e.g. Spoken English Vocabulary Workshop"
                     value={uploadTitle}
                     onChange={(e) => setUploadTitle(e.target.value)}
-                    placeholder="e.g. Spoken English Dialogue Workshop"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* Panchayat & Village */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Panchayat *</label>
-                  <Select
-                    value={uploadPanchayat}
-                    onValueChange={(val) => setUploadPanchayat(val)}
-                  >
-                    <SelectTrigger className="w-full h-10 text-xs bg-slate-50 border-slate-200">
-                      <SelectValue placeholder="Select Panchayat" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {panchayats.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Village Center *</label>
-                  <input
-                    type="text"
-                    required
-                    value={uploadVillage}
-                    onChange={(e) => setUploadVillage(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* Date & Uploader */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={uploadDate}
-                    onChange={(e) => setUploadDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
                   />
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Uploader Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={uploadUploader}
-                    onChange={(e) => setUploadUploader(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* File Dropzone */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Select Photographs *</label>
-                <input
-                  id="session-photo-file-input"
-                  type="file"
-                  ref={fileInputRef}
-                  multiple
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      setUploadFiles(Array.from(e.target.files));
-                    }
-                  }}
-                  className="hidden"
-                />
-
-                <label
-                  htmlFor="session-photo-file-input"
-                  className="border-2 border-dashed border-slate-300 hover:border-[#0B3D91] rounded-md p-6 text-center cursor-pointer bg-slate-50 hover:bg-blue-50/40 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[32px] text-slate-400 mb-1">
-                    cloud_upload
-                  </span>
-                  <div className="font-bold text-slate-800">Click to choose image files</div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Supports JPG, PNG, WEBP high-resolution photos.
-                  </p>
-                </label>
-
-                {uploadFiles.length > 0 && (
-                  <div className="mt-2.5 space-y-1">
-                    <span className="font-semibold text-slate-700">
-                      Selected {uploadFiles.length} file(s):
-                    </span>
-                    <div className="max-h-24 overflow-y-auto space-y-1 bg-slate-50 p-2 rounded-md border border-slate-200">
-                      {uploadFiles.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
-                          <span className="truncate max-w-[300px] font-mono">{f.name}</span>
-                          <span className="text-slate-400">{Math.round(f.size / 1024)} KB</span>
-                        </div>
-                      ))}
-                    </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Target Panchayat *
+                    </label>
+                    <Select
+                      value={uploadPanchayat}
+                      onValueChange={(val) => {
+                        setUploadPanchayat(val);
+                        const p = panchayats.find((item) => item.id === val);
+                        setUploadVillage(p?.villages[0]?.name || '');
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Panchayat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {panchayats.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Target Village *
+                    </label>
+                    <Select
+                      value={uploadVillage}
+                      onValueChange={(val) => setUploadVillage(val)}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Village" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {uploadVillages.map((v) => (
+                          <SelectItem key={v.id || v.name} value={v.name}>
+                            {v.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Caption / Context Note
+                  </label>
+                  <Input
+                    type="text"
+                    placeholder="e.g. Students practicing dialogue pairs in village hall"
+                    value={uploadCaption}
+                    onChange={(e) => setUploadCaption(e.target.value)}
+                  />
+                </div>
+
+                {/* File Upload Box */}
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Image Files (JPG, PNG, WebP) *
+                  </label>
+                  <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        setUploadFiles(files);
+                      }}
+                      className="hidden"
+                    />
+                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <p className="mt-2 text-xs font-medium text-foreground">
+                      {uploadFiles.length > 0 ? (
+                        <span className="font-semibold text-primary">{uploadFiles.length} files selected</span>
+                      ) : (
+                        'Click to choose photographs from your device'
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Supports multiple JPG, PNG, WebP photos up to 10MB each
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-3"
+                    >
+                      Browse Files
+                    </Button>
+                  </div>
+                </div>
+
+                {uploadError && (
+                  <p className="text-xs font-semibold text-destructive">{uploadError}</p>
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-md font-semibold hover:bg-slate-50"
-                >
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setShowUploadModal(false)}>
                   Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isUploading || uploadFiles.length === 0}
-                  className={`px-5 py-2 rounded-md font-bold text-white transition-all shadow-xs flex items-center gap-2 ${
-                    isUploading || uploadFiles.length === 0
-                      ? 'bg-slate-400 cursor-not-allowed'
-                      : 'bg-[#0B3D91] hover:bg-[#082a66]'
-                  }`}
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isUploading ? 'sync' : 'upload'}
-                  </span>
-                  {isUploading ? 'Uploading Photos...' : `Upload ${uploadFiles.length} Photos`}
-                </button>
+                </Button>
+                <Button type="submit" disabled={isUploading || uploadFiles.length === 0}>
+                  {isUploading ? 'Uploading...' : `Upload ${uploadFiles.length} Photographs`}
+                </Button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ==========================================
-          MODAL 3: DELETE PHOTO CONFIRMATION
-          ========================================== */}
-      {photoToDelete && (
-        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-md shadow-sm w-full max-w-sm p-5 text-center space-y-3">
-            <span className="material-symbols-outlined text-[38px] text-rose-600">
-              warning
-            </span>
-            <h3 className="font-bold text-base text-slate-900">Delete Photo?</h3>
-            <p className="text-xs text-slate-600">
-              Are you sure you want to permanently remove <strong className="text-slate-900">{photoToDelete.originalFilename}</strong>? This action cannot be undone.
-            </p>
-            <div className="pt-2 flex items-center justify-center gap-2">
-              <button
-                onClick={() => setPhotoToDelete(null)}
-                className="px-3.5 py-1.5 border border-slate-300 rounded-md text-xs font-semibold text-slate-700 hover:bg-slate-50"
+      {/* 7. Delete Confirmation Modal */}
+      {(photoToDelete || showBulkDeleteConfirm) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-foreground">
+                  {showBulkDeleteConfirm ? 'Delete Selected Photos?' : 'Delete Photograph?'}
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {showBulkDeleteConfirm
+                    ? `Are you sure you want to delete ${selectedPhotoIds.length} selected photographs? This action cannot be undone.`
+                    : `Are you sure you want to permanently remove this photograph from the session records?`}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPhotoToDelete(null);
+                  setShowBulkDeleteConfirm(false);
+                }}
               >
                 Cancel
-              </button>
-              <button
-                onClick={() => handleDeletePhoto(photoToDelete)}
-                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-bold shadow-xs"
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  if (showBulkDeleteConfirm) {
+                    handleBulkDelete();
+                  } else if (photoToDelete) {
+                    handleDeletePhoto(photoToDelete);
+                  }
+                }}
               >
-                Confirm Delete
-              </button>
+                Yes, Delete
+              </Button>
             </div>
           </div>
         </div>
@@ -1456,5 +1024,3 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     </div>
   );
 };
-
-

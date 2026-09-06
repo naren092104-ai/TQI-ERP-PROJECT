@@ -78,14 +78,14 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   const navGroups: NavGroup[] = [
     {
-      label: 'Overview',
+      label: 'OVERVIEW',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: House },
         ...(isSuperAdmin
           ? [
               {
                 id: 'academic-setup',
-                label: 'Academic term (8-day)',
+                label: 'Academic Term (8-day)',
                 icon: CalendarBlank,
                 superAdminOnly: true,
               },
@@ -94,44 +94,42 @@ export const Navigation: React.FC<NavigationProps> = ({
       ],
     },
     {
-      label: 'Field operations',
+      label: 'FIELD OPERATIONS',
       items: [
         ...(!isVolunteer ? [{ id: 'clusters', label: 'Clusters', icon: TreeStructure }] : []),
-        { id: 'panchayats', label: 'Panchayats & villages', icon: MapPin },
-        { id: 'students', label: 'Students roster', icon: Student },
-        { id: 'volunteers', label: 'Volunteers directory', icon: Users },
-        { id: 'attendance', label: '8-day attendance', icon: CalendarCheck },
-        { id: 'sessions', label: 'Session scheduling', icon: ClipboardText },
-        { id: 'session-photos', label: 'Session photos', icon: Camera },
-        { id: 'date-change-requests', label: 'Date change requests', icon: Calendar },
-        { id: 'session-reports', label: 'Session reports', icon: FileText },
+        { id: 'panchayats', label: 'Panchayats & Villages', icon: MapPin },
+        { id: 'students', label: 'Students Roster', icon: Student },
+        { id: 'volunteers', label: 'Volunteers Directory', icon: Users },
+        { id: 'attendance', label: '8-Day Attendance', icon: CalendarCheck },
+        { id: 'sessions', label: 'Session Scheduling', icon: ClipboardText },
+        { id: 'session-photos', label: 'Session Photos', icon: Camera },
+        { id: 'date-change-requests', label: 'Date Change Requests', icon: Calendar },
+        { id: 'session-reports', label: 'Session Reports', icon: FileText },
       ],
     },
     {
-      label: 'Curriculum & finance',
+      label: 'CURRICULUM & FINANCE',
       items: [
-        { id: 'module-library', label: 'Module library & PPTs', icon: BookOpen },
-        { id: 'lesson-plan', label: 'Lesson plans', icon: FileText },
-        { id: 'finance', label: 'Finance & OCR bills', icon: CurrencyInr },
-        { id: 'finance-statement', label: 'Finance statements', icon: Receipt },
+        { id: 'module-library', label: 'Module Library & PPTs', icon: BookOpen },
+        { id: 'lesson-plan', label: 'Lesson Plans', icon: FileText },
+        { id: 'finance', label: 'Finance', icon: CurrencyInr },
       ],
     },
     {
-      label: 'Governance',
+      label: 'ADMINISTRATION',
       items: [
+        ...(isSuperAdmin
+          ? [{ id: 'users', label: 'User Management', icon: UserCircleCheck }]
+          : []),
         {
           id: 'approvals',
-          label: 'Approval center',
+          label: 'Approval Center',
           icon: ShieldCheck,
           badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined,
         },
-        { id: 'session-submissions', label: 'Session submissions', icon: Clipboard },
-        { id: 'reports', label: 'Analytics & reports', icon: FileText },
-        ...(isSuperAdmin
-          ? [{ id: 'users', label: 'User & role management', icon: UserCircleCheck }]
-          : []),
-        ...(isSuperAdmin ? [{ id: 'audit-logs', label: 'Audit & governance trail', icon: FileText }] : []),
-        { id: 'settings', label: 'Settings & profile', icon: Gear },
+        ...(isSuperAdmin ? [{ id: 'audit-logs', label: 'Audit Logs', icon: FileText }] : []),
+        { id: 'notifications', label: 'Notifications', icon: Sparkle },
+        { id: 'settings', label: 'Settings', icon: Gear },
       ],
     },
   ];
@@ -168,38 +166,21 @@ export const Navigation: React.FC<NavigationProps> = ({
             'transform var(--dur-medium, 480ms) var(--ease-out-expo), width var(--dur-medium, 480ms) var(--ease-out-expo), box-shadow var(--dur-fast) var(--ease-out-quart)',
         }}
       >
-        {/* Brand header — Double-Bezel friendly */}
+        {/* Brand header */}
         <div
-          className="flex h-16 lg:h-[76px] items-center justify-between px-4 shrink-0"
-          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+          className="flex h-16 items-center justify-between px-4 shrink-0 border-b border-border"
         >
-          <div className="flex items-center gap-2.5 overflow-hidden">
-            <span
-              className="shrink-0"
-              style={{
-                display: 'inline-flex',
-                padding: 4,
-                background:
-                  'color-mix(in srgb, var(--card) 70%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md, 12px)',
-              }}
-            >
-              <TqiLogo size={32} />
+          <div className="flex items-center gap-3 overflow-hidden">
+            <span className="shrink-0 flex items-center justify-center">
+              <TqiLogo size={36} />
             </span>
             {(!isCollapsed || isMobileOpen) && (
               <div className="flex flex-col leading-tight min-w-0">
-                <span
-                  className="text-[15px] font-bold tracking-tight truncate"
-                  style={{ color: 'var(--text)' }}
-                >
-                  Talent Quest
+                <span className="text-sm font-bold tracking-tight text-foreground truncate">
+                  Talent Quest for India
                 </span>
-                <span
-                  className="text-[9.5px] font-semibold tracking-[0.18em] uppercase"
-                  style={{ color: 'var(--brand)' }}
-                >
-                  ERP · connect · share
+                <span className="text-[10px] font-semibold tracking-wider text-primary uppercase mt-0.5">
+                  ERP · CONNECT · SHARE
                 </span>
               </div>
             )}
@@ -209,26 +190,10 @@ export const Navigation: React.FC<NavigationProps> = ({
             <button
               type="button"
               onClick={onToggleCollapse}
-              className="hidden lg:flex h-8 w-8 items-center justify-center transition-colors"
-              style={{
-                color: 'var(--text-muted)',
-                background:
-                  'color-mix(in srgb, var(--surface) 60%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md, 10px)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-hover)';
-                e.currentTarget.style.color = 'var(--text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  'color-mix(in srgb, var(--surface) 60%, transparent)';
-                e.currentTarget.style.color = 'var(--text-muted)';
-              }}
+              className="hidden lg:flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
               title="Collapse sidebar"
             >
-              <CaretLeft size={14} weight="light" />
+              <CaretLeft size={14} />
             </button>
           )}
 
@@ -236,19 +201,10 @@ export const Navigation: React.FC<NavigationProps> = ({
             <button
               type="button"
               onClick={onCloseMobile}
-              className="tqi-touch flex lg:hidden items-center justify-center transition-colors"
-              style={{
-                width: 32,
-                height: 32,
-                color: 'var(--text-muted)',
-                background:
-                  'color-mix(in srgb, var(--surface) 60%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md, 10px)',
-              }}
+              className="flex lg:hidden h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
               aria-label="Close sidebar"
             >
-              <X size={16} weight="light" />
+              <X size={16} />
             </button>
           )}
         </div>
@@ -257,95 +213,46 @@ export const Navigation: React.FC<NavigationProps> = ({
           <button
             type="button"
             onClick={onToggleCollapse}
-            className="mx-auto mt-3 hidden lg:flex h-8 w-8 items-center justify-center transition-colors"
-            style={{
-              color: 'var(--text-muted)',
-              background:
-                'color-mix(in srgb, var(--surface) 60%, transparent)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: 'var(--radius-md, 10px)',
-            }}
+            className="mx-auto mt-3 hidden lg:flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
             title="Expand sidebar"
           >
-            <CaretRight size={14} weight="light" />
+            <CaretRight size={14} />
           </button>
         )}
 
         {/* Quick command palette trigger (only when expanded) */}
         {(!isCollapsed || isMobileOpen) && onOpenCommandPalette && (
-          <div className="px-3 pt-4">
+          <div className="px-3 pt-3">
             <button
               type="button"
               onClick={onOpenCommandPalette}
-              className="tqi-reveal-item group flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-[12.5px] font-medium transition-all"
-              style={{
-                color: 'var(--text-secondary)',
-                background:
-                  'color-mix(in srgb, var(--surface) 50%, transparent)',
-                border: '1px solid var(--border-subtle)',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--surface-hover)';
-                e.currentTarget.style.borderColor = 'var(--border)';
-                e.currentTarget.style.color = 'var(--text)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background =
-                  'color-mix(in srgb, var(--surface) 50%, transparent)';
-                e.currentTarget.style.borderColor = 'var(--border-subtle)';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-              }}
+              className="group flex w-full items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-xs hover:border-border-strong hover:bg-surface-hover hover:text-foreground transition-colors"
             >
-              <MagnifyingGlass
-                size={14}
-                weight="light"
-                style={{ color: 'var(--text-muted)' }}
-              />
+              <MagnifyingGlass size={13} className="shrink-0" />
               <span className="truncate flex-1 text-left">Quick search</span>
-              <span
-                className="inline-flex items-center gap-1 h-5 px-1.5 rounded-md text-[9.5px] font-semibold tracking-wider uppercase"
-                style={{
-                  color: 'var(--text-muted)',
-                  background:
-                    'color-mix(in srgb, var(--card) 70%, transparent)',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <Sparkle size={10} weight="fill" /> ⌘K
+              <span className="inline-flex items-center rounded border border-border px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                ⌘K
               </span>
             </button>
           </div>
         )}
 
-        {/* Nav groups — staggered reveal */}
-        <nav className="flex-1 overflow-y-auto px-3 py-5 space-y-6 custom-scrollbar">
-          {navGroups.map((group, gIdx) => {
+        {/* Nav groups */}
+        <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-5 custom-scrollbar">
+          {navGroups.map((group) => {
             const visibleItems = group.items.filter((item) => !item.superAdminOnly || isSuperAdmin);
             if (visibleItems.length === 0) return null;
 
             return (
-              <div
-                key={group.label}
-                className="space-y-1"
-                style={{
-                  animation: `tqi-reveal-up var(--dur-medium) var(--ease-out-quart) both`,
-                  animationDelay: `${120 + gIdx * 80}ms`,
-                }}
-              >
+              <div key={group.label} className="space-y-0.5">
                 {(!isCollapsed || isMobileOpen) ? (
-                  <div
-                    className="tqi-eyebrow px-3 pb-1.5"
-                    style={{ color: 'var(--text-muted)' }}
-                  >
+                  <div className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 select-none">
                     {group.label}
                   </div>
                 ) : (
-                  <div
-                    className="mx-2 my-2 h-px"
-                    style={{ background: 'var(--border-subtle)' }}
-                  />
+                  <div className="mx-2 my-2 h-px bg-border/60" />
                 )}
-                {visibleItems.map((item, iIdx) => {
+                {visibleItems.map((item) => {
                   const IconComponent = item.icon;
                   const isActive = currentTab === item.id;
                   const collapsed = isCollapsed && !isMobileOpen;
@@ -359,72 +266,32 @@ export const Navigation: React.FC<NavigationProps> = ({
                         onCloseMobile?.();
                       }}
                       title={collapsed ? item.label : undefined}
-                      className={`tqi-reveal-item group relative flex w-full items-center gap-3 rounded-xl text-[13px] font-medium transition-all ${
-                        collapsed ? 'justify-center' : ''
-                      } ${!collapsed ? 'tqi-touch' : ''}`}
-                      style={{
-                        padding: collapsed ? '0.6rem 0' : '0.55rem 0.75rem',
-                        background: isActive
-                          ? 'var(--brand-light)'
-                          : 'transparent',
-                        color: isActive ? 'var(--brand)' : 'var(--text-secondary)',
-                        fontWeight: isActive ? 600 : 500,
-                        border: '1px solid',
-                        borderColor: isActive
-                          ? 'var(--brand-xlight, var(--border))'
-                          : 'transparent',
-                        transition:
-                          'background var(--dur-fast) var(--ease-out-quart), color var(--dur-fast) var(--ease-out-quart), border-color var(--dur-fast) var(--ease-out-quart), transform var(--dur-fast) var(--ease-out-quart)',
-                        animationDelay: `${160 + gIdx * 80 + iIdx * 30}ms`,
-                      }}
-                      onMouseEnter={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'var(--surface-hover)';
-                          e.currentTarget.style.color = 'var(--text)';
-                        }
-                      }}
-                      onMouseLeave={(e) => {
-                        if (!isActive) {
-                          e.currentTarget.style.background = 'transparent';
-                          e.currentTarget.style.color = 'var(--text-secondary)';
-                        }
-                      }}
+                      className={`relative flex w-full items-center gap-2.5 rounded-md text-xs font-medium transition-colors ${
+                        collapsed ? 'justify-center py-2' : 'px-2.5 py-1.5'
+                      } ${
+                        isActive
+                          ? 'bg-primary/10 text-primary font-semibold border border-primary/20'
+                          : 'text-foreground/80 hover:bg-surface-hover hover:text-foreground border border-transparent'
+                      }`}
                     >
-                      {isActive && (
+                      {isActive && !collapsed && (
                         <span
                           aria-hidden
-                          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-[3px] rounded-r"
-                          style={{ background: 'var(--brand)' }}
+                          className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-1 rounded-r bg-primary"
                         />
                       )}
                       <span
-                        className="shrink-0 flex items-center justify-center"
-                        style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 8,
-                          background: isActive
-                            ? 'color-mix(in srgb, var(--brand) 12%, transparent)'
-                            : 'transparent',
-                          color: isActive ? 'var(--brand)' : 'var(--text-muted)',
-                          transition: 'background var(--dur-fast) var(--ease-out-quart)',
-                        }}
+                        className={`shrink-0 flex items-center justify-center ${
+                          isActive ? 'text-primary' : 'text-muted-foreground'
+                        }`}
                       >
-                        <IconComponent size={16} weight="light" />
+                        <IconComponent size={15} />
                       </span>
                       {!collapsed && (
                         <span className="truncate flex-1 text-left">{item.label}</span>
                       )}
                       {item.badge !== undefined && item.badge > 0 && (
-                        <span
-                          className="inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full text-[10px] font-bold"
-                          style={{
-                            background: isActive
-                              ? 'var(--brand)'
-                              : 'var(--error, #c0392b)',
-                            color: isActive ? 'var(--text-on-brand)' : '#fff',
-                          }}
-                        >
+                        <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded text-[10px] font-bold bg-amber-500 text-white">
                           {item.badge}
                         </span>
                       )}
@@ -438,10 +305,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
         {/* Sign out */}
         {onLogout && (
-          <div
-            className="p-3 shrink-0"
-            style={{ borderTop: '1px solid var(--border-subtle)' }}
-          >
+          <div className="p-3 shrink-0 border-t border-border">
             <button
               type="button"
               onClick={() => {
@@ -449,33 +313,12 @@ export const Navigation: React.FC<NavigationProps> = ({
                 onCloseMobile?.();
               }}
               title={isCollapsed && !isMobileOpen ? 'Sign out' : undefined}
-              className={`flex w-full items-center gap-3 rounded-xl text-[13px] font-medium transition-all ${
-                isCollapsed && !isMobileOpen ? 'justify-center' : ''
+              className={`flex w-full items-center gap-2.5 rounded-md text-xs font-medium text-muted-foreground hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30 transition-colors ${
+                isCollapsed && !isMobileOpen ? 'justify-center py-2' : 'px-2.5 py-2'
               }`}
-              style={{
-                padding: isCollapsed && !isMobileOpen ? '0.6rem 0' : '0.55rem 0.75rem',
-                color: 'var(--text-secondary)',
-                background: 'transparent',
-                border: '1px solid transparent',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--error-bg, #FEF3F2)';
-                e.currentTarget.style.color = 'var(--error, #c0392b)';
-                e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--error, #c0392b) 14%, transparent)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = 'var(--text-secondary)';
-                e.currentTarget.style.borderColor = 'transparent';
-              }}
             >
-              <span
-                className="shrink-0 flex items-center justify-center"
-                style={{ width: 28, height: 28, borderRadius: 8 }}
-              >
-                <SignOut size={16} weight="light" />
-              </span>
-              {(!isCollapsed || isMobileOpen) && <span>Sign out</span>}
+              <SignOut size={15} className="shrink-0" />
+              {(!isCollapsed || isMobileOpen) && <span>Sign Out</span>}
             </button>
           </div>
         )}

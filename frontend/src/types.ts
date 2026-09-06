@@ -36,6 +36,8 @@ export interface User {
   email: string;
   role: UserRole;
   clusterId?: string;
+  collegeId?: string;
+  collegeName?: string;
   clusterName?: string;
   status: 'Active' | 'Inactive';
   phone?: string;
@@ -70,6 +72,9 @@ export interface Village {
   name: string;
   panchayatId?: string;
   studentCount: number;
+  volunteerCount?: number;
+  clusterId?: string;
+  status?: string;
 }
 
 export interface Panchayat {
@@ -115,6 +120,7 @@ export interface Volunteer {
   email: string;
   phone: string;
   college?: string;
+  collegeId?: string;
   department: string;
   year: string;
   role?: 'Coordinator' | 'Mentor' | 'Lead Volunteer';

@@ -260,14 +260,28 @@
    These power .btn-primary, .card, .tqi-input, .stat-item, etc.
    ============================================================ */
 :root {
+  /* ============================================================
+     OFFICIAL TQI DESIGN SYSTEM TOKENS
+     ============================================================ */
+  --tqi-primary: #1717B8;
+  --tqi-primary-hover: #1313A0;
+  --tqi-text: #0E1118;
+  --tqi-muted: #5F6573;
+  --tqi-background: #F8FAFC;
+  --tqi-surface: #FFFFFF;
+  --tqi-border: #E2E8F0;
+  --tqi-success: #16A34A;
+  --tqi-warning: #D97706;
+  --tqi-danger: #DC2626;
+
   /* Surfaces */
-  --background: #F4F6FB;
+  --background: #F8FAFC;
   --foreground: #0E1118;
   --card: #ffffff;
   --card-foreground: #0E1118;
-  --surface: #F4F6FB;
+  --surface: #F8FAFC;
   --surface-white: #ffffff;
-  --surface-hover: #F0F2F8;
+  --surface-hover: #F1F5F9;
   --surface-tint: #F2F3FA;        /* subtle brand-tinted backdrop */
   --surface-tint-strong: #E1E3F1;
 

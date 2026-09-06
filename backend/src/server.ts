@@ -1,7 +1,7 @@
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { randomInt, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'crypto';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -44,6 +44,8 @@ const serializeUser = (row: any) => ({
   role: normalizeRole(row.role),
   clusterId: row.cluster_id || 'all',
   clusterName: row.cluster_id ? `${row.cluster_id} Cluster` : 'All Clusters',
+    collegeId: row.college_id || '',
+    collegeName: row.college_name || '',
   phone: row.phone || '',
   status: row.status === 'ACTIVE' ? 'Active' : 'Inactive',
   mustChangePassword: Boolean(row.must_change_password),
@@ -237,9 +239,9 @@ const mapCluster = (row: any) => ({
   district: row.district || 'Tamil Nadu',
   state: row.state || 'Tamil Nadu',
   code: row.code || row.id.toUpperCase(),
-  activePanchayats: 0,
-  totalStudents: 0,
-  totalVolunteers: 0,
+  activePanchayats: Number(row.active_panchayats || 0),
+  totalStudents: Number(row.total_students || 0),
+  totalVolunteers: Number(row.total_volunteers || 0),
   adminId: row.admin_id || '',
   adminName: row.admin_name || '',
   adminEmail: row.admin_email || '',
@@ -248,7 +250,8 @@ const mapCluster = (row: any) => ({
   status: row.status === 'ACTIVE' ? 'Active' : 'Inactive',
   completedSessions: 0,
   totalSessions: 0,
-  collegeName: row.college_name || '',
+  collegeName: row.college_name || row.college_resolved_name || '',
+  collegeId: row.college_id || '',
   spocName: row.spoc_name || '',
   spocMobile: row.spoc_mobile || '',
 });
@@ -278,6 +281,7 @@ const mapVolunteer = (row: any) => ({
   email: row.email || '',
   phone: row.phone || '',
   college: '',
+  collegeId: row.college_id || '',
   department: row.department || 'Community Program',
   year: '2026',
   role: row.role || 'Mentor',
@@ -457,7 +461,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE email = ? OR name = ? OR id = ? LIMIT 1', [email, email, email]);
+    const [rows] = await pool.query<any[]>(`SELECT u.*, c.college_id, co.name AS college_name
+      FROM users u LEFT JOIN clusters c ON c.id = u.cluster_id LEFT JOIN colleges co ON co.id = c.college_id
+      WHERE u.email = ? OR u.name = ? OR u.id = ? LIMIT 1`, [email, email, email]);
 
     if (!rows.length) {
       res.status(401).json({ success: false, error: 'Invalid credentials.' });
@@ -504,6 +510,47 @@ app.get('/api/auth/me', requireAuth, async (req: AuthenticatedRequest, res: Resp
 
 app.post('/api/auth/logout', (_req: Request, res: Response) => {
   res.json({ success: true, message: 'Logged out successfully.' });
+});
+
+app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!email) { res.status(400).json({ success: false, error: 'Email is required.' }); return; }
+  try {
+    const [rows] = await pool.query<any[]>('SELECT u.id, u.name, u.email, c.name AS cluster_name, c.college_name FROM users u LEFT JOIN clusters c ON c.id = u.cluster_id WHERE LOWER(u.email) = ? AND u.status = \'ACTIVE\' LIMIT 1', [email]);
+    if (rows.length) {
+      const rawToken = randomBytes(32).toString('hex');
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+      await pool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL', [rows[0].id]);
+      await pool.query('INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))', [randomUUID(), rows[0].id, tokenHash]);
+      const resetUrl = `${process.env.APP_URL || 'http://localhost:5173'}/reset-password?token=${rawToken}`;
+      const sent = await sendWorkflowEmail({ recipient: rows[0].email, recipientName: rows[0].name, title: 'TQI — Reset Your Password', summary: 'A secure password reset was requested for your TQI account. This link expires in 30 minutes and can be used once.', details: [{ label: 'College', value: rows[0].college_name || '' }, { label: 'Cluster', value: rows[0].cluster_name || 'Central Administration' }], actionLabel: 'Reset Password', actionUrl: resetUrl, projectRoot: PROJECT_ROOT });
+      await pool.query('INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [randomUUID(), rows[0].id, rows[0].name, 'AUTH', null, sent ? 'PASSWORD_RESET_EMAIL_SENT' : 'PASSWORD_RESET_EMAIL_FAILED', 'AUTH', rows[0].id, JSON.stringify({ recipient: rows[0].email, status: sent ? 'sent' : 'failed' })]).catch(() => undefined);
+    }
+    res.json({ success: true, message: 'If an active account exists for that email, a reset link has been sent.' });
+  } catch (error) {
+    console.error('Forgot-password request failed:', error);
+    res.status(503).json({ success: false, error: 'Unable to process the password reset request.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
+  const token = String(req.body.token || '').trim();
+  const newPassword = String(req.body.newPassword || '');
+  if (!token || newPassword.length < 8) { res.status(400).json({ success: false, error: 'A valid reset token and password of at least 8 characters are required.' }); return; }
+  try {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const [rows] = await pool.query<any[]>('SELECT user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > NOW() LIMIT 1', [tokenHash]);
+    if (!rows.length) { res.status(400).json({ success: false, error: 'This reset link is invalid or has expired.' }); return; }
+    const passwordHash = await bcrypt.hash(newPassword, 10);
+    await pool.query('START TRANSACTION');
+    await pool.query('UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?', [passwordHash, rows[0].user_id]);
+    await pool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = ?', [tokenHash]);
+    await pool.query('COMMIT');
+    res.json({ success: true, message: 'Password reset successfully.' });
+  } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    res.status(503).json({ success: false, error: 'Unable to reset password.' });
+  }
 });
 
 app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
@@ -718,8 +765,14 @@ app.get('/api/session-photos', requireAuth, async (req: AuthenticatedRequest, re
   try {
     res.setHeader('Cache-Control', 'no-store');
     const cluster = String(req.query.cluster || req.query.clusterId || 'all').toLowerCase();
+    const academicYearId = String(req.query.academicYearId || '').trim();
     let sql = 'SELECT * FROM session_photos WHERE 1=1';
     const params: any[] = [];
+
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_photos.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
 
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
@@ -910,6 +963,11 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
   try {
     let sql = 'SELECT * FROM approvals WHERE 1=1';
     const params: any[] = [];
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR (sessionId IS NOT NULL AND EXISTS (SELECT 1 FROM sessions s WHERE s.id = approvals.sessionId AND s.academic_year_id = ?)))';
+      params.push(academicYearId, academicYearId);
+    }
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
       params.push(req.user.clusterId);
@@ -983,7 +1041,7 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
 
 app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = "SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone, u.status AS admin_status FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE c.status <> 'INACTIVE'";
+    let sql = "SELECT c.*, colleges.name AS college_resolved_name, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone, u.status AS admin_status, (SELECT COUNT(*) FROM panchayats p WHERE p.cluster_id = c.id) AS active_panchayats, (SELECT COUNT(*) FROM students s WHERE s.cluster_id = c.id AND s.status NOT IN ('inactive', 'INACTIVE')) AS total_students, (SELECT COUNT(*) FROM volunteers v WHERE v.cluster_id = c.id AND v.status NOT IN ('inactive', 'INACTIVE')) AS total_volunteers FROM clusters c LEFT JOIN colleges ON colleges.id = c.college_id LEFT JOIN users u ON u.id = c.admin_id WHERE c.status <> 'INACTIVE'";
     const params: any[] = [];
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND c.id = ?';
@@ -1013,24 +1071,32 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const name = String(req.body.name || `${collegeName} (${district})`).trim();
   const cleanIdPart = `${district}-${collegeName}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   const clusterId = String(req.body.id || cleanIdPart || `cluster-${Date.now()}`);
+  const collegeId = `college-${randomUUID()}`;
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
-  const temporaryPassword = String(req.body.temporaryPassword || 'TQI@Admin2026').trim();
+  const initialPassword = randomBytes(24).toString('base64url');
 
   if (!collegeName || !district || !spocName || !spocMobile || !adminEmail) {
     res.status(400).json({ success: false, error: 'College name, district, SPOC name, SPOC mobile, and login email are required.' });
     return;
   }
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  const passwordHash = await bcrypt.hash(initialPassword, 10);
+  const setupToken = randomBytes(32).toString('hex');
+  const setupTokenHash = createHash('sha256').update(setupToken).digest('hex');
   try {
     await pool.query('START TRANSACTION');
+    await pool.query('INSERT INTO colleges (id, name, district) VALUES (?, ?, ?)', [collegeId, collegeName, district]);
     await pool.query(
-      `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, ?, 'ACTIVE')`,
-      [clusterId, name, district, code, collegeName, spocName, spocMobile, adminId],
+      `INSERT INTO clusters (id, name, district, state, code, college_name, college_id, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, ?, ?, 'ACTIVE')`,
+      [clusterId, name, district, code, collegeName, collegeId, spocName, spocMobile, adminId],
     );
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'CLUSTER_ADMIN', ?, ?, TRUE, 'ACTIVE')`,
       [adminId, adminName, adminEmail, passwordHash, clusterId, spocMobile],
+    );
+    await pool.query(
+      'INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))',
+      [randomUUID(), adminId, setupTokenHash],
     );
 
     // Audit log
@@ -1051,29 +1117,30 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
 
     await pool.query('COMMIT');
 
-    // Asynchronously dispatch welcome / onboarding email with temporary password
-    sendOnboardingCredentialsEmail({
+    const setupUrl = `${process.env.APP_URL || 'http://localhost:5173'}/reset-password?token=${setupToken}`;
+    const setupEmailSent = await sendWorkflowEmail({
       recipient: adminEmail,
-      name: adminName,
-      temporaryPassword,
-      role: 'CLUSTER_ADMIN',
-      clusterName: name,
-      projectRoot: PROJECT_ROOT,
-    }).catch((err) => console.error('[ONBOARDING EMAIL ERROR]:', err));
-    void notifyWorkflow({
-      title: 'New Cluster Admin account created',
-      summary: 'A new Cluster Admin login has been created and onboarding credentials were sent to the administrator.',
+      recipientName: adminName,
+      title: 'TQI Account Setup',
+      summary: 'Your TQI Cluster Admin account has been created. Use the secure link below to create your password. This link expires in 30 minutes and can be used once.',
       details: [
-        { label: 'Administrator', value: adminName },
-        { label: 'Login Email', value: adminEmail },
+        { label: 'College', value: collegeName },
+        { label: 'District', value: district },
         { label: 'Cluster', value: name },
-        { label: 'Created By', value: req.user.name },
+        { label: 'Login Email', value: adminEmail },
       ],
-    }).catch((err) => console.error('[SMTP ERROR] Cluster Admin notification failed:', err.message));
+      actionLabel: 'Set Up Account',
+      actionUrl: setupUrl,
+      projectRoot: PROJECT_ROOT,
+    });
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, setupEmailSent ? 'ACCOUNT_SETUP_EMAIL_SENT' : 'ACCOUNT_SETUP_EMAIL_FAILED', 'CLUSTERS', clusterId, JSON.stringify({ recipient: adminEmail, status: setupEmailSent ? 'sent' : 'failed' })],
+    ).catch(() => undefined);
 
     res.status(201).json({
       success: true,
-      temporaryPassword,
+      warning: setupEmailSent ? undefined : 'Cluster created, but the account setup email could not be sent.',
       cluster: mapCluster({ id: clusterId, name, district, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: spocMobile, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: spocMobile, status: 'ACTIVE' }),
       user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'CLUSTER_ADMIN', cluster_id: clusterId, phone: spocMobile, status: 'ACTIVE', must_change_password: true }),
     });
@@ -1084,11 +1151,33 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   }
 });
 
+app.post('/api/users/:id/request-password-reset', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can request password resets.' }); return; }
+  try {
+    const [rows] = await pool.query<any[]>('SELECT u.id, u.name, u.email, u.cluster_id, c.name AS cluster_name, c.college_name, c.district FROM users u LEFT JOIN clusters c ON c.id = u.cluster_id WHERE u.id = ? AND u.role = \'CLUSTER_ADMIN\' LIMIT 1', [req.params.id]);
+    if (!rows.length) { res.status(404).json({ success: false, error: 'Cluster Admin not found.' }); return; }
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    await pool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL', [req.params.id]);
+    await pool.query('INSERT INTO password_reset_tokens (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL 30 MINUTE))', [randomUUID(), req.params.id, tokenHash]);
+    const resetUrl = `${process.env.APP_URL || 'http://localhost:5173'}/reset-password?token=${rawToken}`;
+    const emailSent = await sendWorkflowEmail({ recipient: rows[0].email, recipientName: rows[0].name, title: 'TQI — Reset Your Password', summary: 'A secure password reset was requested for your TQI Cluster Admin account. This link expires in 30 minutes and can be used once.', details: [{ label: 'College', value: rows[0].college_name || '' }, { label: 'Cluster', value: rows[0].cluster_name || rows[0].cluster_id }, { label: 'Account', value: rows[0].email }], actionLabel: 'Reset Password', actionUrl: resetUrl, projectRoot: PROJECT_ROOT });
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, rows[0].cluster_id, emailSent ? 'PASSWORD_RESET_EMAIL_SENT' : 'PASSWORD_RESET_EMAIL_FAILED', 'AUTH', req.params.id, JSON.stringify({ recipient: rows[0].email, status: emailSent ? 'sent' : 'failed' })],
+    ).catch(() => undefined);
+    res.json({ success: true, message: emailSent ? 'Password reset link sent successfully.' : 'Reset link created, but the email could not be sent.', warning: emailSent ? undefined : 'Unable to deliver the password reset email.' });
+  } catch (error) {
+    console.error('Failed to request password reset:', error);
+    res.status(503).json({ success: false, error: 'Unable to send password reset email.' });
+  }
+});
+
 app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
     const user = req.user;
-    let sql = 'SELECT p.id, p.name, p.cluster_id, c.name AS cluster_name, COUNT(v.id) AS villages_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id LEFT JOIN clusters c ON c.id = p.cluster_id';
+    let sql = "SELECT p.id, p.name, p.cluster_id, p.status, c.name AS cluster_name, COUNT(DISTINCT v.id) AS villages_count, (SELECT COUNT(*) FROM students s WHERE s.panchayat_id = p.id AND s.status NOT IN ('inactive', 'INACTIVE')) AS students_count, (SELECT COUNT(*) FROM volunteers vol WHERE vol.panchayat_id = p.id AND vol.status NOT IN ('inactive', 'INACTIVE')) AS volunteers_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id LEFT JOIN clusters c ON c.id = p.cluster_id";
     const params: any[] = [];
     const where: string[] = [];
 
@@ -1101,7 +1190,7 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
     }
 
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    sql += ' GROUP BY p.id, p.name, p.cluster_id, c.name ORDER BY p.name ASC';
+    sql += ' GROUP BY p.id, p.name, p.cluster_id, p.status, c.name ORDER BY p.name ASC';
 
     const [rows] = await pool.query<any[]>(sql, params);
     res.json({ success: true, panchayats: rows.map((row) => ({
@@ -1110,9 +1199,9 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
       cluster: row.cluster_name || row.cluster_id,
       clusterId: row.cluster_id,
       villagesCount: Number(row.villages_count || 0),
-      activeStudents: 0,
-      volunteersCount: 0,
-      status: 'On Track',
+      activeStudents: Number(row.students_count || 0),
+      volunteersCount: Number(row.volunteers_count || 0),
+      status: row.status === 'ACTIVE' ? 'On Track' : row.status || 'On Track',
       villages: [],
     })) });
   } catch (error) {
@@ -1126,10 +1215,16 @@ app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: 
     const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || req.body.cluster || 'dharmapuri');
     const panchayatId = String(req.body.id || req.body.name || `panchayat-${Date.now()}`).trim().toLowerCase().replace(/\s+/g, '-');
     const name = String(req.body.name || 'New Panchayat').trim();
+    if (!name || !clusterId || (req.user.role === 'Cluster Admin' && clusterId !== req.user.clusterId)) {
+      res.status(400).json({ success: false, error: 'A valid panchayat name and authorized cluster are required.' });
+      return;
+    }
+    const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE id = ? AND status <> \'INACTIVE\' LIMIT 1', [clusterId]);
+    if (!clusterRows.length) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
 
     await pool.query(
       'INSERT INTO panchayats (id, name, cluster_id, status) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), status = VALUES(status)',
-      [panchayatId, name, clusterId, 'ACTIVE']
+      [panchayatId, name, clusterId, String(req.body.status || 'ACTIVE')]
     );
 
     res.json({ success: true, panchayat: { id: panchayatId, name, clusterId, cluster: clusterId, villagesCount: 0, activeStudents: 0, volunteersCount: 0, status: 'On Track', villages: [] } });
@@ -1177,14 +1272,16 @@ app.get('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Res
 app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    const [clusterRows] = await pool.query<any[]>('SELECT college_id FROM clusters WHERE id = ? LIMIT 1', [clusterId]);
+    const collegeId = clusterRows[0]?.college_id || null;
     const id = String(req.body.id || `student-${Date.now()}`).trim();
     const name = String(req.body.name || 'New Student').trim();
     const panchayatId = String(req.body.panchayatId || '');
     const villageId = String(req.body.villageId || '');
 
     await pool.query(
-      `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
-      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'active')]
+      `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, college_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
+      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, collegeId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'active')]
     );
 
     res.json({ success: true, student: { id, code: String(req.body.code || id), name, gender: req.body.gender || 'female', dob: req.body.dob || '2014-01-01', standard: req.body.standard || '6th Standard', clusterId, panchayatId, panchayatName: req.body.panchayatName || panchayatId, villageId, villageName: req.body.villageName || villageId, parentName: req.body.parentName || 'Parent', phone: req.body.phone || '', status: req.body.status || 'active' } });
@@ -1197,7 +1294,7 @@ app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Re
 app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.cluster_id, v.panchayat_id, p.name AS panchayat_name, v.role, v.status FROM volunteers v LEFT JOIN panchayats p ON p.id = v.panchayat_id WHERE 1=1`;
+    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.cluster_id, v.college_id, colleges.name AS college_name, v.panchayat_id, p.name AS panchayat_name, v.role, v.status FROM volunteers v LEFT JOIN colleges ON colleges.id = v.college_id LEFT JOIN panchayats p ON p.id = v.panchayat_id WHERE 1=1`;
     const params: any[] = [];
 
     if (req.user.role === 'Cluster Admin') {
@@ -1220,12 +1317,17 @@ app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: R
 app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    const [clusterRows] = await pool.query<any[]>('SELECT college_id FROM clusters WHERE id = ? AND status <> \'INACTIVE\' LIMIT 1', [clusterId]);
+    if (!clusterRows.length) { res.status(404).json({ success: false, error: 'Assigned cluster not found.' }); return; }
+    const collegeId = clusterRows[0].college_id || null;
+    const [collegeRows] = collegeId ? await pool.query<any[]>('SELECT name FROM colleges WHERE id = ? LIMIT 1', [collegeId]) : [[]];
+    const collegeName = collegeRows[0]?.name || '';
     const id = String(req.body.id || `volunteer-${Date.now()}`).trim();
     await pool.query(
-      'INSERT INTO volunteers (id, name, email, phone, cluster_id, panchayat_id, department, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), role = VALUES(role), status = VALUES(status)',
-      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active')]
+      'INSERT INTO volunteers (id, name, email, phone, cluster_id, college_id, panchayat_id, department, role, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), role = VALUES(role), status = VALUES(status)',
+      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, collegeId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), req.user.id]
     );
-    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
+    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', collegeId, college: collegeName, clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
   } catch (error) {
     console.error('Failed to save volunteer:', error);
     res.status(500).json({ success: false, error: 'Unable to save volunteer.' });
@@ -1397,14 +1499,20 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
 app.get('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM attendance_sessions WHERE 1=1';
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    let sql = 'SELECT a.* FROM attendance_sessions a WHERE 1=1';
     const params: any[] = [];
 
+    if (academicYearId) {
+      sql += ' AND (a.academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = a.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
+
     if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND a.cluster_id = ?';
       params.push(req.user.clusterId);
     } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND a.cluster_id = ?';
       params.push(cluster);
     }
 
@@ -1519,14 +1627,20 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
 app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM lesson_plans WHERE 1=1';
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    let sql = 'SELECT lp.* FROM lesson_plans lp WHERE 1=1';
     const params: any[] = [];
 
+    if (academicYearId) {
+      sql += ' AND (lp.academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = lp.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
+
     if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND lp.cluster_id = ?';
       params.push(req.user.clusterId);
     } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND lp.cluster_id = ?';
       params.push(cluster);
     }
 
@@ -1585,14 +1699,20 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
 app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM finance_entries WHERE 1=1';
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    let sql = 'SELECT f.* FROM finance_entries f WHERE 1=1';
     const params: any[] = [];
 
+    if (academicYearId) {
+      sql += ' AND (f.academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = f.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
+
     if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND f.cluster_id = ?';
       params.push(req.user.clusterId);
     } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND f.cluster_id = ?';
       params.push(cluster);
     }
 
@@ -1620,10 +1740,16 @@ app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Res
     }
     const amount = Number(req.body.amount || 0);
     const date = String(req.body.date || new Date().toISOString().split('T')[0]);
+    const sessionId = String(req.body.sessionId || '').trim();
+    let academicYearId = String(req.body.academicYearId || '').trim();
+    if (!academicYearId && sessionId) {
+      const [sessionRows] = await pool.query<any[]>('SELECT academic_year_id FROM sessions WHERE id = ? LIMIT 1', [sessionId]);
+      academicYearId = String(sessionRows[0]?.academic_year_id || '');
+    }
 
     await pool.query(
-      'INSERT INTO finance_entries (id, cluster_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), created_by = VALUES(created_by), status = VALUES(status), bill_reference = VALUES(bill_reference)',
-      [id, clusterId, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), String(req.body.status || 'Draft'), String(req.body.billReference || '')]
+      'INSERT INTO finance_entries (id, cluster_id, session_id, academic_year_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), session_id = VALUES(session_id), academic_year_id = VALUES(academic_year_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), created_by = VALUES(created_by), status = VALUES(status), bill_reference = VALUES(bill_reference)',
+      [id, clusterId, sessionId || null, academicYearId || null, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), String(req.body.status || 'Draft'), String(req.body.billReference || '')]
     );
 
     res.json({ success: true, financeEntry: { id, clusterId, date, description: req.body.description || 'Finance Entry', category: req.body.category || 'General', amount, status: req.body.status || 'Draft', billReference: req.body.billReference || '' } });
@@ -1839,15 +1965,45 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
   const college_name = String(req.body.college_name || req.body.collegeName || '').trim();
   const spoc_name = String(req.body.spoc_name || req.body.spocName || '').trim();
   const spoc_mobile = String(req.body.spoc_mobile || req.body.spocMobile || '').trim();
+  const adminEmail = String(req.body.spocEmail || req.body.adminEmail || '').trim().toLowerCase();
   const district = String(req.body.district || '').trim();
   const state = String(req.body.state || 'Tamil Nadu').trim();
-  if (!name || !district) { res.status(400).json({ success: false, error: 'Cluster name and district are required.' }); return; }
+  if (!req.body.contactOnly && (!name || !college_name || !district || !spoc_name || !spoc_mobile || !adminEmail)) { res.status(400).json({ success: false, error: 'All cluster, college, district, SPOC, phone, and email fields are required.' }); return; }
   try {
+    if (req.body.contactOnly) {
+      const contactEmail = adminEmail;
+      if (!spoc_name || !spoc_mobile || !contactEmail) { res.status(400).json({ success: false, error: 'SPOC name, contact mobile, and email are required.' }); return; }
+      const [contactRows] = await pool.query<any[]>('SELECT c.name, c.college_name, c.district, c.admin_id FROM clusters c WHERE c.id = ? AND c.status <> \'INACTIVE\' LIMIT 1', [req.params.id]);
+      if (!contactRows.length) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+      const [contactResult] = await pool.query<any>('UPDATE clusters SET spoc_name = ?, spoc_mobile = ? WHERE id = ? AND status <> \'INACTIVE\'', [spoc_name, spoc_mobile, req.params.id]);
+      if (!contactResult.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+      if (contactRows[0].admin_id) await pool.query('UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?', [spoc_name, contactEmail, spoc_mobile, contactRows[0].admin_id]);
+      const emailSent = await sendWorkflowEmail({
+        recipient: contactEmail,
+        recipientName: spoc_name,
+        title: 'Cluster Contact Details Updated',
+        summary: 'Your TQI Cluster contact details were updated by the Super Admin.',
+        details: [{ label: 'College', value: contactRows[0].college_name || '' }, { label: 'Cluster', value: contactRows[0].name }, { label: 'Updated SPOC', value: spoc_name }, { label: 'Updated Phone', value: spoc_mobile }, { label: 'Updated Email', value: contactEmail }],
+        projectRoot: PROJECT_ROOT,
+      });
+      await pool.query('INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [randomUUID(), req.user.id, req.user.name, req.user.role, req.params.id, emailSent ? 'CONTACT_UPDATE_EMAIL_SENT' : 'CONTACT_UPDATE_EMAIL_FAILED', 'CLUSTERS', req.params.id, JSON.stringify({ recipient: contactEmail, status: emailSent ? 'sent' : 'failed' })]).catch(() => undefined);
+      res.json({ success: true, data: { id: req.params.id, spocName: spoc_name, spocMobile: spoc_mobile, adminEmail: contactEmail }, warning: emailSent ? undefined : 'Cluster details updated, but notification email could not be sent.' });
+      return;
+    }
+    const [clusterRows] = await pool.query<any[]>('SELECT college_id FROM clusters WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!clusterRows.length) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+    if (clusterRows[0].college_id) {
+      await pool.query('UPDATE colleges SET name = ?, district = ? WHERE id = ?', [college_name, district, clusterRows[0].college_id]);
+    }
     const [result] = await pool.query<any>(
       'UPDATE clusters SET name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, state = ? WHERE id = ?',
       [name, college_name, spoc_name, spoc_mobile, district, state, req.params.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
+    const [adminRows] = await pool.query<any[]>('SELECT admin_id FROM clusters WHERE id = ? LIMIT 1', [req.params.id]);
+    if (adminRows[0]?.admin_id) {
+      await pool.query('UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?', [spoc_name, adminEmail, spoc_mobile, adminRows[0].admin_id]);
+    }
     await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'UPDATE_CLUSTER', 'CLUSTER', req.params.id, JSON.stringify(req.body)]);
     res.json({ success: true, data: { id: req.params.id } });
   } catch (error) {
@@ -1858,21 +2014,39 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
 // 2. DELETE /api/clusters/:id
 app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete clusters.' }); return; }
+  let connection: any;
   try {
-    await pool.query('START TRANSACTION');
-    const [result] = await pool.query<any>("UPDATE clusters SET status = 'INACTIVE' WHERE id = ? AND status <> 'INACTIVE'", [req.params.id]);
-    if (!result.affectedRows) {
-      await pool.query('ROLLBACK');
+    const dependencyTables = ['panchayats', 'villages', 'students', 'volunteers', 'sessions', 'attendance_sessions', 'session_photos', 'lesson_plans', 'session_reports', 'finance_entries', 'finance_drafts', 'approvals', 'correction_requests', 'date_change_requests', 'session_submissions'];
+    const dependencyCounts = await Promise.all(dependencyTables.map(async (table) => {
+      const [rows] = await pool.query<any[]>(`SELECT COUNT(*) AS count FROM ${table} WHERE cluster_id = ?`, [req.params.id]);
+      return { table, count: Number(rows[0]?.count || 0) };
+    }));
+    if (dependencyCounts.some((dependency) => dependency.count > 0)) {
+      res.status(409).json({ success: false, error: 'This cluster contains operational data and cannot be permanently deleted.', dependencies: dependencyCounts.filter((dependency) => dependency.count > 0) });
+      return;
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [clusterRows] = await connection.query('SELECT id, college_id FROM clusters WHERE id = ? LIMIT 1', [req.params.id]) as [any[], any];
+    if (!clusterRows.length) {
+      await connection.rollback();
       res.status(404).json({ success: false, error: 'Cluster not found.' });
       return;
     }
-    await pool.query("UPDATE users SET status = 'INACTIVE' WHERE cluster_id = ? AND role = 'Cluster Admin'", [req.params.id]);
-    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTER', req.params.id, '{}']);
-    await pool.query('COMMIT');
+    await connection.query("DELETE FROM users WHERE cluster_id = ? AND role = 'CLUSTER_ADMIN'", [req.params.id]);
+    await connection.query('DELETE FROM clusters WHERE id = ?', [req.params.id]);
+    if (clusterRows[0].college_id) {
+      const [otherClusters] = await connection.query('SELECT id FROM clusters WHERE college_id = ? LIMIT 1', [clusterRows[0].college_id]) as [any[], any];
+      if (!otherClusters.length) await connection.query('DELETE FROM colleges WHERE id = ?', [clusterRows[0].college_id]);
+    }
+    await connection.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTER', req.params.id, '{}']);
+    await connection.commit();
     res.json({ success: true, deletedClusterId: req.params.id });
   } catch (error) {
-    await pool.query('ROLLBACK').catch(() => undefined);
+    await connection?.rollback().catch(() => undefined);
     res.status(503).json({ success: false, error: 'Failed to delete cluster.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -1881,10 +2055,21 @@ app.put('/api/clusters/:id/admin-status', requireAuth, async (req: Authenticated
   const status = req.body.status === 'BLOCKED' ? 'BLOCKED' : req.body.status === 'ACTIVE' ? 'ACTIVE' : null;
   if (!status) { res.status(400).json({ success: false, error: 'Invalid administrator status.' }); return; }
   try {
+    const [adminRows] = await pool.query<any[]>('SELECT u.id, u.name, u.email, c.name AS cluster_name, c.college_name, c.spoc_mobile FROM users u INNER JOIN clusters c ON c.id = u.cluster_id WHERE c.id = ? AND u.role = \'CLUSTER_ADMIN\' LIMIT 1', [req.params.id]);
+    if (!adminRows.length) { res.status(404).json({ success: false, error: 'Cluster Admin not found.' }); return; }
     const [result] = await pool.query<any>("UPDATE users SET status = ? WHERE cluster_id = ? AND role = 'CLUSTER_ADMIN'", [status, req.params.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster Admin not found.' }); return; }
     await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [randomUUID(), req.user.id, status === 'BLOCKED' ? 'BLOCK_CLUSTER_ADMIN' : 'UNBLOCK_CLUSTER_ADMIN', 'CLUSTER', req.params.id, JSON.stringify({ reason: req.body.reason || '' })]);
-    res.json({ success: true, status });
+    const emailSent = await sendWorkflowEmail({
+      recipient: adminRows[0].email,
+      recipientName: adminRows[0].name,
+      title: status === 'BLOCKED' ? 'Cluster Admin Account Blocked' : 'Cluster Admin Account Restored',
+      summary: status === 'BLOCKED' ? 'Your TQI Cluster Admin login has been blocked by the Super Admin.' : 'Your TQI Cluster Admin login has been restored and is active again.',
+      details: [{ label: 'College', value: adminRows[0].college_name || '' }, { label: 'Cluster', value: adminRows[0].cluster_name || req.params.id }, ...(status === 'BLOCKED' ? [{ label: 'Reason', value: String(req.body.reason || 'Administrative action') }] : []), { label: 'Contact', value: adminRows[0].spoc_mobile || '' }],
+      projectRoot: PROJECT_ROOT,
+    });
+    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [randomUUID(), req.user.id, emailSent ? 'ADMIN_STATUS_EMAIL_SENT' : 'ADMIN_STATUS_EMAIL_FAILED', 'CLUSTER', req.params.id, JSON.stringify({ recipient: adminRows[0].email, status: emailSent ? 'sent' : 'failed' })]).catch(() => undefined);
+    res.json({ success: true, status, warning: emailSent ? undefined : 'Account status updated, but notification email could not be sent.' });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Unable to update administrator status.' });
   }
@@ -1892,11 +2077,14 @@ app.put('/api/clusters/:id/admin-status', requireAuth, async (req: Authenticated
 
 // 3. GET /api/villages
 app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const targetClusterId = req.user.role !== 'Super Admin' ? req.user.clusterId : (req.query.cluster || null);
+  const requestedCluster = String(req.query.cluster || '').trim();
+  const targetClusterId = req.user.role !== 'Super Admin' ? req.user.clusterId : (requestedCluster && requestedCluster !== 'all' ? requestedCluster : null);
   const targetPanchayatId = req.query.panchayat || null;
   
   let sql = `
-    SELECT v.*, p.name as panchayat_name 
+    SELECT v.*, p.name as panchayat_name,
+      (SELECT COUNT(*) FROM students s WHERE s.village_id = v.id AND s.status NOT IN ('inactive', 'INACTIVE')) AS students_count,
+      (SELECT COUNT(*) FROM volunteers vol WHERE vol.village_id = v.id AND vol.status NOT IN ('inactive', 'INACTIVE')) AS volunteers_count
     FROM villages v
     LEFT JOIN panchayats p ON v.panchayat_id = p.id
     WHERE 1=1
@@ -1913,8 +2101,8 @@ app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Res
   }
   
   try {
-    const [rows] = await pool.query(sql, params);
-    res.json({ success: true, data: rows });
+    const [rows] = await pool.query<any[]>(sql, params);
+    res.json({ success: true, villages: rows.map((row: any) => ({ ...row, studentCount: Number(row.students_count || 0), volunteerCount: Number(row.volunteers_count || 0), panchayatId: row.panchayat_id, clusterId: row.cluster_id, status: row.status || 'ACTIVE' })), data: rows });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Failed to fetch villages.' });
   }
@@ -1922,18 +2110,21 @@ app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 // 4. POST /api/villages
 app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { id, name, panchayat_id, cluster_id } = req.body;
-  if (!name || !panchayat_id || !cluster_id) {
-    res.status(400).json({ success: false, error: 'Missing required fields.' });
-    return;
-  }
+  const { id, name } = req.body;
   try {
+    const panchayatId = String(req.body.panchayat_id || req.body.panchayatId || '').trim();
+    if (!name || !panchayatId) { res.status(400).json({ success: false, error: 'Village name and panchayat are required.' }); return; }
+    const [parentRows] = await pool.query<any[]>('SELECT id, cluster_id FROM panchayats WHERE id = ? LIMIT 1', [panchayatId]);
+    if (!parentRows.length || (req.user.role === 'Cluster Admin' && parentRows[0].cluster_id !== req.user.clusterId)) {
+      res.status(403).json({ success: false, error: 'You are not authorized to add a village under this panchayat.' }); return;
+    }
+    const clusterId = parentRows[0].cluster_id;
     const finalId = id || crypto.randomUUID();
     const [result] = await pool.query<any>(
       `INSERT INTO villages (id, name, panchayat_id, cluster_id) 
        VALUES (?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id)`,
-      [finalId, name, panchayat_id, cluster_id]
+      [finalId, String(name).trim(), panchayatId, clusterId]
     );
     res.json({ success: true, data: { id: finalId } });
   } catch (error) {
@@ -1944,7 +2135,7 @@ app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Re
 // 5. DELETE /api/villages/:id
 app.delete('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("DELETE FROM villages WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("DELETE v FROM villages v INNER JOIN panchayats p ON p.id = v.panchayat_id WHERE v.id = ? AND (? = 'Super Admin' OR v.cluster_id = ?)", [req.params.id, req.user.role, req.user.clusterId]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Village not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -1955,9 +2146,9 @@ app.delete('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, r
 // 6. DELETE /api/panchayats/:id
 app.delete('/api/panchayats/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await pool.query("DELETE FROM villages WHERE panchayat_id = ?", [req.params.id]);
-    const [result] = await pool.query<any>("DELETE FROM panchayats WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("DELETE FROM panchayats WHERE id = ? AND (? = 'Super Admin' OR cluster_id = ?)", [req.params.id, req.user.role, req.user.clusterId]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Panchayat not found.' }); return; }
+    await pool.query("DELETE FROM villages WHERE panchayat_id = ?", [req.params.id]);
     res.json({ success: true });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Failed to delete panchayat.' });
@@ -2147,6 +2338,11 @@ app.get('/api/date-change-requests', requireAuth, async (req: AuthenticatedReque
   try {
     let sql = 'SELECT * FROM date_change_requests WHERE 1=1';
     const params: any[] = [];
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = date_change_requests.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
 
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
@@ -2220,6 +2416,11 @@ app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, r
   try {
     let sql = 'SELECT * FROM session_reports WHERE 1=1';
     const params: any[] = [];
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_reports.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
       params.push(req.user.clusterId);
@@ -2354,6 +2555,11 @@ app.get('/api/session-submissions', requireAuth, async (req: AuthenticatedReques
   try {
     let sql = 'SELECT * FROM session_submissions WHERE 1=1';
     const params: any[] = [];
+    const academicYearId = String(req.query.academicYearId || '').trim();
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_submissions.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId);
+    }
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
       params.push(req.user.clusterId);

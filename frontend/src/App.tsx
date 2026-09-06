@@ -21,6 +21,7 @@ import {
   SessionSubmission,
   AcademicYear,
   TqiModule,
+  Village,
 } from './types';
 import { Navigation } from './components/Navigation';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -55,6 +56,15 @@ import SessionSubmissionView from './components/SessionSubmissionView';
 import { apiUrl } from './utils/api';
 import { CommandPalette } from './components/ui/CommandPalette';
 import { NotFoundView } from './components/NotFoundView';
+import { PanchayatHierarchyRoute, PanchayatHierarchyView } from './components/PanchayatHierarchyView';
+
+const parsePanchayatRoute = (): PanchayatHierarchyRoute | null => {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (parts.length === 1 && parts[0] === 'panchayats-villages') return { level: 'clusters' };
+  if (parts.length === 3 && parts[0] === 'clusters' && parts[2] === 'panchayats') return { level: 'panchayats', clusterId: decodeURIComponent(parts[1]) };
+  if (parts.length === 5 && parts[0] === 'clusters' && parts[2] === 'panchayats' && parts[4] === 'villages') return { level: 'villages', clusterId: decodeURIComponent(parts[1]), panchayatId: decodeURIComponent(parts[3]) };
+  return null;
+};
 
 const KNOWN_TABS: Set<string> = new Set([
   'dashboard', 'academic-setup', 'approvals', 'clusters', 'audit-logs', 'users',
@@ -86,6 +96,7 @@ export default function App() {
   // Navigation & View State
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
+      if (parsePanchayatRoute()) return 'panchayats';
       const role = currentUser?.role || 'Super Admin';
       const savedTab = localStorage.getItem(`tqi_current_tab_${role}`) as TabType | null;
       if (!savedTab) return 'dashboard';
@@ -100,6 +111,7 @@ export default function App() {
     }
   });
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('vedakkattamaduvu');
+  const [panchayatRoute, setPanchayatRoute] = useState<PanchayatHierarchyRoute | null>(() => parsePanchayatRoute());
   const [initialStudentFilters, setInitialStudentFilters] = useState<{ panchayatId?: string; villageId?: string } | undefined>(undefined);
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>(undefined);
   const [activeFinanceDraftId, setActiveFinanceDraftId] = useState<string | undefined>(undefined);
@@ -108,6 +120,24 @@ export default function App() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [selectedLessonPlanId, setSelectedLessonPlanId] = useState<string | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const handlePopState = () => setPanchayatRoute(parsePanchayatRoute());
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigatePanchayatRoute = (route: PanchayatHierarchyRoute, replace = false) => {
+    const path = route.level === 'clusters'
+      ? '/panchayats-villages'
+      : route.level === 'panchayats'
+        ? `/clusters/${encodeURIComponent(route.clusterId)}/panchayats`
+        : `/clusters/${encodeURIComponent(route.clusterId)}/panchayats/${encodeURIComponent(route.panchayatId)}/villages`;
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+    setPanchayatRoute(route);
+    setCurrentTab('panchayats');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Global ⌘K / Ctrl+K to open the command palette
   useEffect(() => {
@@ -139,6 +169,7 @@ export default function App() {
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLogEntry[]>([]);
   const [panchayats, setPanchayats] = useState<Panchayat[]>([]);
+  const [villages, setVillages] = useState<Village[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -152,8 +183,14 @@ export default function App() {
   const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
   const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState('');
+  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState(() => {
+    try { return localStorage.getItem('tqi_selected_academic_year_id') || ''; } catch { return ''; }
+  });
   const [modules, setModules] = useState<TqiModule[]>([]);
+
+  useEffect(() => {
+    try { if (selectedAcademicYearId) localStorage.setItem('tqi_selected_academic_year_id', selectedAcademicYearId); } catch { /* ignore storage failures */ }
+  }, [selectedAcademicYearId]);
 
   // Sync with API Backend
   const fetchBackendData = useCallback(async (signal: AbortSignal) => {
@@ -189,6 +226,7 @@ export default function App() {
     try {
       const [
         panchayatsRes,
+        villagesRes,
         studentsRes,
         volunteersRes,
         sessionsRes,
@@ -207,20 +245,21 @@ export default function App() {
         modulesRes,
       ] = await Promise.all([
         get(`/api/panchayats?clusterId=${currentUserClusterId}`),
+        get(`/api/villages?cluster=${currentUserClusterId}`),
         get(`/api/students?clusterId=${currentUserClusterId}`),
         get(`/api/volunteers?clusterId=${currentUserClusterId}`),
         get(`/api/sessions?clusterId=${currentUserClusterId}${selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : ''}`),
-        get(`/api/attendance?clusterId=${currentUserClusterId}`),
-        get(`/api/finance?clusterId=${currentUserClusterId}`),
-        get(`/api/lesson-plans?clusterId=${currentUserClusterId}`),
-        get(`/api/approvals?clusterId=${currentUserClusterId}`),
+        get(`/api/attendance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/finance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/lesson-plans?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/approvals?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/audit-logs?clusterId=${currentUserClusterId}`),
         get('/api/notifications'),
         get('/api/clusters'),
         get('/api/users'),
-        get('/api/date-change-requests'),
-        get('/api/session-reports'),
-        get('/api/session-submissions'),
+        get(`/api/date-change-requests?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/session-reports?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/session-submissions?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get('/api/academic-years'),
         get('/api/modules'),
       ]);
@@ -228,6 +267,10 @@ export default function App() {
       if (signal.aborted) return;
 
       if (Array.isArray(panchayatsRes?.panchayats))         setPanchayats(panchayatsRes.panchayats);
+      if (Array.isArray(villagesRes?.villages)) {
+        setVillages(villagesRes.villages);
+        setPanchayats((previous) => previous.map((panchayat) => ({ ...panchayat, villages: villagesRes.villages.filter((village: Village) => village.panchayatId === panchayat.id) })));
+      }
       if (Array.isArray(studentsRes?.students))             setStudents(studentsRes.students);
       if (Array.isArray(volunteersRes?.volunteers))         setVolunteers(volunteersRes.volunteers);
       if (Array.isArray(sessionsRes?.sessions))             setSessions(sessionsRes.sessions);
@@ -242,7 +285,14 @@ export default function App() {
       if (Array.isArray(dateChangeRequestsRes?.dateChangeRequests)) setDateChangeRequests(dateChangeRequestsRes.dateChangeRequests);
       if (Array.isArray(sessionReportsRes?.sessionReports))         setSessionReports(sessionReportsRes.sessionReports);
       if (Array.isArray(sessionSubmissionsRes?.sessionSubmissions)) setSessionSubmissions(sessionSubmissionsRes.sessionSubmissions);
-      if (Array.isArray(academicYearsRes?.academicYears))           setAcademicYears(academicYearsRes.academicYears);
+      if (Array.isArray(academicYearsRes?.academicYears)) {
+        setAcademicYears(academicYearsRes.academicYears);
+        if (selectedAcademicYearId && !academicYearsRes.academicYears.some((year: AcademicYear) => year.id === selectedAcademicYearId)) {
+          setSelectedAcademicYearId('');
+        } else if (!selectedAcademicYearId) {
+          setSelectedAcademicYearId(academicYearsRes.academicYears.find((year: AcademicYear) => year.isActive || (year as any).is_active || (year as any).status === 'ACTIVE')?.id || academicYearsRes.academicYears[0]?.id || '');
+        }
+      }
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
     } catch {
@@ -474,7 +524,7 @@ export default function App() {
         const usersData = await usersResponse.json();
         if (Array.isArray(usersData?.users)) setUsers(usersData.users);
       }
-      return true;
+      return { message: data.warning ? undefined : 'Cluster created and account setup mail sent successfully.', warning: data.warning };
     } catch (error: any) {
       throw error;
     }
@@ -506,7 +556,7 @@ export default function App() {
     const clustersResponse = await fetch(apiUrl('/api/clusters'), { headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' } });
     const clustersData = await clustersResponse.json();
     if (Array.isArray(clustersData?.clusters)) setClusters(clustersData.clusters);
-    return true;
+    return { message: data.warning ? undefined : 'Cluster details updated and notification mail sent successfully.', warning: data.warning };
   };
 
   const handleUpdateClusterAdminStatus = async (clusterId: string, status: 'ACTIVE' | 'BLOCKED', reason?: string) => {
@@ -514,6 +564,14 @@ export default function App() {
     const data = await response.json().catch(() => null);
     if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update Cluster Admin status.');
     setClusters((prev) => prev.map((cluster) => cluster.id === clusterId ? { ...cluster, adminStatus: status } : cluster));
+    return { message: data.warning ? undefined : 'Account status updated and notification mail sent successfully.', warning: data.warning };
+  };
+
+  const handleRequestPasswordReset = async (adminId: string) => {
+    const response = await fetch(apiUrl(`/api/users/${adminId}/request-password-reset`), { method: 'POST', headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' } });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to send password reset link.');
+    return { message: data.message, warning: data.warning };
   };
 
   // Add User Mutation
@@ -664,6 +722,47 @@ export default function App() {
     );
   };
 
+  const refreshHierarchyData = async () => {
+    const headers = { Authorization: `Bearer ${currentUser?.token || ''}` };
+    const [panchayatsResponse, villagesResponse] = await Promise.all([
+      fetch(apiUrl(`/api/panchayats?clusterId=${currentUserClusterId}`), { headers }),
+      fetch(apiUrl(`/api/villages?cluster=${currentUserClusterId}`), { headers }),
+    ]);
+    const panchayatsData = await panchayatsResponse.json();
+    const villagesData = await villagesResponse.json();
+    const nextVillages: Village[] = Array.isArray(villagesData?.villages) ? villagesData.villages : [];
+    setVillages(nextVillages);
+    if (Array.isArray(panchayatsData?.panchayats)) setPanchayats(panchayatsData.panchayats.map((panchayat: Panchayat) => ({ ...panchayat, villages: nextVillages.filter((village) => village.panchayatId === panchayat.id) })));
+  };
+
+  const handleAddPanchayatToCluster = async (clusterId: string, name: string) => {
+    const response = await fetch(apiUrl('/api/panchayats'), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` }, body: JSON.stringify({ name, clusterId }) });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to add panchayat.');
+    await refreshHierarchyData();
+  };
+
+  const handleAddVillageToPanchayat = async (panchayatId: string, name: string) => {
+    const response = await fetch(apiUrl('/api/villages'), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` }, body: JSON.stringify({ name, panchayat_id: panchayatId }) });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to add village.');
+    await refreshHierarchyData();
+  };
+
+  const handleDeletePanchayatFromCluster = async (id: string) => {
+    const response = await fetch(apiUrl(`/api/panchayats/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${currentUser?.token || ''}` } });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to delete panchayat.');
+    await refreshHierarchyData();
+  };
+
+  const handleDeleteVillageFromPanchayat = async (id: string) => {
+    const response = await fetch(apiUrl(`/api/villages/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${currentUser?.token || ''}` } });
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to delete village.');
+    await refreshHierarchyData();
+  };
+
   // Student mutations
   const handleAddStudent = (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
     const newId = `stu-${Date.now()}`;
@@ -779,7 +878,7 @@ export default function App() {
   };
 
   // Volunteer mutations
-  const handleAddVolunteer = (newVol: Omit<Volunteer, 'id' | 'avatarText' | 'recentSessions' | 'totalSessions' | 'attendanceRate'>) => {
+  const handleAddVolunteer = async (newVol: Omit<Volunteer, 'id' | 'avatarText' | 'recentSessions' | 'totalSessions' | 'attendanceRate'>) => {
     const newId = `vol-${Date.now()}`;
     const names = newVol.name.split(' ');
     const avatarText = names.length > 1 ? `${names[0][0]}${names[1][0]}`.toUpperCase() : newVol.name.slice(0, 2).toUpperCase();
@@ -792,6 +891,13 @@ export default function App() {
       attendanceRate: 100,
       recentSessions: [],
     };
+    if (currentUser?.token) {
+      const response = await fetch(apiUrl('/api/volunteers'), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` }, body: JSON.stringify(created) });
+      const data = await response.json();
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save volunteer.');
+      if (data.volunteer) setVolunteers((prev) => [data.volunteer, ...prev]);
+      return;
+    }
     setVolunteers((prev) => [created, ...prev]);
   };
 
@@ -1241,7 +1347,8 @@ export default function App() {
         onSelectTab={(tab) => {
           if (tab === 'attendance') setActiveDraftId(undefined);
           if (tab === 'students') setInitialStudentFilters(undefined);
-          setCurrentTab(tab as TabType);
+          if (tab === 'panchayats') navigatePanchayatRoute({ level: 'clusters' });
+          else setCurrentTab(tab as TabType);
           setMobileSidebarOpen(false);
         }}
         notifications={notifications}
@@ -1265,6 +1372,9 @@ export default function App() {
           clusters={clusters}
           selectedClusterId={currentUserClusterId}
           onSelectCluster={(cid) => setCurrentUserClusterId(cid)}
+          academicYears={academicYears}
+          selectedAcademicYearId={selectedAcademicYearId}
+          onSelectAcademicYear={setSelectedAcademicYearId}
           notifications={notifications}
           pendingApprovalsCount={pendingApprovalsCount}
           onNavigate={(tab, targetId) => {
@@ -1323,6 +1433,7 @@ export default function App() {
               {currentTab === 'academic-setup' && currentUserRole === 'Super Admin' && (
                 <AcademicSetupView
                   authToken={currentUser.token}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   onSetupSaved={() => fetchBackendData(new AbortController().signal)}
                   onAcademicYearChange={setSelectedAcademicYearId}
                   onOpenDay={(academicYearId) => { setSelectedAcademicYearId(academicYearId); setCurrentTab('sessions'); }}
@@ -1344,12 +1455,11 @@ export default function App() {
               {currentTab === 'clusters' && (
                 <ClustersView
                   clusters={clusters}
-                  sessions={displaySessions}
                   userRole={currentUserRole}
-                  onNavigate={handleNavigate}
                   onAddCluster={handleAddCluster}
                   onUpdateCluster={handleUpdateCluster}
                   onUpdateAdminStatus={handleUpdateClusterAdminStatus}
+                  onRequestPasswordReset={handleRequestPasswordReset}
                   onDeleteCluster={handleDeleteCluster}
                 />
               )}
@@ -1373,14 +1483,15 @@ export default function App() {
               )}
 
               {currentTab === 'panchayats' && (
-                <PanchayatsView
+                <PanchayatHierarchyView
+                  route={panchayatRoute || { level: 'clusters' }}
+                  clusters={clusters}
                   panchayats={displayPanchayats}
-                  onSelectPanchayat={(id) => {
-                    setSelectedPanchayatId(id);
-                    setCurrentTab('panchayat-detail');
-                  }}
-                  onAddPanchayat={handleAddPanchayat}
-                  onNavigate={handleNavigate}
+                  onNavigate={navigatePanchayatRoute}
+                  onAddPanchayat={handleAddPanchayatToCluster}
+                  onAddVillage={handleAddVillageToPanchayat}
+                  onDeletePanchayat={handleDeletePanchayatFromCluster}
+                  onDeleteVillage={handleDeleteVillageFromPanchayat}
                 />
               )}
 
@@ -1410,6 +1521,9 @@ export default function App() {
                 <VolunteersView
                   volunteers={displayVolunteers}
                   panchayats={displayPanchayats}
+                  collegeName={currentClusterObj?.collegeName || ''}
+                  clusterName={activeClusterName}
+                  userRole={currentUserRole}
                   onAddVolunteer={handleAddVolunteer}
                   onUpdateVolunteer={handleUpdateVolunteer}
                   onDeleteVolunteer={handleDeleteVolunteer}
@@ -1460,6 +1574,7 @@ export default function App() {
                   panchayats={displayPanchayats}
                   clusters={clusters}
                   authToken={currentUser.token}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   userRole={currentUserRole}
                   currentCluster={currentUserClusterId === 'all' ? 'Dharmapuri' : currentUserClusterId}
                   onNavigate={handleNavigate}

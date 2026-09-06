@@ -1,7 +1,9 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AttendanceSession, Student, Panchayat, TabType, AttendanceRecord } from '../types';
+import { AttendanceSession, Student, Panchayat, TabType, AttendanceRecord, Volunteer } from '../types';
 import { Badge } from './ui/badge';
-import { Check, X, Calendar, MapPin, Sparkles, CheckCircle2 } from './ui/icons';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { EmptyState } from './ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -9,13 +11,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { ActionButton } from './ui/action-button';
+import {
+  Check,
+  X,
+  Calendar,
+  MapPin,
+  CheckCircle2,
+  Users,
+  Search,
+  BookOpen,
+  Eye,
+  AlertCircle,
+  Phone,
+  GraduationCap,
+  CaretLeft,
+  CaretRight,
+} from './ui/icons';
 
 interface AttendanceViewProps {
   attendanceSessions: AttendanceSession[];
   students: Student[];
   panchayats: Panchayat[];
+  volunteers?: Volunteer[];
   draftId?: string;
+  userRole?: string;
   onNavigate: (tab: TabType) => void;
   onSaveAttendance: (session: AttendanceSession) => void;
 }
@@ -24,16 +43,43 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   attendanceSessions,
   students,
   panchayats,
+  volunteers = [],
   draftId,
+  userRole = 'Super Admin',
+  onNavigate,
   onSaveAttendance,
 }) => {
-  // Step 1 & 2 selections
+  const [activeTab, setActiveTab] = useState<'mark' | 'history'>('mark');
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>(
     panchayats[0]?.id || ''
   );
   const [selectedVillageId, setSelectedVillageId] = useState<string>('all');
+  const [selectedDay, setSelectedDay] = useState<number>(1);
+  const [sessionDate, setSessionDate] = useState<string>(
+    new Date().toISOString().split('T')[0]
+  );
+  const [sessionTitle, setSessionTitle] = useState<string>(
+    'Day 1 Spoken English & Life Skills'
+  );
+  const [taskTopic, setTaskTopic] = useState<string>(
+    'Worksheet & Conversational Drill'
+  );
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [activeDraftSessionId, setActiveDraftSessionId] = useState<string | null>(
+    draftId || null
+  );
 
-  // Synchronize selectedPanchayatId if panchayats array loads or updates
+  // Correction request modal state
+  const [showCorrectionModal, setShowCorrectionModal] = useState(false);
+  const [correctionReason, setCorrectionReason] = useState('');
+
+  // Roster search & filter inside workspace
+  const [studentSearch, setStudentSearch] = useState('');
+  const [selectedStandard, setSelectedStandard] = useState<string>('all');
+
+  // Volunteer attendance toggle map: { [volunteerId]: 'Present' | 'Absent' }
+  const [volunteerAttendanceMap, setVolunteerAttendanceMap] = useState<Record<string, 'Present' | 'Absent'>>({});
+
   useEffect(() => {
     if (panchayats.length > 0) {
       const exists = panchayats.some((p) => p.id === selectedPanchayatId);
@@ -42,15 +88,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       }
     }
   }, [panchayats, selectedPanchayatId]);
-  const [selectedDay, setSelectedDay] = useState<number>(1);
-  const [sessionDate, setSessionDate] = useState<string>('2023-10-24');
-  const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Spoken English & Life Skills');
-  const [taskTopic, setTaskTopic] = useState<string>('Worksheet & Conversational Drill');
-  const [activeTab, setActiveTab] = useState<'mark' | 'history'>('mark');
-  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
-  const [activeDraftSessionId, setActiveDraftSessionId] = useState<string | null>(draftId || null);
 
-  // Get current panchayat & its villages
   const currentPanchayat = useMemo(() => {
     return panchayats.find((p) => p.id === selectedPanchayatId) || panchayats[0];
   }, [panchayats, selectedPanchayatId]);
@@ -59,7 +97,6 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     return currentPanchayat?.villages || [];
   }, [currentPanchayat]);
 
-  // When panchayat changes, auto-adjust village
   const handlePanchayatChange = (panchayatId: string) => {
     setSelectedPanchayatId(panchayatId);
     const panch = panchayats.find((p) => p.id === panchayatId);
@@ -70,19 +107,21 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     }
   };
 
-  // Filter students based on Step 1 (Panchayat) and Step 2 (Village)
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
-      const matchPanchayat = s.panchayatId === selectedPanchayatId;
-      const matchVillage = selectedVillageId === 'all' || s.villageId === selectedVillageId;
+      const matchPanchayat = s.panchayatId === selectedPanchayatId || 
+        (currentPanchayat && (s.panchayatName || '').toLowerCase() === currentPanchayat.name.toLowerCase());
+      const matchVillage =
+        selectedVillageId === 'all' ||
+        s.villageId === selectedVillageId ||
+        (s.villageName || '').toLowerCase() === selectedVillageId.toLowerCase();
       return matchPanchayat && matchVillage;
     });
-  }, [students, selectedPanchayatId, selectedVillageId]);
+  }, [students, selectedPanchayatId, selectedVillageId, currentPanchayat]);
 
-  // Student Attendance & Task records map state
   const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecord>>({});
 
-  // Initialize records when students list or draft changes
+  // Initialize records when draftId or filtered students change
   useEffect(() => {
     if (draftId) {
       const draft = attendanceSessions.find((s) => s.id === draftId);
@@ -104,7 +143,6 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       }
     }
 
-    // Default initialization for current filtered students
     setRecordsMap((prev) => {
       const updated: Record<string, AttendanceRecord> = { ...prev };
       filteredStudents.forEach((st) => {
@@ -126,8 +164,17 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   }, [selectedPanchayatId, selectedVillageId, draftId, filteredStudents, taskTopic, attendanceSessions]);
 
-  // Toggle single student attendance status (Present / Absent / Late)
+  const activeSessionObj = useMemo(() => {
+    return attendanceSessions.find((s) => s.id === activeDraftSessionId);
+  }, [attendanceSessions, activeDraftSessionId]);
+
+  const isSessionLocked = useMemo(() => {
+    if (!activeSessionObj) return false;
+    return ['Submitted', 'Approved', 'Completed'].includes(activeSessionObj.status);
+  }, [activeSessionObj]);
+
   const handleToggleAttendance = (studentId: string, status: 'Present' | 'Absent' | 'Late') => {
+    if (isSessionLocked) return;
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
         studentId,
@@ -150,8 +197,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   };
 
-  // Toggle single student task status (Completed / Not Completed)
   const handleToggleTask = (studentId: string, taskStatus: 'Completed' | 'Not Completed') => {
+    if (isSessionLocked) return;
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
         studentId,
@@ -173,8 +220,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   };
 
-  // Batch actions
   const markAllAttendance = (status: 'Present' | 'Absent') => {
+    if (isSessionLocked) return;
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
@@ -198,6 +245,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   };
 
   const markAllTasks = (taskStatus: 'Completed' | 'Not Completed') => {
+    if (isSessionLocked) return;
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
@@ -219,7 +267,6 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   };
 
-  // Metric computations
   const currentRecordsList: AttendanceRecord[] = useMemo(() => {
     return filteredStudents.map((st) => {
       const record = recordsMap[st.id];
@@ -253,13 +300,26 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   const selectedVillageName = useMemo(() => {
     if (selectedVillageId === 'all') return 'All Villages';
-    return availableVillages.find((v) => v.id === selectedVillageId)?.name || 'Village';
+    return availableVillages.find((v) => v.id === selectedVillageId || v.name === selectedVillageId)?.name || 'Village';
   }, [selectedVillageId, availableVillages]);
 
-  // Save / Submit handler
-  const handleSaveAttendanceSession = (isFinalSubmit: boolean) => {
+  const displayedStudents = useMemo(() => {
+    return filteredStudents.filter((st) => {
+      const q = studentSearch.toLowerCase();
+      const matchSearch =
+        !studentSearch ||
+        st.name.toLowerCase().includes(q) ||
+        (st.code || '').toLowerCase().includes(q) ||
+        (st.parentName || '').toLowerCase().includes(q);
+
+      const matchStd = selectedStandard === 'all' || st.standard === selectedStandard;
+      return matchSearch && matchStd;
+    });
+  }, [filteredStudents, studentSearch, selectedStandard]);
+
+  const handleSaveAttendanceSession = (statusToSave: 'Draft' | 'Submitted' | 'Approved') => {
     if (filteredStudents.length === 0) {
-      alert('No students found for this Panchayat and Village. Please add students first.');
+      alert('No students found for this Panchayat and Village. Please enroll students first.');
       return;
     }
 
@@ -280,100 +340,153 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       presentCount,
       absentCount,
       tasksCompletedCount,
-      status: isFinalSubmit ? 'Submitted' : 'Draft',
-      lastSaved: isFinalSubmit ? 'Submitted just now' : 'Saved just now',
+      status: statusToSave,
+      lastSaved: statusToSave === 'Approved' ? 'Approved just now' : statusToSave === 'Submitted' ? 'Submitted just now' : 'Saved draft just now',
       records: currentRecordsList,
     };
 
     onSaveAttendance(newSession);
     setActiveDraftSessionId(sessionIdToSave);
     setSaveSuccessMsg(
-      isFinalSubmit
-        ? `Day ${selectedDay} Attendance & Task records submitted successfully for ${currentPanchayat?.name || 'Panchayat'} (${selectedVillageName})!`
+      statusToSave === 'Approved'
+        ? `Day ${selectedDay} Attendance for ${currentPanchayat?.name} (${selectedVillageName}) has been approved!`
+        : statusToSave === 'Submitted'
+        ? `Day ${selectedDay} Attendance submitted successfully for administrative review!`
         : `Day ${selectedDay} Attendance Draft saved successfully!`
     );
     setTimeout(() => setSaveSuccessMsg(''), 4500);
   };
 
+  const handleRequestCorrection = () => {
+    if (!correctionReason.trim()) {
+      alert('Please enter the reason or correction note.');
+      return;
+    }
+
+    const sessionIdToSave = activeDraftSessionId || `att-${Date.now()}`;
+    const updated: AttendanceSession = {
+      id: sessionIdToSave,
+      sessionId: `ses-day${selectedDay}`,
+      sessionName: sessionTitle || `Day ${selectedDay} Session`,
+      panchayatId: selectedPanchayatId,
+      panchayatName: currentPanchayat?.name || 'Panchayat',
+      villageId: selectedVillageId,
+      villageName: selectedVillageName,
+      date: sessionDate,
+      day: `Day ${selectedDay}`,
+      dayNumber: selectedDay,
+      taskTopic,
+      totalCount: filteredStudents.length,
+      presentCount,
+      absentCount,
+      tasksCompletedCount,
+      status: 'Correction Requested',
+      correctionReason: correctionReason.trim(),
+      lastSaved: 'Correction requested',
+      records: currentRecordsList,
+    };
+
+    onSaveAttendance(updated);
+    setActiveDraftSessionId(sessionIdToSave);
+    setShowCorrectionModal(false);
+    setCorrectionReason('');
+    setSaveSuccessMsg('Correction request sent to the cluster team.');
+    setTimeout(() => setSaveSuccessMsg(''), 4500);
+  };
+
   return (
-    <div className="w-full space-y-6">
-      {/* 1. Cardless Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6">
+      {/* 1. Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Attendance &amp; Task Entry
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              Attendance &amp; Task Workspace
             </h1>
-            <Badge color="primary" size="sm">
+            <Badge variant="default" size="sm">
               Day {selectedDay}
             </Badge>
+            {activeSessionObj && (
+              <Badge
+                variant={
+                  activeSessionObj.status === 'Approved'
+                    ? 'success'
+                    : activeSessionObj.status === 'Submitted'
+                    ? 'info'
+                    : activeSessionObj.status === 'Correction Requested'
+                    ? 'destructive'
+                    : 'secondary'
+                }
+                size="sm"
+              >
+                {activeSessionObj.status}
+              </Badge>
+            )}
           </div>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Step 1: Select Panchayat &rarr; Step 2: Select Village &rarr; Step 3: Mark Present/Absent &amp; Tasks.
+          <p className="mt-1 text-xs text-muted-foreground">
+            Mark student attendance, monitor learning task progress, and submit daily sessions for administrative review.
           </p>
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            type="button"
+          <Button
+            variant={activeTab === 'mark' ? 'default' : 'outline'}
+            size="sm"
             onClick={() => setActiveTab('mark')}
-            className={`rounded-xl px-4 py-2.5 text-xs font-semibold transition shadow-theme-xs ${
-              activeTab === 'mark'
-                ? 'bg-brand-500 text-white'
-                : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5'
-            }`}
+            className="text-xs font-semibold"
           >
-            Mark Attendance &amp; Tasks
-          </button>
-          <button
-            type="button"
+            Attendance Entry
+          </Button>
+          <Button
+            variant={activeTab === 'history' ? 'default' : 'outline'}
+            size="sm"
             onClick={() => setActiveTab('history')}
-            className={`rounded-xl px-4 py-2.5 text-xs font-semibold transition shadow-theme-xs ${
-              activeTab === 'history'
-                ? 'bg-brand-500 text-white'
-                : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5'
-            }`}
+            className="text-xs font-semibold"
           >
-            History ({attendanceSessions.length})
-          </button>
+            Session History ({attendanceSessions.length})
+          </Button>
         </div>
       </div>
 
       {saveSuccessMsg && (
-        <div className="rounded-xl border border-success-200 bg-success-50 p-4 text-xs font-medium text-success-600 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 flex items-center justify-between">
-          <span>{saveSuccessMsg}</span>
+        <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs font-medium text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+            <span>{saveSuccessMsg}</span>
+          </div>
           <button
             type="button"
             onClick={() => setSaveSuccessMsg('')}
-            className="text-success-600 hover:text-success-800 dark:text-success-400"
+            className="text-emerald-600 hover:text-emerald-800 dark:text-emerald-400"
           >
-            <span className="material-symbols-outlined text-[16px]">close</span>
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
       {activeTab === 'mark' ? (
         <div className="space-y-6">
-          {/* STEP SELECTORS BAR - Cardless Flat Styling */}
-          <div className="space-y-4 pb-2 border-b border-gray-100 dark:border-gray-800">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Top Workspace Selector Card */}
+          <div className="rounded-lg border border-border bg-card p-4 shadow-xs space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
               {/* STEP 1: PANCHAYAT SELECTION */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-brand-500" />
-                  1. Panchayat
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-primary" />
+                  <span>1. Target Panchayat *</span>
                 </label>
                 <Select
                   value={selectedPanchayatId}
                   onValueChange={(val) => handlePanchayatChange(val)}
+                  disabled={isSessionLocked}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="h-9 text-xs">
                     <SelectValue placeholder="Select Panchayat" />
                   </SelectTrigger>
                   <SelectContent>
                     {panchayats.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.name} Panchayat ({p.activeStudents} students)
+                        {p.name} ({p.villages?.length || 0} villages)
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -382,22 +495,23 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
               {/* STEP 2: VILLAGE SELECTION */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-brand-500" />
-                  2. Village / Center
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5 text-primary" />
+                  <span>2. Village Hub *</span>
                 </label>
                 <Select
                   value={selectedVillageId}
                   onValueChange={(val) => setSelectedVillageId(val)}
+                  disabled={isSessionLocked}
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger className="h-9 text-xs">
                     <SelectValue placeholder="Select Village" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Villages ({currentPanchayat?.name || 'Cluster'})</SelectItem>
                     {availableVillages.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>
-                        {v.name} ({v.studentCount} students)
+                      <SelectItem key={v.id || v.name} value={v.id || v.name}>
+                        {v.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -406,29 +520,29 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
               {/* STEP 3: SESSION DATE & DAY */}
               <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-brand-500" />
-                  3. Date &amp; Day
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <Calendar className="h-3.5 w-3.5 text-primary" />
+                  <span>3. Session Date &amp; Cycle *</span>
                 </label>
                 <div className="flex gap-2">
-                  <input
+                  <Input
                     type="date"
                     value={sessionDate}
                     onChange={(e) => setSessionDate(e.target.value)}
-                    disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                    className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white disabled:opacity-50"
+                    disabled={isSessionLocked}
+                    className="h-9 text-xs"
                   />
-                  <div className="w-28">
+                  <div className="w-32">
                     <Select
                       value={String(selectedDay)}
                       onValueChange={(val) => setSelectedDay(parseInt(val) || 1)}
-                      disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
+                      disabled={isSessionLocked}
                     >
-                      <SelectTrigger className="w-full text-brand-500 font-bold disabled:opacity-50">
+                      <SelectTrigger className="h-9 text-xs font-semibold">
                         <SelectValue placeholder="Day" />
                       </SelectTrigger>
                       <SelectContent>
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
                           <SelectItem key={d} value={String(d)}>
                             Day {d}
                           </SelectItem>
@@ -440,393 +554,658 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
               </div>
             </div>
 
-            {/* Edit Lock Messages */}
-            {(() => {
-              const activeSession = attendanceSessions.find(s => s.id === activeDraftSessionId);
-              if (activeSession && ['Submitted', 'Approved', 'Completed'].includes(activeSession.status)) {
-                return (
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center gap-2 text-sm text-gray-700">
-                    <CheckCircle2 className="w-5 h-5 text-success-500" />
-                    <span>This attendance has been {activeSession.status.toLowerCase()} and cannot be edited.</span>
-                  </div>
-                );
-              }
-              if (activeSession && activeSession.status === 'Correction Requested') {
-                return (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm text-amber-800">
-                    <span className="material-symbols-outlined text-[20px] text-amber-600">warning</span>
-                    <span>Correction Requested: {activeSession.correctionReason || 'Please review and resubmit.'}</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            {/* Locked Warning / Correction Notice */}
+            {isSessionLocked && (
+              <div className="rounded-md border border-border bg-muted/40 p-3 text-xs text-muted-foreground flex items-center gap-2">
+                <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>This session has been {activeSessionObj?.status.toLowerCase()} and attendance records are read-only.</span>
+              </div>
+            )}
+            {activeSessionObj?.status === 'Correction Requested' && (
+              <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300 flex items-start gap-2">
+                <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="block font-semibold">Correction Requested by Reviewer:</strong>
+                  <span>{activeSessionObj.correctionReason || 'Please review absent records and verify student counts.'}</span>
+                </div>
+              </div>
+            )}
 
-            {/* Task / Activity Topic setup */}
-            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex-1 flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  Today&apos;s Topic:
+            {/* Curriculum Topic input & Quick Day buttons */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-3">
+              <div className="flex flex-1 items-center gap-2">
+                <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                  Curriculum Topic:
                 </span>
-                <input
+                <Input
                   type="text"
-                  placeholder="e.g., Phonics Worksheet & Speaking Practice"
+                  placeholder="e.g. Day 1: Self Introductions & Action Verbs"
                   value={taskTopic}
                   onChange={(e) => setTaskTopic(e.target.value)}
-                  className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
+                  disabled={isSessionLocked}
+                  className="h-8 text-xs"
                 />
               </div>
 
-              {/* Day Quick Selectors */}
+              {/* Day Quick Selectors 1-8 */}
               <div className="flex items-center gap-1 overflow-x-auto">
-                {[1, 2, 3, 4, 5, 6].map((day) => (
-                  <button
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((day) => (
+                  <Button
                     key={day}
                     type="button"
+                    variant={selectedDay === day ? 'default' : 'outline'}
+                    size="sm"
                     onClick={() => setSelectedDay(day)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      selectedDay === day
-                        ? 'bg-brand-500 text-white shadow-theme-xs'
-                        : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                    }`}
+                    disabled={isSessionLocked}
+                    className="h-7 px-2 text-xs"
                   >
                     Day {day}
-                  </button>
+                  </Button>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* 2. Compact Metric Cards (counts & status only) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Enrolled</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{filteredStudents.length}</div>
-              <p className="mt-1 text-xs text-gray-400 truncate">
+          {/* 2. KPI Stat Metric Cards */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Users className="h-3.5 w-3.5 text-primary" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Total Enrolled</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tracking-tight text-foreground">{filteredStudents.length}</p>
+              <p className="mt-1 text-[11px] text-muted-foreground truncate">
                 {currentPanchayat?.name || 'Panchayat'} &middot; {selectedVillageName}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-success-500">Present</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{presentCount}</div>
-              <p className="mt-1 text-xs font-medium text-success-500">
+            <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Present</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">{presentCount}</p>
+              <p className="mt-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
                 {filteredStudents.length > 0
                   ? `${Math.round((presentCount / filteredStudents.length) * 100)}% Attendance`
                   : '0%'}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-error-500">Absent</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{absentCount}</div>
-              <p className="mt-1 text-xs font-medium text-error-500">
+            <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <X className="h-3.5 w-3.5 text-red-600" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Absent</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tracking-tight text-red-600 dark:text-red-400">{absentCount}</p>
+              <p className="mt-1 text-[11px] font-medium text-red-600 dark:text-red-400">
                 {filteredStudents.length > 0
                   ? `${Math.round((absentCount / filteredStudents.length) * 100)}% Absent`
                   : '0%'}
               </p>
             </div>
 
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-warning-500">Tasks Completed</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{tasksCompletedCount}</div>
-              <p className="mt-1 text-xs font-medium text-warning-500">
+            <div className="rounded-lg border border-border bg-card p-3.5 shadow-xs">
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <BookOpen className="h-3.5 w-3.5 text-purple-600" />
+                <span className="text-[11px] font-semibold uppercase tracking-wider">Tasks Done</span>
+              </div>
+              <p className="mt-2 text-2xl font-bold tracking-tight text-purple-600 dark:text-purple-400">{tasksCompletedCount}</p>
+              <p className="mt-1 text-[11px] font-medium text-purple-600 dark:text-purple-400">
                 {filteredStudents.length > 0
-                  ? `${Math.round((tasksCompletedCount / filteredStudents.length) * 100)}% Tasks Done`
+                  ? `${Math.round((tasksCompletedCount / filteredStudents.length) * 100)}% Completed`
                   : '0%'}
               </p>
             </div>
           </div>
 
-          {/* 3. Cardless Batch Action Toolbar with Lucide Icons */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Attendance:</span>
-              <button
-                type="button"
-                onClick={() => markAllAttendance('Present')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-600 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>All Present</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => markAllAttendance('Absent')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-error-200 bg-error-50 px-3 py-1.5 text-xs font-semibold text-error-600 hover:bg-error-100 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>All Absent</span>
-              </button>
+          {/* 3. Batch Actions & Roster Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card p-3 shadow-xs">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[200px]">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  placeholder="Search students in this roster..."
+                  className="h-8 pl-8 text-xs"
+                />
+              </div>
+
+              <div className="w-32">
+                <Select
+                  value={selectedStandard}
+                  onValueChange={(val) => setSelectedStandard(val)}
+                >
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Standard" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Standards</SelectItem>
+                    <SelectItem value="9">Std 9</SelectItem>
+                    <SelectItem value="10">Std 10</SelectItem>
+                    <SelectItem value="11">Std 11</SelectItem>
+                    <SelectItem value="12">Std 12</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Tasks:</span>
-              <button
-                type="button"
-                onClick={() => markAllTasks('Completed')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-600 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>All Tasks Done</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => markAllTasks('Not Completed')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span>Reset Tasks</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 border-r border-border pr-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => markAllAttendance('Present')}
+                  disabled={isSessionLocked}
+                  className="h-8 gap-1 text-xs text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
+                >
+                  <Check className="h-3 w-3" />
+                  <span>All Present</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => markAllAttendance('Absent')}
+                  disabled={isSessionLocked}
+                  className="h-8 gap-1 text-xs text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-950/40"
+                >
+                  <X className="h-3 w-3" />
+                  <span>All Absent</span>
+                </Button>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => markAllTasks('Completed')}
+                  disabled={isSessionLocked}
+                  className="h-8 gap-1 text-xs text-purple-700 hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-950/40"
+                >
+                  <Check className="h-3 w-3" />
+                  <span>All Tasks Done</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => markAllTasks('Not Completed')}
+                  disabled={isSessionLocked}
+                  className="h-8 text-xs text-muted-foreground"
+                >
+                  Reset Tasks
+                </Button>
+              </div>
             </div>
           </div>
 
-          {/* 4. Student Attendance Roster (Cardless list) */}
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-            <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+          {/* 4. Student Roster Attendance Table */}
+          <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden">
+            <div className="flex items-center justify-between border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground">
               <span>
-                Student Roster ({filteredStudents.length} Enrolled)
+                Student Roster ({displayedStudents.length} of {filteredStudents.length} Students)
               </span>
-              <span className="text-[11px] lowercase font-normal">Attendance &amp; Task status</span>
+              <span className="font-normal text-muted-foreground">
+                Mark attendance and task evaluation status
+              </span>
             </div>
 
-            {filteredStudents.length === 0 ? (
-              <div className="p-12 text-center text-gray-400 text-xs">
-                No students found in this selection.
+            {displayedStudents.length === 0 ? (
+              <div className="py-12">
+                <EmptyState
+                  icon={Users}
+                  title="No students found"
+                  description="No students enrolled matching this Panchayat and Village filter."
+                  actionLabel="Back to All Villages"
+                  onAction={() => setSelectedVillageId('all')}
+                />
               </div>
             ) : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filteredStudents.map((st) => {
-                  const record = recordsMap[st.id] || {
-                    studentId: st.id,
-                    studentName: st.name,
-                    code: st.code,
-                    standard: st.standard,
-                    villageName: st.villageName,
-                    status: 'Present',
-                    taskStatus: 'Completed',
-                    taskTitle: taskTopic,
-                    remarks: '',
-                  };
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border bg-muted/20 font-semibold text-muted-foreground">
+                    <tr>
+                      <th className="w-14 px-4 py-3 text-center">S.No</th>
+                      <th className="px-4 py-3">Student Name</th>
+                      <th className="px-4 py-3">Standard</th>
+                      <th className="px-4 py-3">Village</th>
+                      <th className="px-4 py-3 text-center">Attendance Status</th>
+                      <th className="px-4 py-3 text-center">Curriculum Task</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {displayedStudents.map((st, idx) => {
+                      const rec = recordsMap[st.id] || {
+                        studentId: st.id,
+                        studentName: st.name,
+                        code: st.code,
+                        standard: st.standard,
+                        villageName: st.villageName,
+                        status: 'Present',
+                        taskStatus: 'Completed',
+                        taskTitle: taskTopic,
+                      };
+                      const isPresent = rec.status === 'Present';
+                      const isAbsent = rec.status === 'Absent';
+                      const isTaskCompleted = rec.taskStatus === 'Completed';
 
-                  const isPresent = record.status === 'Present';
-                  const isAbsent = record.status === 'Absent';
-                  const isTaskCompleted = record.taskStatus === 'Completed';
-
-                  return (
-                    <div
-                      key={st.id}
-                      className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
-                        isAbsent ? 'bg-error-50/20 dark:bg-error-950/10' : 'hover:bg-gray-50/80 dark:hover:bg-white/[0.02]'
-                      }`}
-                    >
-                      {/* Student Info */}
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-full bg-brand-50 text-brand-500 flex items-center justify-center font-bold text-xs shrink-0 dark:bg-brand-500/10 dark:text-brand-400"
+                      return (
+                        <tr
+                          key={st.id}
+                          className={`transition-colors ${
+                            isAbsent
+                              ? 'bg-red-50/20 dark:bg-red-950/10'
+                              : 'hover:bg-muted/30'
+                          }`}
                         >
-                          {st.avatarLetter || st.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-bold text-gray-900 dark:text-white">{st.name}</h4>
-                            <span className="font-mono text-[10px] text-gray-400">
-                              {st.code}
+                          <td className="px-4 py-3 text-center font-mono text-muted-foreground">
+                            {idx + 1}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2.5">
+                              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                                {st.avatarLetter || st.name.charAt(0)}
+                              </div>
+                              <div>
+                                <div className="font-semibold text-foreground">
+                                  {st.name}
+                                </div>
+                                <div className="font-mono text-[10px] text-muted-foreground">
+                                  {st.code || 'ID: —'}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className="inline-flex items-center rounded border border-border bg-muted/40 px-2 py-0.5 font-semibold text-foreground">
+                              Std {st.standard}
                             </span>
-                          </div>
-                          <p className="text-[11px] text-gray-400 mt-0.5">
-                            Std {st.standard} &middot; {st.villageName} &middot; Parent: {st.parentName || '—'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Attendance Toggle Buttons & Task Status */}
-                      <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAttendance(st.id, 'Present')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isPresent
-                                ? 'bg-success-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Present
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAttendance(st.id, 'Absent')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isAbsent
-                                ? 'bg-error-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Absent
-                          </button>
-                        </div>
-
-                        <div className="border-l border-gray-200 pl-3 dark:border-gray-800 flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTask(st.id, 'Completed')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isTaskCompleted
-                                ? 'bg-brand-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Task Done
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTask(st.id, 'Not Completed')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              !isTaskCompleted
-                                ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-white'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Pending
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {st.villageName}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="inline-flex items-center rounded-md border border-border p-0.5 bg-background">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAttendance(st.id, 'Present')}
+                                disabled={isSessionLocked}
+                                className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                                  isPresent
+                                    ? 'bg-emerald-600 text-white shadow-xs'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <Check className="h-3 w-3" />
+                                <span>Present</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleAttendance(st.id, 'Absent')}
+                                disabled={isSessionLocked}
+                                className={`flex items-center gap-1 rounded px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                                  isAbsent
+                                    ? 'bg-red-600 text-white shadow-xs'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                <X className="h-3 w-3" />
+                                <span>Absent</span>
+                              </button>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <div className="inline-flex items-center rounded-md border border-border p-0.5 bg-background">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTask(st.id, 'Completed')}
+                                disabled={isSessionLocked || isAbsent}
+                                className={`rounded px-2.5 py-1 text-xs font-semibold transition disabled:opacity-40 ${
+                                  isTaskCompleted && !isAbsent
+                                    ? 'bg-primary text-primary-foreground shadow-xs'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                Done
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleToggleTask(st.id, 'Not Completed')}
+                                disabled={isSessionLocked || isAbsent}
+                                className={`rounded px-2.5 py-1 text-xs font-semibold transition disabled:opacity-40 ${
+                                  !isTaskCompleted || isAbsent
+                                    ? 'bg-muted text-foreground'
+                                    : 'text-muted-foreground hover:text-foreground'
+                                }`}
+                              >
+                                Pending
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
 
-          {/* ACTION BUTTONS (SAVE DRAFT & SUBMIT) */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              <span className="font-semibold text-gray-900 dark:text-white">Day {selectedDay}:</span>{' '}
+          {/* 5. Volunteer Attendance Sub-Section */}
+          {volunteers.length > 0 && (
+            <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden">
+              <div className="border-b border-border bg-muted/40 px-4 py-3 text-xs font-semibold text-muted-foreground flex items-center justify-between">
+                <span>Assigned College Volunteers Attendance</span>
+                <span className="text-[11px] font-normal">Check in mentors for Day {selectedDay}</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-border bg-muted/20 text-muted-foreground">
+                    <tr>
+                      <th className="w-14 px-4 py-2.5 text-center">S.No</th>
+                      <th className="px-4 py-2.5">Mentor Name</th>
+                      <th className="px-4 py-2.5">College / Institution</th>
+                      <th className="px-4 py-2.5">Department</th>
+                      <th className="px-4 py-2.5 text-center">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {volunteers.slice(0, 5).map((vol, vIdx) => {
+                      const volStatus = volunteerAttendanceMap[vol.id] || 'Present';
+                      return (
+                        <tr key={vol.id} className="hover:bg-muted/30">
+                          <td className="px-4 py-2.5 text-center font-mono text-muted-foreground">
+                            {vIdx + 1}
+                          </td>
+                          <td className="px-4 py-2.5 font-semibold text-foreground">
+                            {vol.name}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground">
+                            {vol.college || '—'}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground">
+                            {vol.department}
+                          </td>
+                          <td className="px-4 py-2.5 text-center">
+                            <div className="inline-flex items-center rounded-md border border-border p-0.5 bg-background">
+                              <button
+                                type="button"
+                                onClick={() => setVolunteerAttendanceMap((m) => ({ ...m, [vol.id]: 'Present' }))}
+                                className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                                  volStatus === 'Present'
+                                    ? 'bg-emerald-600 text-white'
+                                    : 'text-muted-foreground'
+                                }`}
+                              >
+                                Present
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setVolunteerAttendanceMap((m) => ({ ...m, [vol.id]: 'Absent' }))}
+                                className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                                  volStatus === 'Absent'
+                                    ? 'bg-red-600 text-white'
+                                    : 'text-muted-foreground'
+                                }`}
+                              >
+                                Absent
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* 6. Footer Workflow Action Bar */}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-t border-border pt-4">
+            <div className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">Day {selectedDay} Summary:</span>{' '}
               {presentCount} Present &middot; {absentCount} Absent &middot; {tasksCompletedCount} Tasks Done
             </div>
 
-            {!['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '') && (
-              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-                <button
-                  type="button"
-                  onClick={() => handleSaveAttendanceSession(false)}
-                  className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-                >
-                  Save as Draft
-                </button>
-                <ActionButton
-                  onClick={() => handleSaveAttendanceSession(true)}
-                  size="sm"
-                  variant="primary"
-                >
-                  Submit Attendance &amp; Tasks
-                </ActionButton>
-              </div>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {!isSessionLocked && (
+                <>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSaveAttendanceSession('Draft')}
+                  >
+                    Save as Draft
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => handleSaveAttendanceSession('Submitted')}
+                    className="bg-primary text-primary-foreground hover:bg-primary/90"
+                  >
+                    Submit for Approval
+                  </Button>
+                </>
+              )}
+
+              {/* Super Admin Approval Controls */}
+              {userRole === 'Super Admin' && (
+                <>
+                  {activeSessionObj?.status !== 'Approved' && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => handleSaveAttendanceSession('Approved')}
+                      className="bg-emerald-600 text-white hover:bg-emerald-700"
+                    >
+                      <Check className="h-3.5 w-3.5 mr-1" />
+                      Approve Attendance
+                    </Button>
+                  )}
+                  {activeSessionObj?.status !== 'Correction Requested' && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowCorrectionModal(true)}
+                      className="text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-300 dark:border-amber-900"
+                    >
+                      Request Correction
+                    </Button>
+                  )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       ) : (
-        /* SESSION HISTORY TAB */
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white">
-              Past Recorded Attendance &amp; Task Sessions
-            </h3>
-            <span className="text-xs font-medium text-gray-400">
-              {attendanceSessions.length} Sessions Logged
+        /* ==========================================
+            SESSION HISTORY TAB
+           ========================================== */
+        <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h3 className="text-sm font-bold text-foreground">
+                Recorded Attendance Sessions
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                History of logged attendance and task records across academic cycles.
+              </p>
+            </div>
+            <span className="text-xs font-semibold text-muted-foreground">
+              {attendanceSessions.length} Sessions Total
             </span>
           </div>
 
           <div className="overflow-x-auto">
-            <table className="tqi-table-compact w-full text-left border-collapse">
-              <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
+            <table className="w-full text-left text-xs">
+              <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
                 <tr>
-                  <th className="px-5 py-3.5">Session &amp; Day</th>
-                  <th className="px-5 py-3.5">Panchayat &amp; Village</th>
-                  <th className="px-5 py-3.5">Date</th>
-                  <th className="px-5 py-3.5">Attendance</th>
-                  <th className="px-5 py-3.5">Tasks Done</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
+                  <th className="px-4 py-3">Session &amp; Day</th>
+                  <th className="px-4 py-3">Panchayat &amp; Village</th>
+                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Attendance</th>
+                  <th className="px-4 py-3">Tasks Completed</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
-                {attendanceSessions.map((session) => (
-                  <tr key={session.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
-                    <td className="px-5 py-3.5 font-bold text-gray-900 dark:text-white">
-                      {session.day || `Day ${session.dayNumber}`}
-                      <span className="block text-[11px] font-normal text-gray-400">
-                        {session.sessionName}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
-                      <span className="font-semibold text-gray-900 dark:text-white">{session.panchayatName}</span>
-                      <span className="block text-[11px] text-gray-400">
-                        {session.villageName}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 font-mono">{session.date}</td>
-                    <td className="px-5 py-3.5">
-                      <span className="font-bold text-success-500">{session.presentCount || 0}</span> /{' '}
-                      <span className="text-gray-500">{session.totalCount || session.records.length}</span>
-                    </td>
-                    <td className="px-5 py-3.5 font-bold text-warning-500">
-                      {session.tasksCompletedCount ??
-                        session.records.filter((r) => r.taskStatus === 'Completed').length}{' '}
-                      / {session.records.length}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <Badge
-                        color={
-                          session.status === 'Submitted'
-                            ? 'success'
-                            : session.status === 'Correction Requested'
-                            ? 'error'
-                            : 'primary'
-                        }
-                        size="sm"
-                      >
-                        {session.status}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (session.panchayatId) setSelectedPanchayatId(session.panchayatId);
-                          if (session.villageId) setSelectedVillageId(session.villageId);
-                          if (session.dayNumber) setSelectedDay(session.dayNumber);
-                          if (session.date) setSessionDate(session.date);
-                          if (session.sessionName) setSessionTitle(session.sessionName);
-                          if (session.taskTopic) setTaskTopic(session.taskTopic);
-
-                          const map: Record<string, AttendanceRecord> = {};
-                          session.records.forEach((r) => {
-                            map[r.studentId] = r;
-                          });
-                          setRecordsMap(map);
-                          setActiveDraftSessionId(session.id);
-                          setActiveTab('mark');
-                        }}
-                        className="text-xs font-bold text-brand-500 hover:text-brand-600 transition"
-                      >
-                        {session.status === 'Draft' || session.status === 'Correction Requested'
-                          ? 'Continue Entry →'
-                          : 'View / Edit →'}
-                      </button>
+              <tbody className="divide-y divide-border">
+                {attendanceSessions.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-12">
+                      <EmptyState
+                        icon={Calendar}
+                        title="No attendance sessions recorded"
+                        description="Start logging attendance for Day 1 through Day 8 from the Attendance Entry tab."
+                        actionLabel="Mark Attendance"
+                        onAction={() => setActiveTab('mark')}
+                      />
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  attendanceSessions.map((session) => (
+                    <tr
+                      key={session.id}
+                      className="transition-colors hover:bg-muted/30"
+                    >
+                      <td className="px-4 py-3 font-semibold text-foreground">
+                        {session.day || `Day ${session.dayNumber}`}
+                        <div className="text-[11px] font-normal text-muted-foreground">
+                          {session.sessionName}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">{session.panchayatName}</div>
+                        <div className="text-[11px] text-muted-foreground">{session.villageName}</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono text-muted-foreground">
+                        {session.date}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                          {session.presentCount || 0}
+                        </span>{' '}
+                        /{' '}
+                        <span className="text-muted-foreground">
+                          {session.totalCount || session.records.length}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-purple-600 dark:text-purple-400">
+                        {session.tasksCompletedCount ??
+                          session.records.filter((r) => r.taskStatus === 'Completed').length}{' '}
+                        /{' '}
+                        <span className="font-normal text-muted-foreground">
+                          {session.records.length}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge
+                          variant={
+                            session.status === 'Approved'
+                              ? 'success'
+                              : session.status === 'Submitted'
+                              ? 'info'
+                              : session.status === 'Correction Requested'
+                              ? 'destructive'
+                              : 'secondary'
+                          }
+                          size="sm"
+                        >
+                          {session.status}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (session.panchayatId) setSelectedPanchayatId(session.panchayatId);
+                            if (session.villageId) setSelectedVillageId(session.villageId);
+                            if (session.dayNumber) setSelectedDay(session.dayNumber);
+                            if (session.date) setSessionDate(session.date);
+                            if (session.sessionName) setSessionTitle(session.sessionName);
+                            if (session.taskTopic) setTaskTopic(session.taskTopic);
+
+                            const map: Record<string, AttendanceRecord> = {};
+                            session.records.forEach((r) => {
+                              map[r.studentId] = r;
+                            });
+                            setRecordsMap(map);
+                            setActiveDraftSessionId(session.id);
+                            setActiveTab('mark');
+                          }}
+                          className="text-xs font-semibold text-primary hover:text-primary/90"
+                        >
+                          {session.status === 'Draft' || session.status === 'Correction Requested'
+                            ? 'Continue Entry →'
+                            : 'Review Roster →'}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* Correction Request Modal */}
+      {showCorrectionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <h3 className="text-base font-bold text-foreground">Request Resubmission</h3>
+              <button
+                type="button"
+                onClick={() => setShowCorrectionModal(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-foreground">
+                  Reason for Correction / Notes to Cluster Team *
+                </label>
+                <textarea
+                  rows={4}
+                  required
+                  placeholder="Explain why this attendance sheet requires changes (e.g. absent counts mismatch with student roster)..."
+                  value={correctionReason}
+                  onChange={(e) => setCorrectionReason(e.target.value)}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowCorrectionModal(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleRequestCorrection}
+                >
+                  Send Correction Request
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       )}

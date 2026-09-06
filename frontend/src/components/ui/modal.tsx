@@ -117,40 +117,24 @@ export const Modal: React.FC<ModalProps> = ({
       />
       <div
         ref={modalRef}
-        className={`${contentClasses} ${asSheet ? 'rounded-t-3xl rounded-b-none' : ''} ${isFull ? '' : 'max-h-[92vh] rounded-2xl'} overflow-y-auto custom-scrollbar ${className}`}
+        className={`${contentClasses} ${asSheet ? 'rounded-t-lg rounded-b-none' : ''} ${isFull ? '' : 'max-h-[92vh] rounded-lg'} overflow-y-auto custom-scrollbar border border-border bg-card shadow-xl ${className}`}
         onClick={(e) => e.stopPropagation()}
-        style={{
-          ...motionStyle,
-          background: 'var(--card)',
-          border: '1px solid var(--border)',
-          boxShadow:
-            '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 32px 80px -24px rgba(15, 23, 42, 0.4)',
-        }}
       >
         {(title || showCloseButton) && (
           <div
-            className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 ${asSheet ? 'rounded-t-3xl' : ''}`}
-            style={{
-              background:
-                'color-mix(in srgb, var(--card) 90%, transparent)',
-              backdropFilter: 'blur(8px)',
-              WebkitBackdropFilter: 'blur(8px)',
-              borderBottom: '1px solid var(--border-subtle)',
-            }}
+            className={`sticky top-0 z-10 flex items-center justify-between px-4 py-3 sm:px-6 sm:py-3.5 border-b border-border bg-card/95 backdrop-blur-xs`}
           >
             <div className="min-w-0 flex-1">
               {title && (
                 <h3
-                  className="truncate text-[15px] sm:text-[17px] font-semibold tracking-tight"
-                  style={{ color: 'var(--text)' }}
+                  className="truncate text-base font-semibold tracking-tight text-foreground"
                 >
                   {title}
                 </h3>
               )}
               {subtitle && (
                 <p
-                  className="mt-0.5 truncate text-[12px]"
-                  style={{ color: 'var(--text-muted)' }}
+                  className="mt-0.5 truncate text-xs text-muted-foreground"
                 >
                   {subtitle}
                 </p>
@@ -158,29 +142,12 @@ export const Modal: React.FC<ModalProps> = ({
             </div>
             {showCloseButton && (
               <button
+                type="button"
                 onClick={onClose}
-                className="tqi-touch ml-2 inline-flex shrink-0 items-center justify-center transition-all"
-                style={{
-                  width: 32,
-                  height: 32,
-                  color: 'var(--text-muted)',
-                  background:
-                    'color-mix(in srgb, var(--surface) 60%, transparent)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 'var(--radius-md, 10px)',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--surface-hover)';
-                  e.currentTarget.style.color = 'var(--text)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background =
-                    'color-mix(in srgb, var(--surface) 60%, transparent)';
-                  e.currentTarget.style.color = 'var(--text-muted)';
-                }}
+                className="ml-2 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
                 aria-label="Close"
               >
-                <X size={14} weight="light" />
+                <X size={16} />
               </button>
             )}
           </div>

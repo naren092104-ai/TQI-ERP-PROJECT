@@ -77,6 +77,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotStatus, setForgotStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [forgotError, setForgotError] = useState<string | null>(null);
+  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('token') || '');
 
   const openForgot = () => {
     setForgotEmail(identifier);
@@ -202,6 +203,24 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setIsLoading(false);
     }
   };
+  const handleTokenReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    if (newPassword.length < 8 || newPassword !== confirmPassword) { setErrorMessage(newPassword.length < 8 ? 'New password must be at least 8 characters.' : 'Passwords do not match.'); return; }
+    setIsLoading(true);
+    try {
+      const response = await fetch(apiUrl('/api/auth/reset-password'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, newPassword }) });
+      const data = await response.json();
+      if (!response.ok || !data?.success) { setErrorMessage(data?.error || 'Unable to reset password.'); setIsLoading(false); return; }
+      window.history.replaceState({}, '', window.location.pathname);
+      setErrorMessage('Password reset successfully. You can now sign in.');
+      setNewPassword(''); setConfirmPassword(''); setIsLoading(false);
+    } catch { setErrorMessage('Unable to reach the server. Please try again.'); setIsLoading(false); }
+  };
+
+  if (resetToken) {
+    return <div className="tqi-login-shell"><section className="tqi-login-form-side"><div className="tqi-login-card"><CardBrandMark /><h1 className="tqi-login-h1">Create New Password</h1><p className="tqi-login-sub2">Use a new password for your TQI Cluster Admin account.</p>{errorMessage && <div className="tqi-alert tqi-alert-error" style={{ marginTop: '1rem' }}>{errorMessage}</div>}<form onSubmit={handleTokenReset} style={{ marginTop: '1.25rem' }}><label className="tqi-login-label" htmlFor="reset-new-pass">New password</label><input id="reset-new-pass" type="password" required minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="tqi-login-input" placeholder="At least 8 characters" /><label className="tqi-login-label" htmlFor="reset-confirm-pass" style={{ marginTop: '0.85rem' }}>Confirm password</label><input id="reset-confirm-pass" type="password" required minLength={8} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="tqi-login-input" placeholder="Re-enter your password" /><button type="submit" disabled={isLoading} className="tqi-login-primary" style={{ marginTop: '1.25rem' }}>{isLoading ? 'Resetting...' : 'Reset Password'}</button></form></div></section></div>;
+  }
 
   // ============= Onboarding / change-password view =============
   if (pendingSession) {
