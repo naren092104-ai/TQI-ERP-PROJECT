@@ -57,6 +57,7 @@ import { apiUrl } from './utils/api';
 import { CommandPalette } from './components/ui/CommandPalette';
 import { NotFoundView } from './components/NotFoundView';
 import { PanchayatHierarchyRoute, PanchayatHierarchyView } from './components/PanchayatHierarchyView';
+import { TqiLoadingScreen } from './components/TqiLoadingScreen';
 
 const parsePanchayatRoute = (): PanchayatHierarchyRoute | null => {
   const parts = window.location.pathname.split('/').filter(Boolean);
@@ -187,6 +188,10 @@ export default function App() {
     try { return localStorage.getItem('tqi_selected_academic_year_id') || ''; } catch { return ''; }
   });
   const [modules, setModules] = useState<TqiModule[]>([]);
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(() => {
+    return Boolean(currentUser?.token);
+  });
+  const [initialLoadError, setInitialLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     try { if (selectedAcademicYearId) localStorage.setItem('tqi_selected_academic_year_id', selectedAcademicYearId); } catch { /* ignore storage failures */ }
@@ -295,10 +300,32 @@ export default function App() {
       }
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
-    } catch {
-      // Network error or abort — keep existing in-memory state.
+
+      const isNetworkFailure = (
+        panchayatsRes === null &&
+        clustersRes === null &&
+        studentsRes === null &&
+        volunteersRes === null
+      );
+      if (isNetworkFailure && !signal.aborted) {
+        setInitialLoadError("Unable to connect to the TQI ERP server. Please verify your connection or server status.");
+      } else if (!signal.aborted) {
+        setInitialLoadError(null);
+        setIsInitialLoading(false);
+      }
+    } catch (err: any) {
+      if (!signal.aborted) {
+        setInitialLoadError(err?.message || "Unable to load TQI ERP data. Please try again.");
+      }
     }
   }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId]);
+
+  const handleRetryInitialLoad = () => {
+    setInitialLoadError(null);
+    setIsInitialLoading(true);
+    const controller = new AbortController();
+    fetchBackendData(controller.signal);
+  };
 
   useEffect(() => {
     if (!currentUser?.token) return;
@@ -318,6 +345,8 @@ export default function App() {
     setCurrentUserRole(session.role);
     setCurrentUserClusterId(session.clusterId);
     setCurrentTab('dashboard');
+    setIsInitialLoading(true);
+    setInitialLoadError(null);
     if (session.role === 'Super Admin') {
       setSelectedPanchayatId('vedakkattamaduvu');
     } else if (session.clusterId === 'salem') {
@@ -336,6 +365,8 @@ export default function App() {
       // ignore
     }
     setCurrentUser(null);
+    setIsInitialLoading(false);
+    setInitialLoadError(null);
     setCurrentTab('dashboard');
   };
 
@@ -1261,6 +1292,16 @@ export default function App() {
   // If user is logged out, render the Login Page
   if (!currentUser) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // During genuine initial workspace data bootstrap, render the branded loading screen
+  if (isInitialLoading) {
+    return (
+      <TqiLoadingScreen
+        error={initialLoadError}
+        onRetry={handleRetryInitialLoad}
+      />
+    );
   }
 
   // Scoped Data Lists based on Logged-in User Role and Cluster

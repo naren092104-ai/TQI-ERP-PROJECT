@@ -7,7 +7,7 @@ import {
   UserCircle,
   Check,
   Command,
-  Sliders,
+  Menu,
   Sparkle,
   Gear,
   Question,
@@ -140,7 +140,7 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <>
       {/* Enterprise Top Header */}
-      <header className="sticky top-0 z-30 w-full h-14 border-b border-border bg-card px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 shadow-xs">
+      <header className="tqi-app-header sticky top-0 z-30 w-full h-14 border-b border-border bg-card px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 shadow-xs">
         {/* Left: mobile toggle + search */}
         <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
           <button
@@ -149,17 +149,7 @@ export const Header: React.FC<HeaderProps> = ({
             className="lg:hidden flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
             aria-label="Toggle navigation"
           >
-            <Sliders size={16} />
-          </button>
-
-          {/* Mobile search trigger */}
-          <button
-            type="button"
-            onClick={() => setMobileSearchOpen(true)}
-            className="sm:hidden flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
-            aria-label="Open search"
-          >
-            <Search size={16} />
+            <Menu size={18} />
           </button>
 
           {/* Inline search (tablet+) */}
@@ -223,14 +213,14 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right: Academic Year, Notifications, Mode, User profile */}
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="tqi-header-actions flex items-center gap-2 shrink-0">
           {/* Global Academic Year Selector */}
-          <div className="relative">
+          <div className="tqi-header-year relative">
             <select
               aria-label="Academic Year"
               value={selectedAcademicYearId}
               onChange={(event) => onSelectAcademicYear?.(event.target.value)}
-              className="h-8 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
+              className="tqi-header-year-select h-8 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
             >
               <option value="">Select Academic Year</option>
               {academicYears.map((year) => (

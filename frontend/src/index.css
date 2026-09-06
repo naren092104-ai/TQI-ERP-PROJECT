@@ -3274,6 +3274,47 @@ kbd.tqi-kbd {
 .tqi-touch { min-height: 44px; min-width: 44px; }
 .tqi-stack-mobile { display: flex; flex-direction: row; gap: 0.5rem; }
 @media (max-width: 640px) {
+  .tqi-app-header {
+    height: auto !important;
+    min-height: 56px;
+    padding: 0.5rem 0.75rem !important;
+    gap: 0.35rem !important;
+  }
+
+  .tqi-app-header > :first-child {
+    min-width: 0;
+    gap: 0.35rem !important;
+  }
+
+  .tqi-header-actions {
+    gap: 0.25rem !important;
+  }
+
+  .tqi-header-year-select {
+    width: 6.75rem;
+    max-width: 6.75rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-left: 0.4rem !important;
+    padding-right: 0.4rem !important;
+    font-size: 0.6875rem !important;
+  }
+
+  .tqi-header-actions > button,
+  .tqi-header-actions .relative > button {
+    flex: 0 0 auto;
+  }
+
+  .tqi-header-actions .relative:last-child button {
+    padding-right: 0.35rem;
+  }
+
+  .tqi-header-actions .relative:last-child button > span:first-child {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
   .tqi-stack-mobile { flex-direction: column; }
 }
 .tqi-table-compact th,
