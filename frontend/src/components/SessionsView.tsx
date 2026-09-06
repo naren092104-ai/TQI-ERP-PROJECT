@@ -42,6 +42,7 @@ interface SessionsViewProps {
   onUpdateSession: (id: string, updated: Partial<Session>) => void;
   onDeleteSession?: (id: string) => Promise<void> | void;
   onRequestDateChange?: (sessionId: string, originalDate: string, newDate: string, reason: string) => Promise<void>;
+  onFixSessionDate?: (sessionId: string, date: string) => Promise<void>;
   canManageSchedule?: boolean;
   userRole?: string;
 }
@@ -56,6 +57,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   onUpdateSession,
   onDeleteSession,
   onRequestDateChange,
+  onFixSessionDate,
   userRole = 'Super Admin',
 }) => {
   const isClusterAdmin = userRole === 'Cluster Admin';
@@ -63,7 +65,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClusterId, setSelectedClusterId] = useState<string>('all');
-  const [showClusterCards, setShowClusterCards] = useState(true);
+  const [showClusterCards, setShowClusterCards] = useState(userRole === 'Super Admin');
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('all');
@@ -79,6 +81,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const [viewingSession, setViewingSession] = useState<Session | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<Session | null>(null);
   const [dateChangeSession, setDateChangeSession] = useState<Session | null>(null);
+  const [dateFixSession, setDateFixSession] = useState<Session | null>(null);
+  const [dateFixValue, setDateFixValue] = useState('');
   const [newDateValue, setNewDateValue] = useState('');
   const [dateChangeReason, setDateChangeReason] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -87,6 +91,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
   };
+
+  useEffect(() => {
+    setShowClusterCards(userRole === 'Super Admin');
+    setSelectedClusterId('all');
+  }, [userRole]);
 
   const moduleOptions = [
     'Spoken English & Communication',
@@ -166,7 +175,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   }, [filteredSessions, currentPage, pageSize]);
 
   const visibleClusters = useMemo(
-    () => isClusterAdmin ? clusters.filter((cluster) => sessions.some((session) => session.clusterId === cluster.id) || cluster.id === clusters[0]?.id) : clusters,
+    () => isClusterAdmin ? clusters : clusters,
     [clusters, sessions, isClusterAdmin]
   );
 
@@ -219,11 +228,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     setEditingSession(null);
     const p = panchayats[0];
     setFormData({
-      name: `Day 1 Spoken English Session`,
+      name: '',
       clusterId: clusters[0]?.id || '',
       dayNumber: 1,
       date: new Date().toISOString().split('T')[0],
-      module: 'Spoken English & Communication',
+      module: '',
       panchayatId: p?.id || '',
       villageName: p?.villages[0]?.name || '',
       volunteerId: volunteers[0]?.id || '',
@@ -236,11 +245,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const handleOpenEdit = (session: Session) => {
     setEditingSession(session);
     setFormData({
-      name: session.name || session.title || '',
+      name: session.name || '',
       clusterId: session.clusterId || clusters[0]?.id || '',
       dayNumber: session.dayNumber || 1,
       date: session.date || new Date().toISOString().split('T')[0],
-      module: session.module || 'Spoken English & Communication',
+      module: session.module || '',
       panchayatId: session.panchayatId || (panchayats[0]?.id || ''),
       villageName: session.villageName || '',
       volunteerId: session.volunteerId || '',
@@ -325,6 +334,24 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     setDateChangeReason('');
   };
 
+  const handleOpenDateFix = (session: Session) => {
+    setDateFixSession(session);
+    setDateFixValue(session.date || '');
+  };
+
+  const handleFixDate = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!dateFixSession || !dateFixValue) return;
+    try {
+      if (onFixSessionDate) await onFixSessionDate(dateFixSession.id, dateFixValue);
+      else onUpdateSession(dateFixSession.id, { date: dateFixValue, dateFixed: true });
+      showToast(`Date fixed for ${dateFixSession.name || 'Name not set'}`);
+      setDateFixSession(null);
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to save session date.');
+    }
+  };
+
   const handleSubmitDateChange = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!dateChangeSession) return;
@@ -337,22 +364,26 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       return;
     }
 
-    if (onRequestDateChange) {
-      await onRequestDateChange(
-        dateChangeSession.id,
-        dateChangeSession.date,
-        newDateValue,
-        dateChangeReason
-      );
-    } else {
-      onUpdateSession(dateChangeSession.id, {
-        date: newDateValue,
-        status: 'Action Req.',
-      });
-    }
+    try {
+      if (onRequestDateChange) {
+        await onRequestDateChange(
+          dateChangeSession.id,
+          dateChangeSession.date,
+          newDateValue,
+          dateChangeReason
+        );
+      } else {
+        onUpdateSession(dateChangeSession.id, {
+          date: newDateValue,
+          status: 'Action Req.',
+        });
+      }
 
-    showToast(`Reschedule request submitted for ${dateChangeSession.name}`);
-    setDateChangeSession(null);
+      showToast(`Reschedule request submitted for ${dateChangeSession.name}`);
+      setDateChangeSession(null);
+    } catch (error: any) {
+      showToast(error?.message || 'Unable to submit date change request.');
+    }
   };
 
   return (
@@ -360,9 +391,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       {/* 1. Page Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <button type="button" onClick={() => { setShowClusterCards(true); setSelectedClusterId('all'); }} className="mb-2 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to clusters
-          </button>
           <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
             Sessions Schedule &amp; Management
           </h1>
@@ -372,24 +400,16 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onNavigate('date-change-requests')}
-            className="gap-1.5 text-xs font-semibold"
-          >
-            <CalendarCheck className="h-3.5 w-3.5" />
-            <span>Date Change Requests ({stats.dateChangesPending})</span>
-          </Button>
-
-          <Button
-            size="sm"
-            onClick={handleOpenAdd}
-            className="gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Schedule Session</span>
-          </Button>
+          {!isClusterAdmin && (
+            <Button
+              size="sm"
+              onClick={handleOpenAdd}
+              className="gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Schedule Session</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -558,12 +578,9 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
               <tr>
                 <th className="w-14 px-4 py-3 text-center">S.No</th>
-                <th className="px-4 py-3">Cluster</th>
                 <th className="px-4 py-3 text-center">Cycle Day</th>
                 <th className="px-4 py-3">Session Date</th>
                 <th className="px-4 py-3">Module &amp; Curriculum</th>
-                <th className="px-4 py-3">Panchayat &amp; Village</th>
-                <th className="px-4 py-3">Volunteer Mentor</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -571,7 +588,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             <tbody className="divide-y divide-border">
               {paginatedSessions.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12">
+                  <td colSpan={6} className="py-12">
                     <EmptyState
                       icon={Calendar}
                       title="No sessions scheduled"
@@ -580,8 +597,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                           ? 'Try adjusting your filters or search terms.'
                           : 'Schedule your first teaching session to begin academic operations.'
                       }
-                      actionLabel="+ Schedule Session"
-                      onAction={handleOpenAdd}
+                      actionLabel={isClusterAdmin ? undefined : '+ Schedule Session'}
+                      onAction={isClusterAdmin ? undefined : handleOpenAdd}
                     />
                   </td>
                 </tr>
@@ -589,7 +606,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 paginatedSessions.map((session, idx) => {
                   const sNo = (currentPage - 1) * pageSize + idx + 1;
                   const dayNum = session.dayNumber || parseInt(session.day?.replace(/\D/g, '') || '1', 10);
-                  const isCompleted = session.status === 'Completed';
+                  const displayStatus = session.dateFixed ? 'Scheduled' : session.status;
+                  const isCompleted = displayStatus === 'Completed';
 
                   return (
                     <tr
@@ -599,11 +617,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                       <td className="px-4 py-3 text-center font-mono text-muted-foreground">
                         {sNo}
                       </td>
-                      <td className="px-4 py-3">
-                        <span className="font-semibold text-foreground">
-                          {session.clusterName || 'Main Cluster'}
-                        </span>
-                      </td>
                       <td className="px-4 py-3 text-center">
                         <Badge variant="default" size="sm">
                           Day {dayNum}
@@ -612,50 +625,34 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                       <td className="px-4 py-3">
                         <div className="font-mono text-xs font-semibold text-foreground flex items-center gap-1.5">
                           <Calendar className="h-3.5 w-3.5 text-primary" />
-                          <span>{session.date || '—'}</span>
+                          <span>{session.dateFixed ? session.date : 'Not Fixed'}</span>
+                          {session.dateFixed && <Badge variant="success" size="sm">✓ Date Fixed</Badge>}
                         </div>
                       </td>
                       <td className="px-4 py-3">
                         <div className="font-semibold text-foreground">
-                          {session.name || session.title}
+                          {session.name || 'Name not set'}
                         </div>
                         <div className="text-[11px] text-muted-foreground">
-                          {session.module || 'Spoken English'}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-foreground">{session.panchayatName || '—'}</div>
-                        <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <MapPin className="h-3 w-3" />
-                          <span>{session.villageName || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-                            {(session.volunteerName || 'U').charAt(0)}
-                          </div>
-                          <span className="text-foreground font-medium">
-                            {session.volunteerName || 'Unassigned'}
-                          </span>
+                          {session.module || 'Name not set'}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-center">
                         <Badge
                           variant={
-                            session.status === 'Completed'
+                            displayStatus === 'Completed'
                               ? 'success'
-                              : session.status === 'In Progress'
+                              : displayStatus === 'In Progress'
                               ? 'info'
-                              : session.status === 'Needs Attention' || session.status === 'Action Req.'
+                              : displayStatus === 'Needs Attention' || displayStatus === 'Action Req.'
                               ? 'warning'
-                              : session.status === 'Cancelled'
+                              : displayStatus === 'Cancelled'
                               ? 'destructive'
                               : 'secondary'
                           }
                           size="sm"
                         >
-                          {session.status}
+                          {displayStatus}
                         </Badge>
                       </td>
                       <td className="px-4 py-3 text-right">
@@ -678,15 +675,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                           >
                             <Edit3 className="h-3.5 w-3.5" />
                           </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
-                            onClick={() => handleOpenDateChange(session)}
-                            title="Request Date Reschedule"
-                          >
-                            <CalendarCheck className="h-3.5 w-3.5" />
-                          </Button>
+                          {isClusterAdmin && !session.dateFixed && <Button variant="outline" size="sm" className="h-8 text-xs text-primary" onClick={() => handleOpenDateFix(session)}>Fix Session Date</Button>}
+                          {(!isClusterAdmin || session.dateFixed) && <Button variant="ghost" size="icon" className="h-7 w-7 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40" onClick={() => handleOpenDateChange(session)} title={session.dateFixed ? 'Request Date Change' : 'Request Date Reschedule'}><CalendarCheck className="h-3.5 w-3.5" /></Button>}
                           <Button
                             variant="ghost"
                             size="icon"
@@ -783,7 +773,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   <Input
                     type="text"
                     required
-                    placeholder="e.g. Day 1 Spoken English & Self Introductions"
+                    placeholder="Configured in Academic Setup"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     autoFocus
@@ -1044,13 +1034,22 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         </div>
       )}
 
+      {dateFixSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-border pb-3"><div><h3 className="text-base font-bold text-foreground">Fix Session Date</h3><p className="mt-0.5 text-xs text-muted-foreground">Set the actual date for {dateFixSession.name || 'Name not set'}.</p></div><button type="button" onClick={() => setDateFixSession(null)} className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button></div>
+            <form onSubmit={handleFixDate} className="mt-4 space-y-4 text-xs"><label className="block font-semibold text-foreground">Session Date *<Input className="mt-1" type="date" required value={dateFixValue} onChange={(event) => setDateFixValue(event.target.value)} /></label><p className="rounded-md bg-muted/50 p-3 text-muted-foreground">After saving, this date will be marked as fixed and used by attendance, lesson plans, photos, reports, and finance.</p><div className="flex justify-end gap-2 border-t border-border pt-4"><Button type="button" variant="outline" onClick={() => setDateFixSession(null)}>Cancel</Button><Button type="submit">Confirm &amp; Save</Button></div></form>
+          </div>
+        </div>
+      )}
+
       {/* 7. View Session Details Modal */}
       {viewingSession && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
           <div className="relative w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
             <div className="flex items-center justify-between border-b border-border pb-3">
               <div>
-                <h3 className="text-base font-bold text-foreground">{viewingSession.name || viewingSession.title}</h3>
+                <h3 className="text-base font-bold text-foreground">{viewingSession.name || 'Name not set'}</h3>
                 <p className="text-xs text-muted-foreground">Session ID: {viewingSession.code || viewingSession.id}</p>
               </div>
               <button

@@ -38,11 +38,12 @@ interface StudentsViewProps {
   students: Student[];
   panchayats: Panchayat[];
   initialFilters?: { panchayatId?: string; villageId?: string };
-  onAddStudent: (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => void;
+  onAddStudent: (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => Promise<void> | void;
   onBulkImportStudents?: (students: any[], clusterId: string) => Promise<void> | void;
   onEditStudent?: (id: string, updated: Partial<Student>) => Promise<void> | void;
   onUpdateStudent?: (id: string, updated: Partial<Student>) => void;
   onDeleteStudent: (id: string) => void;
+  openOnMount?: 'add' | 'import';
 }
 
 interface ParsedStudentRow {
@@ -66,6 +67,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   onEditStudent,
   onUpdateStudent,
   onDeleteStudent,
+  openOnMount,
 }) => {
   const [search, setSearch] = useState('');
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('all');
@@ -82,6 +84,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
+  const [genderManuallyEdited, setGenderManuallyEdited] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const [importRows, setImportRows] = useState<ParsedStudentRow[]>([]);
@@ -90,6 +93,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [importPanchayatId, setImportPanchayatId] = useState<string>('');
   const [importVillageName, setImportVillageName] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (openOnMount === 'add') handleOpenAdd();
+    if (openOnMount === 'import') {
+      const targetPanchayat = panchayats.find((panchayat) => panchayat.id === initialFilters?.panchayatId);
+      const targetVillage = targetPanchayat?.villages.find((village) => village.id === initialFilters?.villageId || village.name === initialFilters?.villageId);
+      setImportPanchayatId(targetPanchayat?.id || '');
+      setImportVillageName(targetVillage?.name || '');
+      setShowImportModal(true);
+    }
+  }, [openOnMount, initialFilters]);
 
   useEffect(() => {
     if (initialFilters?.panchayatId) {
@@ -108,7 +122,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   const [formData, setFormData] = useState({
     name: '',
-    gender: 'female' as 'male' | 'female',
+    gender: 'other' as 'male' | 'female' | 'other',
     dob: '2009-06-15',
     standard: '9',
     parentName: '',
@@ -148,7 +162,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         !search ||
         (s.name || '').toLowerCase().includes(q) ||
         (s.code || '').toLowerCase().includes(q) ||
-        (s.parentName || '').toLowerCase().includes(q) ||
         (s.phone || '').includes(q) ||
         (s.villageName || '').toLowerCase().includes(q);
 
@@ -204,25 +217,29 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   const handleOpenAdd = () => {
     setEditingStudent(null);
+    setGenderManuallyEdited(false);
+    const targetPanchayat = panchayats.find((panchayat) => panchayat.id === initialFilters?.panchayatId) || panchayats[0];
+    const targetVillage = targetPanchayat?.villages.find((village) => village.id === initialFilters?.villageId || village.name === initialFilters?.villageId) || targetPanchayat?.villages[0];
     setFormData({
       name: '',
-      gender: 'female',
+      gender: 'other',
       dob: '2009-06-15',
       standard: '9',
       parentName: '',
       phone: '',
       status: 'active',
-      panchayatId: panchayats[0]?.id || '',
-      villageName: panchayats[0]?.villages[0]?.name || '',
+      panchayatId: targetPanchayat?.id || '',
+      villageName: targetVillage?.name || '',
     });
     setShowAddModal(true);
   };
 
   const handleOpenEdit = (student: Student) => {
     setEditingStudent(student);
+    setGenderManuallyEdited(true);
     setFormData({
       name: student.name,
-      gender: student.gender === 'male' ? 'male' : 'female',
+      gender: student.gender,
       dob: student.dob || '2009-06-15',
       standard: ['9', '10', '11', '12'].includes(student.standard) ? student.standard : '9',
       parentName: student.parentName || '',
@@ -234,7 +251,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setShowAddModal(true);
   };
 
-  const handleSaveStudent = (e: React.FormEvent) => {
+  const handleSaveStudent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.name.trim()) {
       alert('Please enter student name.');
@@ -273,7 +290,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       }
       showToast(`Updated student ${formData.name.trim()}`);
     } else {
-      onAddStudent({
+      await onAddStudent({
         name: formData.name.trim(),
         gender: formData.gender,
         dob: formData.dob,
@@ -311,7 +328,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Female',
         'Standard': '9',
         'Date of Birth': '2010-04-15',
-        'Parent Name': 'Srinivasan K.',
         'Contact Phone': '9443211223',
         'Status': 'Active',
       },
@@ -320,7 +336,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Male',
         'Standard': '10',
         'Date of Birth': '2009-08-20',
-        'Parent Name': 'Nathan P.',
         'Contact Phone': '9842199887',
         'Status': 'Active',
       },
@@ -329,7 +344,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Female',
         'Standard': '11',
         'Date of Birth': '2008-01-10',
-        'Parent Name': 'Ramesh T.',
         'Contact Phone': '9789044556',
         'Status': 'Active',
       },
@@ -338,7 +352,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Male',
         'Standard': '12',
         'Date of Birth': '2007-11-28',
-        'Parent Name': 'Murugesan V.',
         'Contact Phone': '9840277889',
         'Status': 'Active',
       },
@@ -390,7 +403,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           }
 
           const dob = findVal(['dob', 'birth', 'dateofbirth']) || '2009-06-15';
-          const parentName = findVal(['parent', 'guardian', 'father', 'mother']) || '';
+          const parentName = '';
           const phone = findVal(['phone', 'mobile', 'contact']) || '';
           const rawStatus = findVal(['status']).toLowerCase();
           const status: 'active' | 'inactive' = rawStatus.includes('inact') ? 'inactive' : 'active';
@@ -565,7 +578,7 @@ formatted.forEach((st) => onAddStudent(st));
               setSearch(e.target.value);
               setCurrentPage(1);
             }}
-            placeholder="Search by student name, code, parent, or village..."
+            placeholder="Search by student name, code, phone, or village..."
             className="h-9 pl-8 text-xs"
           />
         </div>
@@ -711,7 +724,7 @@ formatted.forEach((st) => onAddStudent(st));
                 <th className="px-4 py-3">Std</th>
                 <th className="px-4 py-3">Gender</th>
                 <th className="px-4 py-3">Panchayat & Village</th>
-                <th className="px-4 py-3">Parent / Contact</th>
+                          <th className="px-4 py-3">Contact</th>
                 <th className="px-4 py-3 text-center">Status</th>
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
@@ -778,7 +791,6 @@ formatted.forEach((st) => onAddStudent(st));
                         </div>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="text-foreground">{st.parentName || '—'}</div>
                         <div className="font-mono text-[11px] text-muted-foreground flex items-center gap-1">
                           <Phone className="h-3 w-3" />
                           <span>{st.phone || '—'}</span>
@@ -888,7 +900,7 @@ formatted.forEach((st) => onAddStudent(st));
                 </h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {editingStudent
-                    ? 'Update demographic, academic standard, and parent records.'
+                    ? 'Update demographic and academic standard records.'
                     : 'Add a student to the academic roster for village learning centers.'}
                 </p>
               </div>
@@ -912,7 +924,13 @@ formatted.forEach((st) => onAddStudent(st));
                     required
                     placeholder="e.g. Kavya S."
                     value={formData.name}
-                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      const matchingStudent = !genderManuallyEdited
+                        ? students.find((student) => student.name.trim().toLowerCase() === name.trim().toLowerCase())
+                        : undefined;
+                      setFormData({ ...formData, name, gender: matchingStudent?.gender || formData.gender });
+                    }}
                     autoFocus
                   />
                 </div>
@@ -920,11 +938,11 @@ formatted.forEach((st) => onAddStudent(st));
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-foreground">
-                      Gender *
+                      Gender * <span className="font-normal text-muted-foreground">(auto-filled when known; editable)</span>
                     </label>
                     <Select
                       value={formData.gender}
-                      onValueChange={(val: any) => setFormData({ ...formData, gender: val })}
+                      onValueChange={(val: any) => { setGenderManuallyEdited(true); setFormData({ ...formData, gender: val }); }}
                     >
                       <SelectTrigger className="h-9 text-xs">
                         <SelectValue placeholder="Select Gender" />
@@ -932,6 +950,7 @@ formatted.forEach((st) => onAddStudent(st));
                       <SelectContent>
                         <SelectItem value="female">Female</SelectItem>
                         <SelectItem value="male">Male</SelectItem>
+                        <SelectItem value="other">Other</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -957,7 +976,7 @@ formatted.forEach((st) => onAddStudent(st));
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {initialFilters?.panchayatId ? <div className="grid grid-cols-1 gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs font-semibold text-foreground">Panchayat</label><div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground">{panchayats.find((panchayat) => panchayat.id === formData.panchayatId)?.name || formData.panchayatId}</div></div><div><label className="mb-1 block text-xs font-semibold text-foreground">Village</label><div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm text-foreground">{formData.villageName || 'No village selected'}</div></div></div> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-foreground">
                       Target Panchayat *
@@ -1007,21 +1026,9 @@ formatted.forEach((st) => onAddStudent(st));
                       </SelectContent>
                     </Select>
                   </div>
-                </div>
+                </div>}
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">
-                      Parent / Guardian Name
-                    </label>
-                    <Input
-                      type="text"
-                      placeholder="e.g. Srinivasan K."
-                      value={formData.parentName}
-                      onChange={(e) => setFormData({ ...formData, parentName: e.target.value })}
-                    />
-                  </div>
-
                   <div>
                     <label className="mb-1 block text-xs font-semibold text-foreground">
                       Contact Phone
@@ -1032,37 +1039,6 @@ formatted.forEach((st) => onAddStudent(st));
                       value={formData.phone}
                       onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                     />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">
-                      Date of Birth
-                    </label>
-                    <Input
-                      type="date"
-                      value={formData.dob}
-                      onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">
-                      Enrollment Status
-                    </label>
-                    <Select
-                      value={formData.status}
-                      onValueChange={(val: any) => setFormData({ ...formData, status: val })}
-                    >
-                      <SelectTrigger className="h-9 text-xs">
-                        <SelectValue placeholder="Select Status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="active">Active</SelectItem>
-                        <SelectItem value="inactive">Inactive</SelectItem>
-                      </SelectContent>
-                    </Select>
                   </div>
                 </div>
               </div>
@@ -1132,10 +1108,6 @@ formatted.forEach((st) => onAddStudent(st));
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Village Learning Hub:</span>
                   <span className="font-semibold text-foreground">{viewingStudent.villageName || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Parent / Guardian:</span>
-                  <span className="text-foreground">{viewingStudent.parentName || '—'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Phone Contact:</span>
@@ -1293,7 +1265,6 @@ formatted.forEach((st) => onAddStudent(st));
                           <th className="px-3 py-1.5">Name</th>
                           <th className="px-3 py-1.5">Gender</th>
                           <th className="px-3 py-1.5">Std</th>
-                          <th className="px-3 py-1.5">Parent</th>
                           <th className="px-3 py-1.5">Phone</th>
                           <th className="px-3 py-1.5">Status</th>
                         </tr>
@@ -1304,7 +1275,6 @@ formatted.forEach((st) => onAddStudent(st));
                             <td className="px-3 py-1.5 font-medium text-foreground">{r.name || '—'}</td>
                             <td className="px-3 py-1.5 capitalize">{r.gender}</td>
                             <td className="px-3 py-1.5">Std {r.standard}</td>
-                            <td className="px-3 py-1.5 text-muted-foreground">{r.parentName || '—'}</td>
                             <td className="px-3 py-1.5 font-mono text-muted-foreground">{r.phone || '—'}</td>
                             <td className="px-3 py-1.5">
                               {r.isValid ? (

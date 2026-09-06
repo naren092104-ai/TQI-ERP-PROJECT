@@ -96,14 +96,13 @@ export const Navigation: React.FC<NavigationProps> = ({
     {
       label: 'FIELD OPERATIONS',
       items: [
-        ...(!isVolunteer ? [{ id: 'clusters', label: 'Clusters', icon: TreeStructure }] : []),
+        ...(!isVolunteer ? [{ id: 'clusters', label: 'Clusters', icon: TreeStructure, superAdminOnly: true }] : []),
         { id: 'panchayats', label: 'Panchayats & Villages', icon: MapPin },
         { id: 'students', label: 'Students Roster', icon: Student },
         { id: 'volunteers', label: 'Volunteers Directory', icon: Users },
-        { id: 'attendance', label: '8-Day Attendance', icon: CalendarCheck },
+        { id: 'attendance', label: 'Attendance', icon: CalendarCheck },
         { id: 'sessions', label: 'Session Scheduling', icon: ClipboardText },
         { id: 'session-photos', label: 'Session Photos', icon: Camera },
-        { id: 'date-change-requests', label: 'Date Change Requests', icon: Calendar },
         { id: 'session-reports', label: 'Session Reports', icon: FileText },
       ],
     },
@@ -121,12 +120,15 @@ export const Navigation: React.FC<NavigationProps> = ({
         ...(isSuperAdmin
           ? [{ id: 'users', label: 'User Management', icon: UserCircleCheck }]
           : []),
-        {
-          id: 'approvals',
-          label: 'Approval Center',
-          icon: ShieldCheck,
-          badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined,
-        },
+        ...(isSuperAdmin
+          ? [{
+              id: 'approvals',
+              label: 'Approval Center',
+              icon: ShieldCheck,
+              badge: pendingApprovalsCount > 0 ? pendingApprovalsCount : undefined,
+              superAdminOnly: true,
+            }]
+          : []),
         ...(isSuperAdmin ? [{ id: 'audit-logs', label: 'Audit Logs', icon: FileText }] : []),
         { id: 'notifications', label: 'Notifications', icon: Sparkle },
         { id: 'settings', label: 'Settings', icon: Gear },

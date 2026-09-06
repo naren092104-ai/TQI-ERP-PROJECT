@@ -330,10 +330,10 @@ export const Header: React.FC<HeaderProps> = ({
               </span>
               <div className="hidden sm:flex flex-col text-left leading-tight">
                 <span className="text-xs font-semibold text-foreground truncate max-w-[120px]">
-                  Admin
+                  {userRole === 'Cluster Admin' ? 'Cluster Admin' : 'Admin'}
                 </span>
                 <span className="text-[9px] font-bold text-primary tracking-wider uppercase">
-                  SUPER ADMIN
+                  {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
                 </span>
               </div>
               <CaretDown
@@ -350,7 +350,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <p className="text-xs font-semibold text-foreground">{userName}</p>
                   <p className="text-[11px] text-muted-foreground truncate">{userEmail}</p>
                   <span className="inline-block mt-1 text-[10px] font-bold text-primary uppercase">
-                    SUPER ADMIN
+                    {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
                   </span>
                 </div>
 

@@ -96,6 +96,8 @@ CREATE TABLE IF NOT EXISTS `volunteers` (
   `panchayat_id` VARCHAR(64) NULL,
   `village_id` VARCHAR(64) NULL,
   `department` VARCHAR(255) NULL,
+  `stream` VARCHAR(100) NULL,
+  `passing_out_year` SMALLINT NULL,
   `role` VARCHAR(64) NULL,
   `status` ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -484,7 +486,68 @@ CREATE TABLE IF NOT EXISTS `session_submissions` (
   INDEX `idx_submissions_day` (`day_number`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 27. Schema Migrations Table
+-- 27. Session Photo Submissions Table
+CREATE TABLE IF NOT EXISTS `session_photo_submissions` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `cluster_id` VARCHAR(64) NOT NULL,
+  `academic_year_id` VARCHAR(64) NOT NULL,
+  `day_number` INT NOT NULL,
+  `session_id` VARCHAR(64) NULL,
+  `status` VARCHAR(64) NOT NULL DEFAULT 'DRAFT',
+  `submitted_by` VARCHAR(64) NULL,
+  `submitted_at` TIMESTAMP NULL,
+  `reviewed_by` VARCHAR(64) NULL,
+  `reviewed_at` TIMESTAMP NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY `uk_photo_sub` (`cluster_id`, `academic_year_id`, `day_number`),
+  INDEX `idx_photo_sub_cluster` (`cluster_id`),
+  INDEX `idx_photo_sub_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 28. Photo Delete Requests Table
+CREATE TABLE IF NOT EXISTS `photo_delete_requests` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `photo_id` VARCHAR(64) NOT NULL,
+  `cluster_id` VARCHAR(64) NOT NULL,
+  `academic_year_id` VARCHAR(64) NOT NULL,
+  `day_number` INT NOT NULL,
+  `session_id` VARCHAR(64) NULL,
+  `requested_by` VARCHAR(64) NOT NULL,
+  `requested_by_name` VARCHAR(255) NULL,
+  `reason` TEXT NOT NULL,
+  `status` VARCHAR(64) NOT NULL DEFAULT 'PENDING',
+  `reviewed_by` VARCHAR(64) NULL,
+  `reviewed_at` TIMESTAMP NULL,
+  `review_remarks` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pdr_photo` (`photo_id`),
+  INDEX `idx_pdr_cluster` (`cluster_id`),
+  INDEX `idx_pdr_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 29. Photo Change Requests Table
+CREATE TABLE IF NOT EXISTS `photo_change_requests` (
+  `id` VARCHAR(64) PRIMARY KEY,
+  `cluster_id` VARCHAR(64) NOT NULL,
+  `academic_year_id` VARCHAR(64) NOT NULL,
+  `day_number` INT NOT NULL,
+  `session_id` VARCHAR(64) NULL,
+  `requested_by` VARCHAR(64) NOT NULL,
+  `requested_by_name` VARCHAR(255) NULL,
+  `reason` TEXT NOT NULL,
+  `status` VARCHAR(64) NOT NULL DEFAULT 'PENDING',
+  `reviewed_by` VARCHAR(64) NULL,
+  `reviewed_at` TIMESTAMP NULL,
+  `review_remarks` TEXT NULL,
+  `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_pcr_cluster` (`cluster_id`),
+  INDEX `idx_pcr_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 30. Schema Migrations Table
 CREATE TABLE IF NOT EXISTS `schema_migrations` (
   `version` VARCHAR(255) PRIMARY KEY,
   `applied_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP

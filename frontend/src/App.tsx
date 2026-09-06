@@ -58,12 +58,22 @@ import { CommandPalette } from './components/ui/CommandPalette';
 import { NotFoundView } from './components/NotFoundView';
 import { PanchayatHierarchyRoute, PanchayatHierarchyView } from './components/PanchayatHierarchyView';
 import { TqiLoadingScreen } from './components/TqiLoadingScreen';
+import { StudentDirectoryRoute, StudentDirectoryView } from './components/StudentDirectoryView';
 
 const parsePanchayatRoute = (): PanchayatHierarchyRoute | null => {
   const parts = window.location.pathname.split('/').filter(Boolean);
   if (parts.length === 1 && parts[0] === 'panchayats-villages') return { level: 'clusters' };
   if (parts.length === 3 && parts[0] === 'clusters' && parts[2] === 'panchayats') return { level: 'panchayats', clusterId: decodeURIComponent(parts[1]) };
   if (parts.length === 5 && parts[0] === 'clusters' && parts[2] === 'panchayats' && parts[4] === 'villages') return { level: 'villages', clusterId: decodeURIComponent(parts[1]), panchayatId: decodeURIComponent(parts[3]) };
+  return null;
+};
+
+const parseStudentRoute = (): StudentDirectoryRoute | null => {
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (parts.length === 1 && parts[0] === 'students') return { level: 'clusters' };
+  if (parts.length === 3 && parts[0] === 'students' && parts[1] === 'clusters') return { level: 'panchayats', clusterId: decodeURIComponent(parts[2]) };
+  if (parts.length === 5 && parts[0] === 'students' && parts[1] === 'clusters' && parts[3] === 'panchayats') return { level: 'students', clusterId: decodeURIComponent(parts[2]), panchayatId: decodeURIComponent(parts[4]) };
+  if (parts.length === 7 && parts[0] === 'students' && parts[1] === 'clusters' && parts[3] === 'panchayats' && parts[5] === 'villages') return { level: 'village', clusterId: decodeURIComponent(parts[2]), panchayatId: decodeURIComponent(parts[4]), villageId: decodeURIComponent(parts[6]) };
   return null;
 };
 
@@ -98,6 +108,7 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<TabType>(() => {
     try {
       if (parsePanchayatRoute()) return 'panchayats';
+      if (parseStudentRoute()) return 'students';
       const role = currentUser?.role || 'Super Admin';
       const savedTab = localStorage.getItem(`tqi_current_tab_${role}`) as TabType | null;
       if (!savedTab) return 'dashboard';
@@ -113,6 +124,9 @@ export default function App() {
   });
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('vedakkattamaduvu');
   const [panchayatRoute, setPanchayatRoute] = useState<PanchayatHierarchyRoute | null>(() => parsePanchayatRoute());
+  const [studentRoute, setStudentRoute] = useState<StudentDirectoryRoute | null>(() => parseStudentRoute());
+  const [studentManagementOpen, setStudentManagementOpen] = useState(false);
+  const [studentManagementMode, setStudentManagementMode] = useState<'add' | 'import'>('add');
   const [initialStudentFilters, setInitialStudentFilters] = useState<{ panchayatId?: string; villageId?: string } | undefined>(undefined);
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>(undefined);
   const [activeFinanceDraftId, setActiveFinanceDraftId] = useState<string | undefined>(undefined);
@@ -123,7 +137,10 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
 
   useEffect(() => {
-    const handlePopState = () => setPanchayatRoute(parsePanchayatRoute());
+    const handlePopState = () => {
+      setPanchayatRoute(parsePanchayatRoute());
+      setStudentRoute(parseStudentRoute());
+    };
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
@@ -137,6 +154,20 @@ export default function App() {
     window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
     setPanchayatRoute(route);
     setCurrentTab('panchayats');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const navigateStudentRoute = (route: StudentDirectoryRoute, replace = false) => {
+    const path = route.level === 'clusters'
+      ? '/students'
+      : route.level === 'panchayats'
+        ? `/students/clusters/${encodeURIComponent(route.clusterId)}`
+        : route.level === 'students'
+          ? `/students/clusters/${encodeURIComponent(route.clusterId)}/panchayats/${encodeURIComponent(route.panchayatId)}`
+          : `/students/clusters/${encodeURIComponent(route.clusterId)}/panchayats/${encodeURIComponent(route.panchayatId)}/villages/${encodeURIComponent(route.villageId)}`;
+    window.history[replace ? 'replaceState' : 'pushState']({}, '', path);
+    setStudentRoute(route);
+    setCurrentTab('students');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -174,6 +205,7 @@ export default function App() {
   const [students, setStudents] = useState<Student[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [programDays, setProgramDays] = useState<Array<{ id: string; day_number: number; day_name: string; academic_year_id?: string; status?: string }>>([]);
   const [attendanceSessions, setAttendanceSessions] = useState<AttendanceSession[]>([]);
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [financeDrafts, setFinanceDrafts] = useState<FinanceDraft[]>([]);
@@ -235,6 +267,7 @@ export default function App() {
         studentsRes,
         volunteersRes,
         sessionsRes,
+        programDaysRes,
         attendanceRes,
         financeRes,
         lessonPlansRes,
@@ -254,6 +287,7 @@ export default function App() {
         get(`/api/students?clusterId=${currentUserClusterId}`),
         get(`/api/volunteers?clusterId=${currentUserClusterId}`),
         get(`/api/sessions?clusterId=${currentUserClusterId}${selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : ''}`),
+        get(`/api/program-days${selectedAcademicYearId ? `?academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : ''}`),
         get(`/api/attendance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/finance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/lesson-plans?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
@@ -279,6 +313,7 @@ export default function App() {
       if (Array.isArray(studentsRes?.students))             setStudents(studentsRes.students);
       if (Array.isArray(volunteersRes?.volunteers))         setVolunteers(volunteersRes.volunteers);
       if (Array.isArray(sessionsRes?.sessions))             setSessions(sessionsRes.sessions);
+      if (Array.isArray(programDaysRes?.programDays))       setProgramDays(programDaysRes.programDays);
       if (Array.isArray(attendanceRes?.attendanceSessions)) setAttendanceSessions(attendanceRes.attendanceSessions);
       if (Array.isArray(financeRes?.financeEntries))        setFinanceEntries(financeRes.financeEntries);
       if (Array.isArray(lessonPlansRes?.lessonPlans))       setLessonPlans(lessonPlansRes.lessonPlans);
@@ -700,6 +735,7 @@ export default function App() {
       setCurrentTab('finance-statement');
       return;
     }
+    window.history.replaceState({}, '', '/');
     setCurrentTab(tab);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -775,8 +811,15 @@ export default function App() {
 
   const handleAddVillageToPanchayat = async (panchayatId: string, name: string) => {
     const response = await fetch(apiUrl('/api/villages'), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` }, body: JSON.stringify({ name, panchayat_id: panchayatId }) });
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to add village.');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.message || data.error || 'Unable to add village.');
+    await refreshHierarchyData();
+  };
+
+  const handleEditVillage = async (id: string, name: string, status: string) => {
+    const response = await fetch(apiUrl(`/api/villages/${id}`), { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` }, body: JSON.stringify({ name, status }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.message || data.error || 'Unable to update village.');
     await refreshHierarchyData();
   };
 
@@ -789,95 +832,35 @@ export default function App() {
 
   const handleDeleteVillageFromPanchayat = async (id: string) => {
     const response = await fetch(apiUrl(`/api/villages/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${currentUser?.token || ''}` } });
-    const data = await response.json();
-    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to delete village.');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.message || data.error || 'Unable to delete village.');
     await refreshHierarchyData();
   };
 
   // Student mutations
-  const handleAddStudent = (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
-    const newId = `stu-${Date.now()}`;
-    const code = `STU-24-${String(students.length + 1).padStart(3, '0')}`;
-    const avatarLetter = newStudent.name.charAt(0).toUpperCase();
-    const colors = ['bg-[#0b3d91] text-white', 'bg-[#345baf] text-white', 'bg-[#521a00] text-white', 'bg-[#592600] text-white'];
-    const avatarBg = colors[students.length % colors.length];
-
-    const created: Student = {
-      ...newStudent,
-      id: newId,
-      code,
-      avatarLetter,
-      avatarBg,
-    };
-    setStudents((prev) => [created, ...prev]);
-
-    setPanchayats((prev) =>
-      prev.map((p) => {
-        if (p.id === newStudent.panchayatId) {
-          const updatedVillages = p.villages.map((v) =>
-            v.name === newStudent.villageName || v.id === newStudent.villageId
-              ? { ...v, studentCount: v.studentCount + 1 }
-              : v
-          );
-          return {
-            ...p,
-            activeStudents: p.activeStudents + 1,
-            villages: updatedVillages,
-          };
-        }
-        return p;
-      })
-    );
+  const handleAddStudent = async (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
+    const response = await fetch(apiUrl('/api/students'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify(newStudent),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to save student.');
+    await fetchBackendData(new AbortController().signal);
   };
 
-  const handleBulkAddStudents = (
+  const handleBulkAddStudents = async (
     newStudentsList: Array<Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>>
   ) => {
     if (!newStudentsList || newStudentsList.length === 0) return;
-
-    const colors = [
-      'bg-[#0b3d91] text-white',
-      'bg-[#345baf] text-white',
-      'bg-[#521a00] text-white',
-      'bg-[#592600] text-white',
-    ];
-
-    const currentTotal = students.length;
-    const createdBatch: Student[] = newStudentsList.map((st, idx) => {
-      const codeNumber = currentTotal + idx + 1;
-      return {
-        ...st,
-        id: `stu-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
-        code: `STU-24-${String(codeNumber).padStart(3, '0')}`,
-        avatarLetter: (st.name || 'S').charAt(0).toUpperCase(),
-        avatarBg: colors[(currentTotal + idx) % colors.length],
-      };
+    const response = await fetch(apiUrl('/api/students/bulk'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ students: newStudentsList, clusterId: newStudentsList[0].clusterId || currentUserClusterId }),
     });
-
-    setStudents((prev) => [...createdBatch, ...prev]);
-
-    setPanchayats((prev) =>
-      prev.map((p) => {
-        const matchingAdded = createdBatch.filter((s) => s.panchayatId === p.id);
-        if (matchingAdded.length > 0) {
-          const updatedVillages = p.villages.map((v) => {
-            const villageAdded = matchingAdded.filter(
-              (s) => s.villageId === v.id || s.villageName === v.name
-            );
-            return {
-              ...v,
-              studentCount: v.studentCount + villageAdded.length,
-            };
-          });
-          return {
-            ...p,
-            activeStudents: p.activeStudents + matchingAdded.length,
-            villages: updatedVillages,
-          };
-        }
-        return p;
-      })
-    );
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.success) throw new Error(data.error || 'Unable to import students.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleUpdateStudent = (id: string, updated: Partial<Student>) => {
@@ -932,7 +915,30 @@ export default function App() {
     setVolunteers((prev) => [created, ...prev]);
   };
 
-  const handleUpdateVolunteer = (id: string, updated: Partial<Volunteer>) => {
+  const handleBulkImportVolunteers = async (newVolunteers: any[], clusterId: string) => {
+    const response = await fetch(apiUrl('/api/volunteers/bulk'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser?.token || ''}`,
+      },
+      body: JSON.stringify({ volunteers: newVolunteers, clusterId }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to import volunteers.');
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleUpdateVolunteer = async (id: string, updated: Partial<Volunteer>) => {
+    if (currentUser?.token) {
+      const response = await fetch(apiUrl(`/api/volunteers/${id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+        body: JSON.stringify(updated),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update volunteer.');
+    }
     setVolunteers((prev) => prev.map((v) => (v.id === id ? { ...v, ...updated } : v)));
   };
 
@@ -965,7 +971,21 @@ export default function App() {
           sessionName: existing.name,
         }),
       });
-      if (!response.ok) return;
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data?.success === false) {
+        throw new Error(data?.error || 'Unable to save session date.');
+      }
+      const savedId = data?.sessionId || id;
+      setSessions((prev) => prev.map((s) => (s.id === id ? {
+        ...s,
+        ...updated,
+        id: savedId,
+        status: data?.status || updated.status || s.status,
+        dateFixed: data?.dateFixed ?? updated.dateFixed ?? s.dateFixed,
+        dateFixedAt: data?.dateFixedAt || s.dateFixedAt,
+        dateFixedBy: data?.dateFixedBy || s.dateFixedBy,
+      } : s)));
+      return;
     }
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...updated } : s)));
   };
@@ -1113,10 +1133,30 @@ export default function App() {
         body: JSON.stringify({ sessionId, originalDate, requestedDate, reason }),
       });
       const data = await response.json();
-      if (data?.success && data.dateChangeRequest) {
-        setDateChangeRequests(prev => [data.dateChangeRequest, ...prev]);
+      if (response.status === 409 && data?.error?.toLowerCase().includes('already pending')) {
+        const refreshResponse = await fetch(
+          apiUrl(`/api/date-change-requests?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+          { headers: { Authorization: `Bearer ${currentUser?.token || ''}` } },
+        );
+        const refreshData = await refreshResponse.json().catch(() => ({}));
+        const existingRequest = Array.isArray(refreshData?.dateChangeRequests)
+          ? refreshData.dateChangeRequests.find((request: DateChangeRequest) => request.sessionId === sessionId)
+          : null;
+        if (existingRequest) {
+          setDateChangeRequests((previous) => [
+            existingRequest,
+            ...previous.filter((request) => request.id !== existingRequest.id),
+          ]);
+          return;
+        }
       }
-    } catch { /* ignore */ }
+      if (!response.ok || !data?.success || !data.dateChangeRequest) {
+        throw new Error(data?.error || 'Unable to submit date change request.');
+      }
+      setDateChangeRequests(prev => [data.dateChangeRequest, ...prev]);
+    } catch (error) {
+      throw error;
+    }
   };
 
   const handleReviewDateChangeRequest = async (requestId: string, action: 'approve' | 'reject', remarks: string) => {
@@ -1127,12 +1167,13 @@ export default function App() {
         body: JSON.stringify({ remarks }),
       });
       const data = await response.json();
-      if (data?.success) {
-        setDateChangeRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: action === 'approve' ? 'APPROVED' : 'REJECTED', reviewRemarks: remarks } : r));
-        if (action === 'approve') {
-          // Refresh sessions to get updated dates
-          fetchBackendData(new AbortController().signal);
-        }
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || `Unable to ${action} date change request.`);
+      }
+      setDateChangeRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: action === 'approve' ? 'APPROVED' : 'REJECTED', reviewRemarks: remarks } : r));
+      if (action === 'approve') {
+        // Refresh sessions to get the approved date.
+        fetchBackendData(new AbortController().signal);
       }
     } catch { /* ignore */ }
   };
@@ -1254,12 +1295,18 @@ export default function App() {
 
   const handleDeleteModule = async (id: string) => {
     try {
-      await fetch(apiUrl(`/api/modules/${id}`), {
+      const response = await fetch(apiUrl(`/api/modules/${id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
       });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || 'Unable to delete module.');
+      }
       setModules(prev => prev.filter(m => m.id !== id));
-    } catch { /* ignore */ }
+    } catch (error: any) {
+      alert(error?.message || 'Unable to delete module.');
+    }
   };
 
   const handleUploadModuleResource = async (moduleId: string, file: File) => {
@@ -1284,9 +1331,70 @@ export default function App() {
     } catch { /* ignore */ }
   };
 
+  const handleRefreshModules = useCallback(async () => {
+    try {
+      const response = await fetch(apiUrl('/api/modules'), {
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      const data = await response.json();
+      if (response.ok && Array.isArray(data?.modules)) {
+        setModules(data.modules);
+      }
+    } catch {
+      // Keep the current module list when a background refresh fails.
+    }
+  }, [currentUser?.token]);
+
+  const handleModuleResource = async (moduleId: string, resourceId: string, mode: 'view' | 'download') => {
+    try {
+      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download`), {
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      if (!response.ok) throw new Error('Unable to open resource.');
+
+      const blobUrl = URL.createObjectURL(await response.blob());
+      if (mode === 'view') {
+        window.open(blobUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        return;
+      }
+
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `module-resource-${resourceId}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
+    } catch (error: any) {
+      alert(error?.message || 'Unable to open resource.');
+    }
+  };
+
   const handleDownloadModuleResource = (moduleId: string, resourceId: string) => {
-    const downloadUrl = apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download`);
-    window.open(downloadUrl, '_blank');
+    void handleModuleResource(moduleId, resourceId, 'download');
+  };
+
+  const handleViewModuleResource = (moduleId: string, resourceId: string) => {
+    void handleModuleResource(moduleId, resourceId, 'view');
+  };
+
+  const handleDeleteModuleResource = async (moduleId: string, resourceId: string) => {
+    if (!window.confirm('Delete this resource permanently?')) return;
+    try {
+      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources/${resourceId}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      const data = await response.json();
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete resource.');
+      setModules(prev => prev.map(module => module.id === moduleId
+        ? { ...module, resources: module.resources.filter(resource => resource.id !== resourceId) }
+        : module
+      ));
+    } catch (error: any) {
+      alert(error?.message || 'Unable to delete resource.');
+    }
   };
 
   // If user is logged out, render the Login Page
@@ -1305,33 +1413,31 @@ export default function App() {
   }
 
   // Scoped Data Lists based on Logged-in User Role and Cluster
-  const clusterFilterKey = currentUserClusterId === 'salem' ? 'Salem' : currentUserClusterId === 'namakkal' ? 'Namakkal' : 'Dharmapuri';
-  
   const displayPanchayats = currentUserRole === 'Super Admin'
     ? panchayats
-    : panchayats.filter((p) => (p.cluster || '').toLowerCase() === clusterFilterKey.toLowerCase());
+    : panchayats.filter((p) => p.clusterId === currentUserClusterId || (p.cluster && currentClusterObj && p.cluster.toLowerCase() === currentClusterObj.name.toLowerCase()));
 
   const displayPanchayatIds = new Set(displayPanchayats.map((p) => p.id));
 
   const displayStudents = currentUserRole === 'Super Admin'
     ? students
-    : students.filter((s) => displayPanchayatIds.has(s.panchayatId));
+    : students.filter((s) => s.clusterId === currentUserClusterId || displayPanchayatIds.has(s.panchayatId));
 
   const displayVolunteers = currentUserRole === 'Super Admin'
     ? volunteers
-    : volunteers.filter((v) => !v.panchayatId || displayPanchayatIds.has(v.panchayatId) || v.clusterId === currentUserClusterId);
+    : volunteers.filter((v) => v.clusterId === currentUserClusterId || !v.panchayatId || displayPanchayatIds.has(v.panchayatId));
 
   const displaySessions = currentUserRole === 'Super Admin'
     ? sessions
-    : sessions.filter((s) => displayPanchayatIds.has(s.panchayatId) || s.clusterId === currentUserClusterId);
+    : sessions.filter((s) => s.clusterId === currentUserClusterId || displayPanchayatIds.has(s.panchayatId));
 
   const displayAttendance = currentUserRole === 'Super Admin'
     ? attendanceSessions
-    : attendanceSessions.filter((a) => displayPanchayatIds.has(a.panchayatId) || a.clusterId === currentUserClusterId);
+    : attendanceSessions.filter((a) => a.clusterId === currentUserClusterId || displayPanchayatIds.has(a.panchayatId));
 
   const displayFinance = currentUserRole === 'Super Admin'
     ? financeEntries
-    : financeEntries.filter((f) => !f.panchayatId || displayPanchayatIds.has(f.panchayatId) || f.clusterId === currentUserClusterId);
+    : financeEntries.filter((f) => f.clusterId === currentUserClusterId || !f.panchayatId || displayPanchayatIds.has(f.panchayatId));
 
   const displayFinanceDrafts = currentUserRole === 'Super Admin'
     ? financeDrafts
@@ -1339,7 +1445,7 @@ export default function App() {
 
   const displayLessonPlans = currentUserRole === 'Super Admin'
     ? lessonPlans
-    : lessonPlans.filter((lp) => !lp.clusterId || lp.clusterId === currentUserClusterId || (lp.panchayatId && displayPanchayatIds.has(lp.panchayatId)));
+    : lessonPlans.filter((lp) => lp.clusterId === currentUserClusterId || !lp.clusterId || (lp.panchayatId && displayPanchayatIds.has(lp.panchayatId)));
 
   const displayApprovals = currentUserRole === 'Super Admin'
     ? approvals
@@ -1387,9 +1493,18 @@ export default function App() {
         currentTab={currentTab}
         onSelectTab={(tab) => {
           if (tab === 'attendance') setActiveDraftId(undefined);
-          if (tab === 'students') setInitialStudentFilters(undefined);
+          if (tab === 'students') {
+            setInitialStudentFilters(undefined);
+            setStudentManagementOpen(false);
+            navigateStudentRoute({ level: 'clusters' });
+            setMobileSidebarOpen(false);
+            return;
+          }
           if (tab === 'panchayats') navigatePanchayatRoute({ level: 'clusters' });
-          else setCurrentTab(tab as TabType);
+          else {
+            window.history.replaceState({}, '', '/');
+            setCurrentTab(tab as TabType);
+          }
           setMobileSidebarOpen(false);
         }}
         notifications={notifications}
@@ -1481,7 +1596,7 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'approvals' && (
+              {currentTab === 'approvals' && currentUserRole === 'Super Admin' && (
                 <ApprovalCenterView
                   approvals={displayApprovals}
                   clusters={clusters}
@@ -1490,6 +1605,12 @@ export default function App() {
                   onRequestCorrection={handleRequestCorrection}
                   onReject={handleRejectSubmission}
                   onNavigate={handleNavigate}
+                  dateChangeRequests={displayDateChangeRequests}
+                  sessions={displaySessions}
+                  currentUserId={currentUser.id || ''}
+                  currentUserClusterId={currentUserClusterId}
+                  onSubmitDateChange={handleSubmitDateChangeRequest}
+                  onReviewDateChange={handleReviewDateChangeRequest}
                 />
               )}
 
@@ -1531,6 +1652,7 @@ export default function App() {
                   onNavigate={navigatePanchayatRoute}
                   onAddPanchayat={handleAddPanchayatToCluster}
                   onAddVillage={handleAddVillageToPanchayat}
+                  onEditVillage={handleEditVillage}
                   onDeletePanchayat={handleDeletePanchayatFromCluster}
                   onDeleteVillage={handleDeleteVillageFromPanchayat}
                 />
@@ -1547,25 +1669,51 @@ export default function App() {
               )}
 
               {currentTab === 'students' && (
-                <StudentsView
-                  students={displayStudents}
-                  panchayats={displayPanchayats}
-                  initialFilters={initialStudentFilters}
-                  onAddStudent={handleAddStudent}
-                  onBulkImportStudents={handleBulkAddStudents}
-                  onUpdateStudent={handleUpdateStudent}
-                  onDeleteStudent={handleDeleteStudent}
-                />
+                studentManagementOpen ? (
+                  <div className="space-y-4">
+                    <button type="button" className="text-xs font-medium text-muted-foreground hover:text-foreground" onClick={() => setStudentManagementOpen(false)}>← Back to Students Directory</button>
+                    <StudentsView
+                      students={displayStudents}
+                      panchayats={displayPanchayats}
+                      initialFilters={initialStudentFilters}
+                      onAddStudent={handleAddStudent}
+                      onBulkImportStudents={handleBulkAddStudents}
+                      onUpdateStudent={handleUpdateStudent}
+                      onDeleteStudent={handleDeleteStudent}
+                      openOnMount={studentManagementMode}
+                    />
+                  </div>
+                ) : (
+                  <StudentDirectoryView
+                    route={
+                      (studentRoute && (currentUserRole === 'Super Admin' || studentRoute.level !== 'clusters'))
+                        ? studentRoute
+                        : (currentUserRole === 'Cluster Admin'
+                            ? { level: 'panchayats', clusterId: currentUserClusterId }
+                            : { level: 'clusters' })
+                    }
+                    clusters={currentUserRole === 'Super Admin' ? clusters : clusters.filter((cluster) => cluster.id === currentUserClusterId)}
+                    panchayats={displayPanchayats}
+                    students={displayStudents}
+                    academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
+                    userRole={currentUserRole}
+                    onNavigate={navigateStudentRoute}
+                    onManageStudents={(mode, panchayatId, villageId) => { setStudentManagementMode(mode === 'bulk' ? 'import' : 'add'); setInitialStudentFilters(panchayatId ? { panchayatId, villageId } : undefined); setStudentManagementOpen(true); }}
+                  />
+                )
               )}
 
               {currentTab === 'volunteers' && (
                 <VolunteersView
                   volunteers={displayVolunteers}
+                  clusters={clusters}
                   panchayats={displayPanchayats}
                   collegeName={currentClusterObj?.collegeName || ''}
                   clusterName={activeClusterName}
                   userRole={currentUserRole}
                   onAddVolunteer={handleAddVolunteer}
+                  onBulkImportVolunteers={handleBulkImportVolunteers}
+                  onEditVolunteer={handleUpdateVolunteer}
                   onUpdateVolunteer={handleUpdateVolunteer}
                   onDeleteVolunteer={handleDeleteVolunteer}
                 />
@@ -1574,14 +1722,17 @@ export default function App() {
               {currentTab === 'sessions' && (
                 <SessionsView
                   sessions={displaySessions}
-                  clusters={clusters}
+                  clusters={currentUserRole === 'Super Admin' ? clusters : clusters.filter((cluster) => cluster.id === currentUserClusterId)}
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
                   onNavigate={handleNavigate}
                   onAddSession={handleAddSession}
                   onUpdateSession={handleUpdateSession}
                   onDeleteSession={handleDeleteSession}
+                  onRequestDateChange={handleSubmitDateChangeRequest}
+                  onFixSessionDate={async (id, date) => { await handleUpdateSession(id, { date, dateFixed: true, status: 'Scheduled' }); }}
                   canManageSchedule={currentUserRole === 'Cluster Admin'}
+                  userRole={currentUserRole}
                 />
               )}
 
@@ -1590,7 +1741,13 @@ export default function App() {
                   attendanceSessions={displayAttendance}
                   students={displayStudents}
                   panchayats={displayPanchayats}
+                  sessions={displaySessions}
+                  programDays={programDays}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   draftId={activeDraftId}
+                  userRole={currentUserRole}
+                  clusterName={activeClusterName}
+                  authToken={currentUser?.token}
                   onNavigate={handleNavigate}
                   onSaveAttendance={handleSaveAttendance}
                 />
@@ -1692,18 +1849,6 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'date-change-requests' && (
-                <DateChangeRequestView
-                  dateChangeRequests={displayDateChangeRequests}
-                  sessions={displaySessions}
-                  currentUserRole={currentUserRole}
-                  currentUserId={currentUser.id || ''}
-                  currentUserClusterId={currentUserClusterId}
-                  onSubmitRequest={handleSubmitDateChangeRequest}
-                  onReviewRequest={handleReviewDateChangeRequest}
-                />
-              )}
-
               {currentTab === 'session-reports' && (
                 <SessionReportView
                   sessionReports={displaySessionReports}
@@ -1734,11 +1879,15 @@ export default function App() {
                 <ModuleLibraryView
                   modules={modules}
                   currentUserRole={currentUserRole}
+                  currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   onCreateModule={handleCreateModule}
                   onUpdateModule={handleUpdateModule}
                   onDeleteModule={handleDeleteModule}
                   onUploadResource={handleUploadModuleResource}
                   onDownloadResource={handleDownloadModuleResource}
+                  onViewResource={handleViewModuleResource}
+                  onDeleteResource={handleDeleteModuleResource}
+                  onRefreshModules={handleRefreshModules}
                 />
               )}
 

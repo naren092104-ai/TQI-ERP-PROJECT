@@ -83,6 +83,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   volunteers = [],
 }) => {
   const [setupDays, setSetupDays] = useState<{ dayNumber: number; sessionName: string }[]>([]);
+  const isClusterAdmin = userRole === 'Cluster Admin';
 
   useEffect(() => {
     fetch(apiUrl('/api/academic-setup'))
@@ -213,14 +214,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
-              Super Admin Dashboard
+              {isClusterAdmin ? 'Cluster Admin Dashboard' : 'Super Admin Dashboard'}
             </h1>
             <Badge variant="default" className="text-[10px]">
               {todayFormatted()}
             </Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            Enterprise overview of field operations across {totalClusters} college clusters.
+            {isClusterAdmin
+              ? `Operational overview for ${clusterName}.`
+              : `Enterprise overview of field operations across ${totalClusters} college clusters.`}
           </p>
         </div>
 

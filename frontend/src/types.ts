@@ -122,11 +122,15 @@ export interface Volunteer {
   college?: string;
   collegeId?: string;
   department: string;
+  stream?: string;
   year: string;
+  passingOutYear?: number | string;
   role?: 'Coordinator' | 'Mentor' | 'Lead Volunteer';
   clusterId?: string;
   panchayatId?: string;
   panchayatName?: string;
+  villageId?: string;
+  villageName?: string;
   module?: string;
   status?: 'Active' | 'Inactive';
   totalSessions: number;
@@ -149,6 +153,9 @@ export interface Session {
   dayId?: string;
   dayNumber?: number;
   date: string;
+  dateFixed?: boolean;
+  dateFixedAt?: string;
+  dateFixedBy?: string;
   day?: string;
   time?: string;
   endTime?: string;
@@ -250,6 +257,42 @@ export interface SessionPhotoItem {
   uploadedAt: string;
   status: 'active' | 'archived';
   caption?: string;
+  academicYearId?: string;
+  deleteRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+  deleteRequestId?: string | null;
+  deleteRequestReason?: string | null;
+}
+
+export interface PhotoDeleteRequest {
+  id: string;
+  photoId: string;
+  clusterId: string;
+  clusterName: string;
+  academicYearId?: string;
+  academicYear?: string;
+  dayNumber: number;
+  dayName: string;
+  sessionName: string;
+  fileName: string;
+  fileUrl: string;
+  requestedBy: string;
+  reason: string;
+  requestedDate: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
+export interface DayPhotoStatus {
+  dayNumber: number;
+  dayName: string;
+  sessionName: string;
+  photosCount: number;
+  maxPhotos: number;
+  status: 'DRAFT' | 'SUBMITTED' | 'PENDING REVIEW' | 'APPROVED' | 'EDIT_REQUESTED' | 'EDIT_APPROVED' | 'RESUBMISSION_REQUIRED';
+  isLocked: boolean;
+  submittedBy?: string;
+  submittedAt?: string;
 }
 
 export interface DayPhotoSummary {
@@ -479,9 +522,10 @@ export interface AttendanceRecord {
   studentName: string;
   code: string;
   standard?: string;
+  gender?: string;
   villageName?: string;
-  status: 'Present' | 'Absent' | 'Late';
-  taskStatus?: 'Completed' | 'Not Completed';
+  status: 'Present' | 'Absent' | 'Not Marked' | 'Late';
+  taskStatus?: 'Completed' | 'Incomplete' | 'Not Completed' | 'Not Marked';
   taskTitle?: string;
   remarks?: string;
 }
@@ -503,11 +547,30 @@ export interface AttendanceSession {
   totalCount?: number;
   presentCount?: number;
   absentCount?: number;
+  taskCompletedCount?: number;
   tasksCompletedCount?: number;
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Correction Requested';
+  notMarkedCount?: number;
+  status:
+    | 'Draft'
+    | 'Submitted - Pending Review'
+    | 'Edit Requested'
+    | 'Edit Approved'
+    | 'Resubmission'
+    | 'Approved'
+    | 'Rejected'
+    | 'Submitted'
+    | 'Correction Requested'
+    | 'Pending Review'
+    | 'Resubmission Required';
   lastSaved?: string;
   adminComment?: string;
   correctionReason?: string;
+  editReason?: string;
+  editRequestedBy?: string;
+  editRequestedAt?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  reviewRemarks?: string;
   submittedAt?: string;
   updatedAt?: string;
   submittedBy?: string;
@@ -517,7 +580,7 @@ export interface AttendanceSession {
 
 export interface CorrectionRequest {
   id: string;
-  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Sessions';
+  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Sessions' | 'Session Photos';
   clusterId: string;
   clusterName: string;
   recordId: string;
@@ -534,7 +597,7 @@ export interface CorrectionRequest {
 
 export interface ApprovalItem {
   id: string;
-  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Sessions' | 'Correction Request';
+  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Sessions' | 'Correction Request' | 'Session Photos';
   clusterId: string;
   clusterName: string;
   recordId: string;
@@ -705,4 +768,23 @@ export interface AcademicYear {
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface ClusterDayPhotoSummary {
+  dayNumber: number;
+  status: string;
+  photoCount: number;
+  maxPhotos: number;
+  submittedBy?: string | null;
+  submittedAt?: string | null;
+  isLocked: boolean;
+}
+
+export interface ClusterPhotoSummary {
+  clusterId: string;
+  clusterName: string;
+  district: string;
+  totalPhotos: number;
+  submittedDaysCount: number;
+  days: ClusterDayPhotoSummary[];
 }

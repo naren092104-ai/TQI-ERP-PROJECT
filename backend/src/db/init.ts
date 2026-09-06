@@ -90,6 +90,7 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         name VARCHAR(255) NOT NULL,
         panchayat_id VARCHAR(64) NOT NULL,
         cluster_id VARCHAR(64) NOT NULL,
+        status VARCHAR(64) NOT NULL DEFAULT 'ACTIVE',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_villages_panchayat (panchayat_id),
@@ -135,6 +136,8 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         panchayat_id VARCHAR(64) NULL,
         village_id VARCHAR(64) NULL,
         department VARCHAR(255) NULL,
+        stream VARCHAR(100) NULL,
+        passing_out_year SMALLINT NULL,
         role VARCHAR(64) NULL,
         status ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -166,6 +169,9 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
         volunteer_id VARCHAR(64) NULL,
         volunteerId VARCHAR(64) NULL,
         date DATE NOT NULL,
+        session_date_fixed BOOLEAN NOT NULL DEFAULT FALSE,
+        session_date_fixed_at DATETIME NULL,
+        session_date_fixed_by VARCHAR(64) NULL,
         time VARCHAR(50) NULL,
         endTime VARCHAR(50) NULL,
         status VARCHAR(64) NULL,
@@ -617,6 +623,76 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `,
   },
+  {
+    name: 'session_photo_submissions',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS session_photo_submissions (
+        id VARCHAR(64) PRIMARY KEY,
+        cluster_id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        day_number INT NOT NULL,
+        session_id VARCHAR(64) NULL,
+        status VARCHAR(64) NOT NULL DEFAULT 'DRAFT',
+        submitted_by VARCHAR(64) NULL,
+        submitted_at TIMESTAMP NULL,
+        reviewed_by VARCHAR(64) NULL,
+        reviewed_at TIMESTAMP NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_photo_sub (cluster_id, academic_year_id, day_number),
+        INDEX idx_photo_sub_cluster (cluster_id),
+        INDEX idx_photo_sub_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
+  {
+    name: 'photo_delete_requests',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS photo_delete_requests (
+        id VARCHAR(64) PRIMARY KEY,
+        photo_id VARCHAR(64) NOT NULL,
+        cluster_id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        day_number INT NOT NULL,
+        session_id VARCHAR(64) NULL,
+        requested_by VARCHAR(64) NOT NULL,
+        requested_by_name VARCHAR(255) NULL,
+        reason TEXT NOT NULL,
+        status VARCHAR(64) NOT NULL DEFAULT 'PENDING',
+        reviewed_by VARCHAR(64) NULL,
+        reviewed_at TIMESTAMP NULL,
+        review_remarks TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pdr_photo (photo_id),
+        INDEX idx_pdr_cluster (cluster_id),
+        INDEX idx_pdr_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
+  {
+    name: 'photo_change_requests',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS photo_change_requests (
+        id VARCHAR(64) PRIMARY KEY,
+        cluster_id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        day_number INT NOT NULL,
+        session_id VARCHAR(64) NULL,
+        requested_by VARCHAR(64) NOT NULL,
+        requested_by_name VARCHAR(255) NULL,
+        reason TEXT NOT NULL,
+        status VARCHAR(64) NOT NULL DEFAULT 'PENDING',
+        reviewed_by VARCHAR(64) NULL,
+        reviewed_at TIMESTAMP NULL,
+        review_remarks TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_pcr_cluster (cluster_id),
+        INDEX idx_pcr_status (status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
 ];
 
 export const COLUMN_PATCHES: { table: string; column: string; definition: string }[] = [
@@ -640,6 +716,14 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'sessions', column: 'day_id', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'clusterId', definition: 'VARCHAR(64) NULL' },
   { table: 'attendance_sessions', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'attendance_sessions', column: 'edit_reason', definition: 'TEXT NULL' },
+  { table: 'attendance_sessions', column: 'edit_requested_by', definition: 'VARCHAR(128) NULL' },
+  { table: 'attendance_sessions', column: 'edit_requested_at', definition: 'TIMESTAMP NULL' },
+  { table: 'attendance_sessions', column: 'reviewed_by', definition: 'VARCHAR(128) NULL' },
+  { table: 'attendance_sessions', column: 'reviewed_at', definition: 'TIMESTAMP NULL' },
+  { table: 'attendance_sessions', column: 'review_remarks', definition: 'TEXT NULL' },
+  { table: 'attendance_sessions', column: 'task_completed_count', definition: 'INT NOT NULL DEFAULT 0' },
+  { table: 'attendance_sessions', column: 'not_marked_count', definition: 'INT NOT NULL DEFAULT 0' },
   { table: 'lesson_plans', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
   { table: 'session_photos', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
   { table: 'finance_entries', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
@@ -651,6 +735,8 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'sessions', column: 'endTime', definition: 'VARCHAR(50) NULL' },
   { table: 'sessions', column: 'status', definition: 'VARCHAR(64) NULL' },
   { table: 'volunteers', column: 'village_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'volunteers', column: 'stream', definition: 'VARCHAR(100) NULL' },
+  { table: 'volunteers', column: 'passing_out_year', definition: 'SMALLINT NULL' },
   { table: 'modules', column: 'module_number', definition: 'VARCHAR(50) NULL' },
   { table: 'modules', column: 'module_name', definition: 'VARCHAR(255) NULL' },
   { table: 'modules', column: 'topic', definition: 'VARCHAR(255) NULL' },
@@ -691,6 +777,8 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'academic_years', column: 'status', definition: 'VARCHAR(32) NOT NULL DEFAULT \'DRAFT\'' },
   { table: 'date_change_requests', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
   { table: 'date_change_requests', column: 'day_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'session_photos', column: 'delete_request_status', definition: 'VARCHAR(64) NULL' },
+  { table: 'session_photos', column: 'delete_request_id', definition: 'VARCHAR(64) NULL' },
 ];
 
 export async function initDatabaseSchema(): Promise<void> {

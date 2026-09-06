@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { TqiModule, UserRole } from '../types';
-import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3 } from './ui/icons';
+import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3, Eye } from './ui/icons';
 import {
   Select,
   SelectContent,
@@ -12,25 +12,37 @@ import {
 interface ModuleLibraryViewProps {
   modules: TqiModule[];
   currentUserRole: UserRole;
+  currentAcademicYear?: string;
   onCreateModule?: (module: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => Promise<void>;
   onUpdateModule?: (id: string, module: any) => Promise<void>;
   onDeleteModule?: (id: string) => Promise<void>;
   onUploadResource?: (moduleId: string, file: File) => Promise<void>;
   onDownloadResource?: (moduleId: string, resourceId: string) => void;
+  onViewResource?: (moduleId: string, resourceId: string) => void;
+  onDeleteResource?: (moduleId: string, resourceId: string) => void;
+  onRefreshModules?: () => Promise<void>;
 }
 
 export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
   modules,
   currentUserRole,
+  currentAcademicYear = '',
   onCreateModule,
   onUpdateModule,
   onDeleteModule,
   onUploadResource,
-  onDownloadResource
+  onDownloadResource,
+  onViewResource,
+  onDeleteResource,
+  onRefreshModules
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<TqiModule | null>(null);
+
+  useEffect(() => {
+    void onRefreshModules?.();
+  }, [onRefreshModules]);
 
   const [formData, setFormData] = useState({
     moduleNumber: '',
@@ -41,10 +53,12 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
     dayNumber: 1
   });
 
-  const filteredModules = modules.filter(m => 
-    m.moduleName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    m.topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    m.moduleNumber.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredModules = modules.filter(m =>
+    m.status !== 'Archived' && (
+      m.moduleName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      m.topic.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      m.moduleNumber.toLowerCase().includes(searchTerm.toLowerCase())
+    )
   );
 
   const handleOpenModal = (mod?: TqiModule) => {
@@ -53,19 +67,19 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
       setFormData({
         moduleNumber: mod.moduleNumber,
         moduleName: mod.moduleName,
-        topic: mod.topic,
+        topic: mod.moduleName,
         description: mod.description || '',
-        academicYear: mod.academicYear,
+        academicYear: currentAcademicYear || mod.academicYear,
         dayNumber: mod.dayNumber || 1
       });
     } else {
       setEditingModule(null);
       setFormData({
-        moduleNumber: '',
+        moduleNumber: `DAY-${Date.now()}`,
         moduleName: '',
         topic: '',
         description: '',
-        academicYear: '2023-2024',
+        academicYear: currentAcademicYear,
         dayNumber: 1
       });
     }
@@ -86,11 +100,14 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
     if (!onUploadResource) return;
     const input = document.createElement('input');
     input.type = 'file';
+    input.multiple = true;
     input.accept = '.pdf,.ppt,.pptx';
     input.onchange = async (e: any) => {
-      const file = e.target.files[0];
-      if (file) {
-        await onUploadResource(moduleId, file);
+      const files = Array.from(e.target.files || []) as File[];
+      if (files.length > 0) {
+        for (const file of files) {
+          await onUploadResource(moduleId, file);
+        }
       }
     };
     input.click();
@@ -136,9 +153,6 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
           <div key={module.id} className="flex flex-col rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
             <div className="flex items-start justify-between mb-3">
               <div className="flex items-center gap-2">
-                <span className="inline-flex items-center px-2 py-1 rounded text-xs font-bold bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
-                  {module.moduleNumber}
-                </span>
                 <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-bold bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400">
                   Day {module.dayNumber}
                 </span>
@@ -162,7 +176,6 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
               <span className={`text-[10px] px-2 py-1 rounded font-bold ${module.status === 'Active' ? 'bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-400' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'}`}>{module.status || 'Active'}</span>
             </div>
             
-            <p className="text-xs font-semibold text-gray-500 dark:text-gray-400 mt-1">{module.topic}</p>
             <p className="text-xs text-gray-600 dark:text-gray-400 mt-3 line-clamp-3 flex-1">{module.description}</p>
             
             <div className="mt-4 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
@@ -182,11 +195,36 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
                 <div key={res.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-white/[0.02] rounded-lg border border-gray-100 dark:border-gray-800 text-xs">
                   <div className="flex items-center gap-2 truncate">
                     <FileText className="w-3.5 h-3.5 text-brand-500 shrink-0" />
-                    <span className="truncate text-gray-700 dark:text-gray-300">{res.fileName}</span>
+                    <span className="truncate text-gray-700 dark:text-gray-300">{res.fileName || res.originalFileName}</span>
                   </div>
-                  <button onClick={() => onDownloadResource && onDownloadResource(module.id, res.id)} className="text-gray-500 hover:text-brand-500 p-1">
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onViewResource && onViewResource(module.id, res.id)}
+                      className="text-gray-500 hover:text-brand-500 p-1"
+                      title="View resource"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onDownloadResource && onDownloadResource(module.id, res.id)}
+                      className="text-gray-500 hover:text-brand-500 p-1"
+                      title="Download resource"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    {currentUserRole === 'Super Admin' && (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteResource && onDeleteResource(module.id, res.id)}
+                        className="text-gray-500 hover:text-red-600 p-1"
+                        title="Delete resource"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
               {(!module.resources || module.resources.length === 0) && (
@@ -214,12 +252,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-num">Module Number</label>
-                  <input id="mod-num" required value={formData.moduleNumber} onChange={e => setFormData({...formData, moduleNumber: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" placeholder="e.g. M-101" />
-                </div>
-                <div>
+              <div>
                   <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Day Number (1-8)</label>
                   <Select
                     value={String(formData.dayNumber)}
@@ -236,19 +269,13 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-name">Module Name</label>
                 <input id="mod-name" required value={formData.moduleName} onChange={e => setFormData({...formData, moduleName: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
               </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-topic">Topic</label>
-                <input id="mod-topic" required value={formData.topic} onChange={e => setFormData({...formData, topic: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-year">Academic Year</label>
-                <input id="mod-year" required value={formData.academicYear} onChange={e => setFormData({...formData, academicYear: e.target.value})} className="w-full text-xs rounded-xl border border-gray-300 p-2 dark:bg-gray-800 dark:border-gray-700 dark:text-white" />
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                Academic Year: <strong>{currentAcademicYear || 'Not configured'}</strong>
               </div>
               <div>
                 <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1" htmlFor="mod-desc">Description</label>

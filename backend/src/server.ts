@@ -280,14 +280,18 @@ const mapVolunteer = (row: any) => ({
   name: row.name,
   email: row.email || '',
   phone: row.phone || '',
-  college: '',
+  college: row.college_name || row.college_resolved_name || '',
   collegeId: row.college_id || '',
   department: row.department || 'Community Program',
+  stream: row.stream || '',
   year: '2026',
+  passingOutYear: row.passing_out_year || '',
   role: row.role || 'Mentor',
   clusterId: row.cluster_id,
   panchayatId: row.panchayat_id,
   panchayatName: row.panchayat_name || row.panchayat_id || '',
+  villageId: row.village_id || '',
+  villageName: row.village_name || row.village_id || '',
   module: '',
   status: row.status || 'Active',
   totalSessions: 0,
@@ -310,6 +314,9 @@ const mapSession = (row: any) => ({
   dayNumber: Number(row.day_number || 1),
   dayId: row.day_id || '',
   date: row.date ? new Date(row.date).toISOString().slice(0, 10) : '',
+  dateFixed: Boolean(row.session_date_fixed),
+  dateFixedAt: row.session_date_fixed_at || '',
+  dateFixedBy: row.session_date_fixed_by || '',
   day: `Day ${row.day_number || 1}`,
   time: row.time || '09:00',
   endTime: row.end_time || '11:00',
@@ -397,6 +404,10 @@ const mapSessionPhotoRow = (row: any, userName?: string): any => ({
   uploadedAt: row.uploaded_at,
   status: 'active',
   caption: row.original_filename || `Day ${row.day_number || 1} photo`,
+  academicYearId: row.academic_year_id || '',
+  deleteRequestStatus: row.delete_request_status || null,
+  deleteRequestId: row.delete_request_id || null,
+  deleteRequestReason: row.delete_request_reason || null,
 });
 
 app.get('/api/health', async (_req: Request, res: Response) => {
@@ -604,7 +615,23 @@ app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT id, name, code, description, is_active, created_at FROM modules ORDER BY code ASC, name ASC');
+    const [rows] = await pool.query<any[]>('SELECT id, name, code, description, is_active, academic_year, day_number, created_at FROM modules WHERE is_active = 1 ORDER BY code ASC, name ASC');
+    const [resourceRows] = await pool.query<any[]>(
+      'SELECT id, module_id, file_url, original_filename, mime_type, file_size, created_at FROM module_resources ORDER BY created_at DESC'
+    );
+    const resourcesByModule = new Map<string, any[]>();
+    resourceRows.forEach((resource) => {
+      const resources = resourcesByModule.get(resource.module_id) || [];
+      resources.push({
+        id: resource.id,
+        url: resource.file_url,
+        fileName: resource.original_filename,
+        mimeType: resource.mime_type,
+        fileSize: resource.file_size,
+        createdAt: resource.created_at,
+      });
+      resourcesByModule.set(resource.module_id, resources);
+    });
     res.json({
       success: true,
       modules: rows.map((row) => ({
@@ -612,11 +639,12 @@ app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Res
         moduleNumber: row.code || row.id,
         moduleName: row.name,
         topic: row.name,
-        academicYear: '2026-2027',
+        academicYear: row.academic_year || '',
         description: row.description || '',
         status: row.is_active ? 'Active' : 'Archived',
         version: 1,
-        resources: [],
+        resources: resourcesByModule.get(row.id) || [],
+        dayNumber: row.day_number || 1,
         createdBy: '',
         createdAt: row.created_at,
         updatedAt: row.created_at,
@@ -766,20 +794,32 @@ app.get('/api/session-photos', requireAuth, async (req: AuthenticatedRequest, re
     res.setHeader('Cache-Control', 'no-store');
     const cluster = String(req.query.cluster || req.query.clusterId || 'all').toLowerCase();
     const academicYearId = String(req.query.academicYearId || '').trim();
+    const dayNumber = req.query.dayNumber ? Number(req.query.dayNumber) : null;
     let sql = 'SELECT * FROM session_photos WHERE 1=1';
     const params: any[] = [];
 
     if (academicYearId) {
-      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_photos.session_id AND s.academic_year_id = ?))';
-      params.push(academicYearId, academicYearId);
+      sql += ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1) OR academic_year_id = (SELECT id FROM academic_years WHERE name = ? LIMIT 1) OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = session_photos.session_id AND s.academic_year_id = ?))';
+      params.push(academicYearId, academicYearId, academicYearId, academicYearId);
     }
 
     if (req.user.role === 'Cluster Admin') {
+      // Security: Cluster Admin cannot query another cluster's photos
+      const reqCluster = req.query.cluster || req.query.clusterId;
+      if (reqCluster && reqCluster !== 'all' && String(reqCluster).toLowerCase() !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You do not have permission to access session photos for another cluster.' });
+        return;
+      }
       sql += ' AND cluster_id = ?';
       params.push(req.user.clusterId);
     } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
-      params.push(cluster);
+      sql += ' AND (LOWER(cluster_id) = LOWER(?) OR LOWER(cluster_id) IN (SELECT LOWER(id) FROM clusters WHERE LOWER(name) = LOWER(?)))';
+      params.push(cluster, cluster);
+    }
+
+    if (dayNumber && Number.isFinite(dayNumber)) {
+      sql += ' AND day_number = ?';
+      params.push(dayNumber);
     }
 
     sql += ' ORDER BY day_number ASC, uploaded_at DESC';
@@ -792,7 +832,281 @@ app.get('/api/session-photos', requireAuth, async (req: AuthenticatedRequest, re
   }
 });
 
-app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array('photos', 20), async (req: AuthenticatedRequest & { files?: Express.Multer.File[] }, res: Response) => {
+app.get('/api/session-photos/file/:id', async (req: Request, res: Response) => {
+  try {
+    const rawId = req.params.id;
+    const cleanId = rawId.replace(/\.[a-zA-Z0-9]+$/, '');
+    const [rows] = await pool.query<any[]>(
+      'SELECT * FROM session_photos WHERE id = ? OR id = ? LIMIT 1',
+      [rawId, cleanId]
+    );
+
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Photo record not found.' });
+      return;
+    }
+
+    const photo = rows[0];
+    let filePath = photo.file_path;
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      if (photo.file_path) {
+        const basename = path.basename(photo.file_path);
+        const altPath = path.join(PHOTO_STORAGE_DIR, basename);
+        if (fs.existsSync(altPath)) {
+          filePath = altPath;
+        }
+      }
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      res.status(404).json({ success: false, error: 'Photo file not found on disk.' });
+      return;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    const mime =
+      photo.mime_type ||
+      (ext === '.png'
+        ? 'image/png'
+        : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.gif'
+        ? 'image/gif'
+        : 'image/jpeg');
+
+    res.setHeader('Content-Type', mime);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(path.resolve(filePath));
+  } catch (error) {
+    console.error('Failed to serve photo file:', error);
+    res.status(500).json({ success: false, error: 'Unable to serve photo file.' });
+  }
+});
+
+app.get('/api/session-photos/:id/download', async (req: Request, res: Response) => {
+  try {
+    const rawId = req.params.id;
+    const cleanId = rawId.replace(/\.[a-zA-Z0-9]+$/, '');
+    const [rows] = await pool.query<any[]>(
+      'SELECT * FROM session_photos WHERE id = ? OR id = ? LIMIT 1',
+      [rawId, cleanId]
+    );
+
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Photo not found.' });
+      return;
+    }
+
+    const photo = rows[0];
+    let filePath = photo.file_path;
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      if (photo.file_path) {
+        const basename = path.basename(photo.file_path);
+        const altPath = path.join(PHOTO_STORAGE_DIR, basename);
+        if (fs.existsSync(altPath)) {
+          filePath = altPath;
+        }
+      }
+    }
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      res.status(404).json({ success: false, error: 'Photo file not found on disk.' });
+      return;
+    }
+
+    res.download(path.resolve(filePath), photo.original_filename || `photo-${rawId}.jpg`);
+  } catch (error) {
+    console.error('Failed to download photo file:', error);
+    res.status(500).json({ success: false, error: 'Unable to download photo file.' });
+  }
+});
+
+app.get('/api/session-photos/day-statuses', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const rawCluster = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.query.clusterId || req.query.cluster || 'all');
+    const academicYearId = String(req.query.academicYearId || '').trim();
+
+    // Query all clusters for cluster summaries
+    const [clusters] = await pool.query<any[]>('SELECT id, name, district FROM clusters ORDER BY name ASC');
+
+    let sql = 'SELECT * FROM session_photo_submissions WHERE 1=1';
+    const params: any[] = [];
+    if (rawCluster && rawCluster !== 'all') {
+      sql += ' AND (LOWER(cluster_id) = LOWER(?) OR LOWER(cluster_id) IN (SELECT LOWER(id) FROM clusters WHERE LOWER(name) = LOWER(?)))';
+      params.push(rawCluster, rawCluster);
+    }
+    if (academicYearId) {
+      sql += ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1) OR academic_year_id = (SELECT id FROM academic_years WHERE name = ? LIMIT 1))';
+      params.push(academicYearId, academicYearId, academicYearId);
+    }
+    const [rows] = await pool.query<any[]>(sql, params);
+
+    const approvedChangeParams: any[] = [];
+    let approvedChangeSql = `
+      SELECT DISTINCT r.day_number
+      FROM photo_change_requests r
+      WHERE r.status = 'APPROVED'
+        AND (
+          LOWER(r.cluster_id) = LOWER(?)
+          OR LOWER(r.cluster_id) IN (SELECT LOWER(id) FROM clusters WHERE LOWER(name) = LOWER(?))
+        )`;
+    approvedChangeParams.push(rawCluster, rawCluster);
+    if (academicYearId) {
+      approvedChangeSql += ' AND (r.academic_year_id = ? OR r.academic_year_id = "" OR r.academic_year_id IS NULL)';
+      approvedChangeParams.push(academicYearId);
+    }
+    const [approvedChangeRows] = rawCluster && rawCluster !== 'all'
+      ? await pool.query<any[]>(approvedChangeSql, approvedChangeParams)
+      : await pool.query<any[]>(
+          `SELECT DISTINCT day_number FROM photo_change_requests WHERE status = 'APPROVED'${academicYearId ? ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL)' : ''}`,
+          academicYearId ? [academicYearId] : [],
+        );
+    const approvedChangeDays = new Set(approvedChangeRows.map((row: any) => Number(row.day_number)));
+
+    let countSql = 'SELECT cluster_id, day_number, COUNT(*) as count FROM session_photos WHERE 1=1';
+    const countParams: any[] = [];
+    if (rawCluster && rawCluster !== 'all') {
+      countSql += ' AND (LOWER(cluster_id) = LOWER(?) OR LOWER(cluster_id) IN (SELECT LOWER(id) FROM clusters WHERE LOWER(name) = LOWER(?)))';
+      countParams.push(rawCluster, rawCluster);
+    }
+    if (academicYearId) {
+      countSql += ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1) OR academic_year_id = (SELECT id FROM academic_years WHERE name = ? LIMIT 1))';
+      countParams.push(academicYearId, academicYearId, academicYearId);
+    }
+    countSql += ' GROUP BY cluster_id, day_number';
+    const [countRows] = await pool.query<any[]>(countSql, countParams);
+
+    const countMap: Record<number, number> = {};
+    for (const c of countRows) {
+      const dNum = Number(c.day_number);
+      countMap[dNum] = (countMap[dNum] || 0) + Number(c.count);
+    }
+
+    const dayDataList: any[] = [];
+    for (let d = 1; d <= 20; d++) {
+      const foundStatus = rows.find((r: any) => Number(r.day_number) === d);
+      dayDataList.push({
+        dayNumber: d,
+        status: approvedChangeDays.has(d) ? 'EDIT_APPROVED' : foundStatus ? foundStatus.status : 'DRAFT',
+        photoCount: countMap[d] || 0,
+        maxPhotos: 50,
+      });
+    }
+
+    // Also build clusterSummaries for Super Admin view
+    let allSubsSql = 'SELECT * FROM session_photo_submissions WHERE 1=1';
+    const allSubsParams: any[] = [];
+    if (academicYearId) {
+      allSubsSql += ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1) OR academic_year_id = (SELECT id FROM academic_years WHERE name = ? LIMIT 1))';
+      allSubsParams.push(academicYearId, academicYearId, academicYearId);
+    }
+    const [allSubs] = await pool.query<any[]>(allSubsSql, allSubsParams);
+
+    let allCountsSql = 'SELECT cluster_id, day_number, COUNT(*) as count FROM session_photos WHERE 1=1';
+    const allCountsParams: any[] = [];
+    if (academicYearId) {
+      allCountsSql += ' AND (academic_year_id = ? OR academic_year_id = "" OR academic_year_id IS NULL OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1) OR academic_year_id = (SELECT id FROM academic_years WHERE name = ? LIMIT 1))';
+      allCountsParams.push(academicYearId, academicYearId, academicYearId);
+    }
+    allCountsSql += ' GROUP BY cluster_id, day_number';
+    const [allCounts] = await pool.query<any[]>(allCountsSql, allCountsParams);
+
+    const clusterSummaries = clusters.map((c) => {
+      const cSubs = allSubs.filter((s) => String(s.cluster_id).toLowerCase() === String(c.id).toLowerCase() || String(s.cluster_id).toLowerCase() === String(c.name).toLowerCase());
+      const cCounts = allCounts.filter((cnt) => String(cnt.cluster_id).toLowerCase() === String(c.id).toLowerCase() || String(cnt.cluster_id).toLowerCase() === String(c.name).toLowerCase());
+
+      const cCountMap: Record<number, number> = {};
+      let totalClusterPhotos = 0;
+      for (const cnt of cCounts) {
+        const num = Number(cnt.day_number);
+        const count = Number(cnt.count);
+        cCountMap[num] = count;
+        totalClusterPhotos += count;
+      }
+
+      let submittedDaysCount = 0;
+      const days = [];
+      for (let d = 1; d <= 8; d++) {
+        const sub = cSubs.find((s) => Number(s.day_number) === d);
+        const st = sub ? String(sub.status).toUpperCase() : 'DRAFT';
+        if (['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(st)) {
+          submittedDaysCount++;
+        }
+        days.push({
+          dayNumber: d,
+          status: st,
+          photoCount: cCountMap[d] || 0,
+          maxPhotos: 50,
+          submittedBy: sub?.submitted_by || null,
+          submittedAt: sub?.submitted_at || null,
+          isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(st),
+        });
+      }
+
+      return {
+        clusterId: c.id,
+        clusterName: c.name,
+        district: c.district,
+        totalPhotos: totalClusterPhotos,
+        submittedDaysCount,
+        days,
+      };
+    });
+
+    res.json({
+      success: true,
+      statuses: rows,
+      counts: countMap,
+      data: dayDataList,
+      clusterSummaries,
+    });
+  } catch (error) {
+    console.error('Failed to get day photo statuses:', error);
+    res.status(500).json({ success: false, error: 'Unable to get photo submission statuses.' });
+  }
+});
+
+app.post('/api/session-photos/submissions/approve', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'Super Admin') {
+      res.status(403).json({ success: false, error: 'Only Super Admin can approve day photo submissions.' });
+      return;
+    }
+    const clusterId = String(req.body.clusterId || '').trim();
+    const dayNumber = Number(req.body.dayNumber);
+    const academicYearId = String(req.body.academicYearId || '').trim();
+
+    await pool.query(
+      `UPDATE session_photo_submissions 
+       SET status = 'APPROVED', reviewed_by = ?, reviewed_at = NOW() 
+       WHERE (LOWER(cluster_id) = LOWER(?) OR LOWER(cluster_id) IN (SELECT LOWER(id) FROM clusters WHERE LOWER(name) = LOWER(?)))
+         AND day_number = ?
+         AND (academic_year_id = ? OR ? = "" OR academic_year_id = (SELECT name FROM academic_years WHERE id = ? LIMIT 1))`,
+      [req.user.name || 'Super Admin', clusterId, clusterId, dayNumber, academicYearId, academicYearId, academicYearId]
+    );
+
+    // Notification for Cluster Admin
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Session photos approved.', `Super Admin approved Day ${dayNumber} photos for cluster ${clusterId}.`, 'session_photos']
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'DAY_PHOTOS_APPROVED', 'Session Photos', `${clusterId}-day-${dayNumber}`, `Super Admin approved Day ${dayNumber} photos collection.`]
+    );
+
+    res.json({ success: true, message: `Day ${dayNumber} photos approved successfully.` });
+  } catch (error) {
+    console.error('Failed to approve day photos:', error);
+    res.status(500).json({ success: false, error: 'Unable to approve day photos.' });
+  }
+});
+
+app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array('photos', 50), async (req: AuthenticatedRequest & { files?: Express.Multer.File[] }, res: Response) => {
   try {
     const files = req.files || [];
     if (!files.length) {
@@ -800,13 +1114,53 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
       return;
     }
 
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri').toLowerCase();
+    const targetCluster = String(req.body.clusterId || req.user.clusterId || 'dharmapuri').toLowerCase();
+    if (req.user.role === 'Cluster Admin') {
+      if (targetCluster && targetCluster !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You can only upload photos for your assigned cluster.' });
+        return;
+      }
+    }
+    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : targetCluster;
     const sessionId = String(req.body.sessionId || `session-${Date.now()}`);
     const dayNumber = Number(req.body.dayNumber || 1);
+    const academicYearId = String(req.body.academicYearId || '').trim();
     const uploadedBy = String(req.body.uploadedBy || req.user.name || 'Cluster Admin');
     const uploadedRole = String(req.body.uploadedRole || req.user.role || 'Cluster Admin');
     const sessionTitle = String(req.body.sessionTitle || `Session Day ${dayNumber}`);
     const uploaderName = uploadedBy || req.user.name || 'Cluster Admin';
+
+    // 1. Check Submission Lock
+    if (req.user.role === 'Cluster Admin') {
+      const [subRows] = await pool.query<any[]>(
+        'SELECT status FROM session_photo_submissions WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "") LIMIT 1',
+        [clusterId, dayNumber, academicYearId, academicYearId]
+      );
+      if (subRows.length > 0) {
+        const subStatus = String(subRows[0].status).toUpperCase();
+        if (['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(subStatus)) {
+          res.status(403).json({
+            success: false,
+            error: 'Photos for this day/session are submitted and locked. Direct photo upload is not permitted. Please request approval from Super Admin.',
+          });
+          return;
+        }
+      }
+    }
+
+    // 2. Enforce 50 photos PER DAY/SESSION Limit
+    const [countRows] = await pool.query<any[]>(
+      'SELECT COUNT(*) as count FROM session_photos WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "" OR academic_year_id IS NULL)',
+      [clusterId, dayNumber, academicYearId, academicYearId]
+    );
+    const currentCount = Number(countRows[0]?.count || 0);
+    if (currentCount + files.length > 50) {
+      res.status(400).json({
+        success: false,
+        error: `Maximum 50 photos per Day/Session allowed. Currently ${currentCount}/50. Cannot upload ${files.length} more photo(s).`,
+      });
+      return;
+    }
 
     const savedPhotos: any[] = [];
     for (const file of files) {
@@ -816,8 +1170,8 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
       const originalName = file.originalname || 'photo.jpg';
 
       await pool.query(
-        'INSERT INTO session_photos (id, cluster_id, session_id, day_number, file_path, file_url, original_filename, mime_type, file_size, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-        [rowId, clusterId, sessionId, dayNumber, filePath, fileUrl, originalName, file.mimetype, file.size, uploaderName],
+        'INSERT INTO session_photos (id, cluster_id, session_id, day_number, file_path, file_url, original_filename, mime_type, file_size, uploaded_by, academic_year_id, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+        [rowId, clusterId, sessionId, dayNumber, filePath, fileUrl, originalName, file.mimetype, file.size, uploaderName, academicYearId || null],
       );
 
       savedPhotos.push(mapSessionPhotoRow({
@@ -831,133 +1185,597 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
         mime_type: file.mimetype,
         file_size: file.size,
         uploaded_by: uploaderName,
+        academic_year_id: academicYearId,
         uploaded_at: new Date().toISOString(),
       }, req.user.name));
     }
 
-    res.json({ success: true, message: `Uploaded ${savedPhotos.length} photo(s).`, photos: savedPhotos, sessionTitle });
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'PHOTO_UPLOADED', 'Session Photos', sessionId, `Uploaded ${savedPhotos.length} photo(s) for Day ${dayNumber}. Total now: ${currentCount + savedPhotos.length}/50`]
+    );
+
+    res.json({
+      success: true,
+      message: `Uploaded ${savedPhotos.length} photo(s).`,
+      photos: savedPhotos,
+      data: savedPhotos[0] || null,
+      sessionTitle,
+      count: currentCount + savedPhotos.length,
+      maxPhotos: 50,
+    });
   } catch (error) {
     console.error('Failed to upload session photos:', error);
     res.status(500).json({ success: false, error: 'Unable to upload session photos.' });
   }
 });
 
-app.get('/api/session-photos/file/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
-    if (!rows.length) {
-      res.status(404).json({ success: false, error: 'Photo was not found.' });
-      return;
-    }
-
-    const row = rows[0];
-    const filePath = String(row.file_path || '');
-    if (!filePath || !fs.existsSync(filePath)) {
-      res.status(404).json({ success: false, error: 'The stored photo file is missing.' });
-      return;
-    }
-
-    res.download(filePath, String(row.original_filename || 'photo.png'));
-  } catch (error) {
-    console.error('Failed to serve photo file:', error);
-    res.status(500).json({ success: false, error: 'Unable to retrieve the photo.' });
-  }
-});
-
-app.get('/api/session-photos/:id/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
-    if (!rows.length) {
-      res.status(404).json({ success: false, error: 'Photo was not found.' });
-      return;
-    }
-
-    const row = rows[0];
-    const filePath = String(row.file_path || '');
-    if (!filePath || !fs.existsSync(filePath)) {
-      res.status(404).json({ success: false, error: 'The stored photo file is missing.' });
-      return;
-    }
-
-    res.download(filePath, String(row.original_filename || 'photo.png'));
-  } catch (error) {
-    console.error('Failed to download photo:', error);
-    res.status(500).json({ success: false, error: 'Unable to download the photo.' });
-  }
-});
-
-app.get('/api/session-photos/download-zip', requireAuth, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  try {
-    const cluster = String(req.query.cluster || req.query.clusterId || 'all').toLowerCase();
-    const dayNumber = req.query.dayNumber ? Number(req.query.dayNumber) : null;
-    const type = String(req.query.type || 'filtered');
-
-    let sql = 'SELECT * FROM session_photos WHERE 1=1';
-    const params: any[] = [];
-
-    if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
-    } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
-      params.push(cluster);
-    }
-
-    if (dayNumber && Number.isFinite(dayNumber)) {
-      sql += ' AND day_number = ?';
-      params.push(dayNumber);
-    }
-
-    sql += ' ORDER BY uploaded_at DESC';
-    const [rows] = await pool.query<any[]>(sql, params);
-    const files = rows.filter((row) => row.file_path && fs.existsSync(row.file_path));
-
-    if (!files.length) {
-      res.status(404).json({ success: false, error: 'No photos available to download.' });
-      return;
-    }
-
-    const zipName = type === 'day' && dayNumber ? `TQI_Day_${dayNumber}_Photos.zip` : cluster === 'all' ? 'TQI_All_Cluster_Photos.zip' : `TQI_${cluster}_Photos.zip`;
-
-    res.setHeader('Content-Type', 'application/zip');
-    res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
-
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.on('error', (err) => next(err));
-    archive.pipe(res);
-
-    files.forEach((row) => {
-      const safeName = String(row.original_filename || `photo-${row.id}.png`);
-      archive.file(row.file_path, { name: safeName });
-    });
-
-    await archive.finalize();
-  } catch (error) {
-    console.error('Failed to create ZIP archive:', error);
-    res.status(500).json({ success: false, error: 'Unable to create the ZIP archive.' });
-  }
-});
-
 app.delete('/api/session-photos/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
+    const photoId = String(req.params.id);
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [photoId]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Photo not found.' });
+      return;
+    }
+    const photo = rows[0];
+
+    // Cluster ownership check
+    if (req.user.role === 'Cluster Admin') {
+      if (String(photo.cluster_id).toLowerCase() !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You do not have permission to delete photos for another cluster.' });
+        return;
+      }
+    }
+
+    // Lock check: if submitted, direct delete is forbidden!
+    if (req.user.role === 'Cluster Admin') {
+      const [subRows] = await pool.query<any[]>(
+        'SELECT status FROM session_photo_submissions WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "" OR academic_year_id IS NULL) LIMIT 1',
+        [photo.cluster_id, photo.day_number, photo.academic_year_id || '', photo.academic_year_id || '']
+      );
+      if (subRows.length > 0) {
+        const subStatus = String(subRows[0].status).toUpperCase();
+        if (['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(subStatus)) {
+          res.status(403).json({
+            success: false,
+            error: 'Photos for this day have been submitted and locked. Direct deletion is not allowed. Please submit a delete request for Super Admin approval.',
+          });
+          return;
+        }
+      }
+    }
+
+    // Direct deletion allowed (Draft or Super Admin)
+    // 1. Unlink physical file
+    if (photo.file_path && fs.existsSync(photo.file_path)) {
+      try {
+        fs.unlinkSync(photo.file_path);
+      } catch (err) {
+        console.warn(`[WARN] Could not unlink file ${photo.file_path}:`, err);
+      }
+    }
+
+    // 2. Delete DB records
+    await pool.query('DELETE FROM photo_delete_requests WHERE photo_id = ?', [photoId]);
+    await pool.query('DELETE FROM session_photos WHERE id = ?', [photoId]);
+
+    // 3. Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, photo.cluster_id, 'PHOTO_DELETED', 'Session Photos', photoId, `Deleted photo ${photo.original_filename || photoId} from Day ${photo.day_number}`]
+    );
+
+    res.json({
+      success: true,
+      message: 'Photo deleted successfully.',
+    });
+  } catch (error) {
+    console.error('Failed to delete photo:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete photo.' });
+  }
+});
+
+app.post('/api/session-photos/submit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const dayNumber = Number(req.body.dayNumber);
+    const academicYearId = String(req.body.academicYearId || '').trim();
+    const targetCluster = String(req.body.clusterId || req.user.clusterId || '').trim().toLowerCase();
+
+    if (req.user.role === 'Cluster Admin') {
+      if (targetCluster && targetCluster !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You cannot submit photos for another cluster.' });
+        return;
+      }
+    }
+    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : targetCluster;
+
+    if (!dayNumber || !clusterId) {
+      res.status(400).json({ success: false, error: 'Day number and cluster are required.' });
+      return;
+    }
+
+    // Ensure at least 1 photo exists
+    const [photos] = await pool.query<any[]>(
+      'SELECT id FROM session_photos WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "" OR academic_year_id IS NULL)',
+      [clusterId, dayNumber, academicYearId, academicYearId]
+    );
+    if (!photos.length) {
+      res.status(400).json({ success: false, error: 'Please upload at least one photograph before submitting.' });
+      return;
+    }
+
+    const subId = randomUUID();
+    await pool.query(
+      `INSERT INTO session_photo_submissions (id, cluster_id, academic_year_id, day_number, status, submitted_by, submitted_at)
+       VALUES (?, ?, ?, ?, 'SUBMITTED', ?, NOW())
+       ON DUPLICATE KEY UPDATE status = 'SUBMITTED', submitted_by = VALUES(submitted_by), submitted_at = NOW()`,
+      [subId, clusterId, academicYearId, dayNumber, req.user.name || req.user.id]
+    );
+
+    // Register in approvals table for Super Admin
+    const approvalId = randomUUID();
+    await pool.query(
+      `INSERT INTO approvals (id, module, type, reference, record_id, status, requested_by, requestedBy, remarks, cluster_id, clusterId, academic_year_id, created_at)
+       VALUES (?, 'Session Photos', 'Day Photos Submission', ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, NOW())`,
+      [approvalId, `Day ${dayNumber} Photos`, subId, req.user.name, req.user.name, `Day ${dayNumber} photo collection submitted for review (${photos.length} photos)`, clusterId, clusterId, academicYearId]
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'PHOTO_SUBMITTED', 'Session Photos', subId, `Submitted Day ${dayNumber} photos for review (${photos.length} photos)`]
+    );
+
+    // Notification for Super Admin
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'New session photos submitted for review.', `Cluster ${clusterId} submitted ${photos.length} photos for Day ${dayNumber}.`, 'session_photos']
+    );
+
+    res.json({
+      success: true,
+      message: 'Session photos submitted for review successfully.',
+      status: 'SUBMITTED',
+    });
+  } catch (error) {
+    console.error('Failed to submit session photos:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit session photos.' });
+  }
+});
+
+app.post('/api/session-photos/request-delete', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const photoId = String(req.body.photoId || '').trim();
+    const reason = String(req.body.reason || '').trim();
+
+    if (!photoId) {
+      res.status(400).json({ success: false, error: 'Photo ID is required.' });
+      return;
+    }
+    if (!reason) {
+      res.status(400).json({ success: false, error: 'Reason for deletion is mandatory.' });
+      return;
+    }
+
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [photoId]);
     if (!rows.length) {
       res.status(404).json({ success: false, error: 'Photo was not found.' });
       return;
     }
 
-    const row = rows[0];
-    if (row.file_path && fs.existsSync(row.file_path)) {
-      fs.unlinkSync(row.file_path);
+    const photo = rows[0];
+    if (req.user.role === 'Cluster Admin') {
+      if (String(photo.cluster_id).toLowerCase() !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You do not have permission to request deletion for this photo.' });
+        return;
+      }
     }
 
-    await pool.query('DELETE FROM session_photos WHERE id = ?', [req.params.id]);
-    res.json({ success: true, message: 'Photo deleted successfully.' });
+    // Check if delete request already pending
+    const [existingReq] = await pool.query<any[]>(
+      'SELECT id FROM photo_delete_requests WHERE photo_id = ? AND status = "PENDING" LIMIT 1',
+      [photoId]
+    );
+    if (existingReq.length > 0) {
+      res.status(400).json({ success: false, error: 'A delete request is already pending approval for this photograph.' });
+      return;
+    }
+
+    const requestId = randomUUID();
+    await pool.query(
+      `INSERT INTO photo_delete_requests (id, photo_id, cluster_id, academic_year_id, day_number, session_id, requested_by, requested_by_name, reason, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', NOW())`,
+      [requestId, photoId, photo.cluster_id, photo.academic_year_id || '', photo.day_number, photo.session_id, req.user.id, req.user.name, reason]
+    );
+
+    // Update photo delete request status
+    await pool.query(
+      'UPDATE session_photos SET delete_request_status = "PENDING", delete_request_id = ? WHERE id = ?',
+      [requestId, photoId]
+    );
+
+    // Add to approvals table
+    const approvalId = randomUUID();
+    await pool.query(
+      `INSERT INTO approvals (id, module, type, reference, record_id, status, requested_by, requestedBy, remarks, cluster_id, clusterId, academic_year_id, created_at)
+       VALUES (?, 'Session Photos', 'Photo Deletion', ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, NOW())`,
+      [approvalId, photo.original_filename || `Day ${photo.day_number} Photo`, requestId, req.user.name, req.user.name, reason, photo.cluster_id, photo.cluster_id, photo.academic_year_id || '']
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, photo.cluster_id, 'PHOTO_DELETE_REQUESTED', 'Session Photos', photoId, `Delete requested for ${photo.original_filename}. Reason: ${reason}`]
+    );
+
+    // Notification for Super Admin
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Photo deletion request requires approval.', `Cluster Admin ${req.user.name} requested deletion of photo ${photo.original_filename}. Reason: ${reason}`, 'session_photos']
+    );
+
+    res.json({
+      success: true,
+      message: 'Photo deletion request submitted for Super Admin review.',
+      requestId,
+      data: { id: requestId },
+    });
   } catch (error) {
-    console.error('Failed to delete session photo:', error);
-    res.status(500).json({ success: false, error: 'Unable to delete the photo.' });
+    console.error('Failed to submit photo delete request:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit delete request.' });
   }
 });
+
+app.get('/api/session-photos/delete-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    let sql = `
+      SELECT pdr.*,
+             sp.original_filename,
+             sp.file_url,
+             sp.file_path,
+             c.name as cluster_name,
+             ay.name as academic_year_name,
+             pd.day_name,
+             s.title as session_title,
+             asetup.session_name
+      FROM photo_delete_requests pdr
+      LEFT JOIN session_photos sp ON sp.id = pdr.photo_id
+      LEFT JOIN clusters c ON c.id = pdr.cluster_id
+      LEFT JOIN academic_years ay ON ay.id = pdr.academic_year_id
+      LEFT JOIN program_days pd ON (pd.day_number = pdr.day_number AND pd.academic_year_id = pdr.academic_year_id)
+      LEFT JOIN sessions s ON s.id = pdr.session_id
+      LEFT JOIN academic_setup asetup ON (asetup.day_number = pdr.day_number AND (asetup.academic_year = ay.name OR ay.name IS NULL))
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (req.user.role === 'Cluster Admin') {
+      sql += ' AND pdr.cluster_id = ?';
+      params.push(req.user.clusterId);
+    } else if (req.query.clusterId && req.query.clusterId !== 'all') {
+      sql += ' AND pdr.cluster_id = ?';
+      params.push(String(req.query.clusterId));
+    }
+    sql += ' ORDER BY pdr.created_at DESC';
+
+    const [rows] = await pool.query<any[]>(sql, params);
+    const requests = rows.map((r) => ({
+      id: r.id,
+      photoId: r.photo_id,
+      clusterId: r.cluster_id,
+      clusterName: r.cluster_name || r.cluster_id,
+      academicYearId: r.academic_year_id,
+      academicYear: r.academic_year_name || '2025–2026',
+      dayNumber: Number(r.day_number),
+      dayName: r.day_name || `Day ${r.day_number}`,
+      sessionName: r.session_name || r.session_title || `Day ${r.day_number} Session`,
+      fileName: r.original_filename || 'photo.jpg',
+      fileUrl: r.file_url || `/api/session-photos/file/${r.photo_id}`,
+      requestedBy: r.requested_by_name || 'Cluster Admin',
+      reason: r.reason,
+      requestedDate: r.created_at,
+      status: r.status,
+      reviewedBy: r.reviewed_by,
+      reviewedAt: r.reviewed_at,
+    }));
+
+    res.json({ success: true, requests });
+  } catch (error) {
+    console.error('Failed to load photo delete requests:', error);
+    res.status(500).json({ success: false, error: 'Unable to load delete requests.' });
+  }
+});
+
+app.post('/api/session-photos/delete-requests/:id/approve', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can approve photo deletion requests.' });
+    return;
+  }
+
+  try {
+    const [reqRows] = await pool.query<any[]>('SELECT * FROM photo_delete_requests WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!reqRows.length) {
+      res.status(404).json({ success: false, error: 'Delete request not found.' });
+      return;
+    }
+    const delReq = reqRows[0];
+    if (delReq.status !== 'PENDING') {
+      res.status(409).json({ success: false, error: `This request has already been ${delReq.status.toLowerCase()}.` });
+      return;
+    }
+
+    // 1. Fetch photo details
+    const [photoRows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [delReq.photo_id]);
+    const photo = photoRows[0];
+
+    // 2. Delete actual file from physical storage
+    if (photo && photo.file_path && fs.existsSync(photo.file_path)) {
+      try {
+        fs.unlinkSync(photo.file_path);
+      } catch (unlinkErr) {
+        console.warn('Physical photo file unlink warning:', unlinkErr);
+      }
+    }
+
+    // 3. Delete record from session_photos database
+    await pool.query('DELETE FROM session_photos WHERE id = ?', [delReq.photo_id]);
+
+    // 4. Update photo_delete_requests
+    await pool.query(
+      'UPDATE photo_delete_requests SET status = "APPROVED", reviewed_by = ?, reviewed_at = NOW() WHERE id = ?',
+      [req.user.name || 'Super Admin', delReq.id]
+    );
+
+    // 5. Update approvals table
+    await pool.query(
+      'UPDATE approvals SET status = "Approved", reviewed_by = ?, reviewed_at = NOW() WHERE record_id = ? OR id = ?',
+      [req.user.name || 'Super Admin', delReq.id, delReq.id]
+    );
+
+    // 6. Audit logs
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, delReq.cluster_id, 'PHOTO_DELETE_APPROVED', 'Session Photos', delReq.photo_id, `Approved deletion of photo ${photo?.original_filename || delReq.photo_id}. Reason: ${delReq.reason}`]
+    );
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, delReq.cluster_id, 'PHOTO_DELETED', 'Session Photos', delReq.photo_id, `Photo permanently removed from database and storage by Super Admin approval.`]
+    );
+
+    // 7. Notify Cluster Admin
+    await pool.query(
+      'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), delReq.requested_by, 'Your photo deletion request has been approved.', `Your request to delete photo ${photo?.original_filename || delReq.photo_id} was approved by Super Admin.`, 'session_photos']
+    );
+
+    res.json({ success: true, message: 'Photo deleted successfully.' });
+  } catch (error) {
+    console.error('Failed to approve photo delete request:', error);
+    res.status(500).json({ success: false, error: 'Unable to process photo deletion approval.' });
+  }
+});
+
+app.post('/api/session-photos/delete-requests/:id/reject', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can reject photo deletion requests.' });
+    return;
+  }
+
+  try {
+    const [reqRows] = await pool.query<any[]>('SELECT * FROM photo_delete_requests WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!reqRows.length) {
+      res.status(404).json({ success: false, error: 'Delete request not found.' });
+      return;
+    }
+    const delReq = reqRows[0];
+    if (delReq.status !== 'PENDING') {
+      res.status(409).json({ success: false, error: `This request has already been ${delReq.status.toLowerCase()}.` });
+      return;
+    }
+
+    const remarks = req.body.remarks ? String(req.body.remarks).trim() : null;
+
+    // Update photo_delete_requests
+    await pool.query(
+      'UPDATE photo_delete_requests SET status = "REJECTED", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?',
+      [req.user.name || 'Super Admin', remarks, delReq.id]
+    );
+
+    // Update session_photos
+    await pool.query(
+      'UPDATE session_photos SET delete_request_status = "REJECTED" WHERE id = ?',
+      [delReq.photo_id]
+    );
+
+    // Update approvals table
+    await pool.query(
+      'UPDATE approvals SET status = "Rejected", reviewed_by = ?, reviewed_at = NOW() WHERE record_id = ? OR id = ?',
+      [req.user.name || 'Super Admin', delReq.id, delReq.id]
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, delReq.cluster_id, 'PHOTO_DELETE_REJECTED', 'Session Photos', delReq.photo_id, `Rejected deletion request for photo ${delReq.photo_id}. Remarks: ${remarks || 'None'}`]
+    );
+
+    // Notify Cluster Admin
+    await pool.query(
+      'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), delReq.requested_by, 'Your photo deletion request has been rejected.', remarks ? `Your request was rejected. Remarks: ${remarks}` : 'Your photo deletion request has been rejected by Super Admin.', 'session_photos']
+    );
+
+    res.json({ success: true, message: 'Photo delete request rejected.' });
+  } catch (error) {
+    console.error('Failed to reject photo delete request:', error);
+    res.status(500).json({ success: false, error: 'Unable to process photo delete rejection.' });
+  }
+});
+
+app.post('/api/session-photos/request-change', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const dayNumber = Number(req.body.dayNumber);
+    const academicYearId = String(req.body.academicYearId || '').trim();
+    const reason = String(req.body.reason || '').trim();
+    const targetCluster = String(req.body.clusterId || req.user.clusterId || '').trim().toLowerCase();
+
+    if (req.user.role === 'Cluster Admin') {
+      if (targetCluster && targetCluster !== String(req.user.clusterId).toLowerCase()) {
+        res.status(403).json({ success: false, error: 'Forbidden. You cannot request changes for another cluster.' });
+        return;
+      }
+    }
+    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : targetCluster;
+
+    if (!dayNumber || !clusterId) {
+      res.status(400).json({ success: false, error: 'Day number and cluster are required.' });
+      return;
+    }
+    if (!reason) {
+      res.status(400).json({ success: false, error: 'Reason for photo correction/change is mandatory.' });
+      return;
+    }
+
+    const reqId = randomUUID();
+    await pool.query(
+      `INSERT INTO photo_change_requests (id, cluster_id, academic_year_id, day_number, requested_by, requested_by_name, reason, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', NOW())`,
+      [reqId, clusterId, academicYearId, dayNumber, req.user.id, req.user.name, reason]
+    );
+
+    // Set status to EDIT_REQUESTED
+    await pool.query(
+      'UPDATE session_photo_submissions SET status = "EDIT_REQUESTED" WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "")',
+      [clusterId, dayNumber, academicYearId, academicYearId]
+    );
+
+    // Register in approvals
+    const approvalId = randomUUID();
+    await pool.query(
+      `INSERT INTO approvals (id, module, type, reference, record_id, status, requested_by, requestedBy, remarks, cluster_id, clusterId, academic_year_id, created_at)
+       VALUES (?, 'Session Photos', 'Photo Change', ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, NOW())`,
+      [approvalId, `Day ${dayNumber} Photo Change`, reqId, req.user.name, req.user.name, reason, clusterId, clusterId, academicYearId]
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'PHOTO_EDIT_REQUESTED', 'Session Photos', reqId, `Photo change requested for Day ${dayNumber}. Reason: ${reason}`]
+    );
+
+    // Notify Super Admin
+    await pool.query(
+      'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), 'Photo change request requires approval.', `Cluster ${clusterId} requested photo changes for Day ${dayNumber}. Reason: ${reason}`, 'session_photos']
+    );
+
+    res.json({ success: true, message: 'Photo change request submitted for Super Admin review.' });
+  } catch (error) {
+    console.error('Failed to submit photo change request:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit photo change request.' });
+  }
+});
+
+app.post('/api/session-photos/change-requests/:id/approve', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can approve photo change requests.' });
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM photo_change_requests WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Change request not found.' });
+      return;
+    }
+    const cReq = rows[0];
+
+    // Unlock ONLY that specific Day/Session collection for that cluster
+    await pool.query(
+      'UPDATE session_photo_submissions SET status = "EDIT_APPROVED" WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "")',
+      [cReq.cluster_id, cReq.day_number, cReq.academic_year_id || '', cReq.academic_year_id || '']
+    );
+
+    await pool.query(
+      'UPDATE photo_change_requests SET status = "APPROVED", reviewed_by = ?, reviewed_at = NOW() WHERE id = ?',
+      [req.user.name || 'Super Admin', cReq.id]
+    );
+
+    await pool.query(
+      'UPDATE approvals SET status = "Approved", reviewed_by = ?, reviewed_at = NOW() WHERE record_id = ? OR id = ?',
+      [req.user.name || 'Super Admin', cReq.id, cReq.id]
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, cReq.cluster_id, 'PHOTO_EDIT_APPROVED', 'Session Photos', cReq.id, `Approved photo change request for Day ${cReq.day_number}. Scope unlocked.`]
+    );
+
+    // Notify Cluster Admin
+    await pool.query(
+      'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), cReq.requested_by, 'Photo change request approved.', `You may now make corrections/additions to Day ${cReq.day_number} photos.`, 'session_photos']
+    );
+
+    res.json({ success: true, message: 'Photo change request approved. Day collection unlocked for editing.' });
+  } catch (error) {
+    console.error('Failed to approve photo change request:', error);
+    res.status(500).json({ success: false, error: 'Unable to approve photo change request.' });
+  }
+});
+
+app.post('/api/session-photos/change-requests/:id/reject', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can reject photo change requests.' });
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query<any[]>('SELECT * FROM photo_change_requests WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Change request not found.' });
+      return;
+    }
+    const cReq = rows[0];
+    const remarks = req.body.remarks ? String(req.body.remarks).trim() : null;
+
+    // Reset status back to SUBMITTED
+    await pool.query(
+      'UPDATE session_photo_submissions SET status = "SUBMITTED" WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "")',
+      [cReq.cluster_id, cReq.day_number, cReq.academic_year_id || '', cReq.academic_year_id || '']
+    );
+
+    await pool.query(
+      'UPDATE photo_change_requests SET status = "REJECTED", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?',
+      [req.user.name || 'Super Admin', remarks, cReq.id]
+    );
+
+    await pool.query(
+      'UPDATE approvals SET status = "Rejected", reviewed_by = ?, reviewed_at = NOW() WHERE record_id = ? OR id = ?',
+      [req.user.name || 'Super Admin', cReq.id, cReq.id]
+    );
+
+    // Audit log
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, cReq.cluster_id, 'PHOTO_EDIT_REJECTED', 'Session Photos', cReq.id, `Rejected photo change request for Day ${cReq.day_number}. Remarks: ${remarks || 'None'}`]
+    );
+
+    // Notify Cluster Admin
+    await pool.query(
+      'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
+      [randomUUID(), cReq.requested_by, 'Photo change request rejected.', remarks ? `Your request was rejected. Remarks: ${remarks}` : 'Your photo change request was rejected by Super Admin.', 'session_photos']
+    );
+
+    res.json({ success: true, message: 'Photo change request rejected.' });
+  } catch (error) {
+    console.error('Failed to reject photo change request:', error);
+    res.status(500).json({ success: false, error: 'Unable to reject photo change request.' });
+  }
+});
+
 
 app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -1022,6 +1840,101 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
     }
 
     await pool.query('UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ?', [status, req.params.id]);
+
+    // Handle Session Photos module specific side-effects
+    if (approval.module === 'Session Photos') {
+      if (approval.type === 'Photo Deletion') {
+        const [delRows] = await pool.query<any[]>(
+          'SELECT * FROM photo_delete_requests WHERE id = ? OR photo_id = ? LIMIT 1',
+          [approval.record_id, approval.record_id]
+        );
+        if (delRows.length > 0) {
+          const delReq = delRows[0];
+          if (action === 'approve') {
+            const [photoRows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [delReq.photo_id]);
+            if (photoRows.length > 0) {
+              const photo = photoRows[0];
+              if (photo.file_path && fs.existsSync(photo.file_path)) {
+                try {
+                  fs.unlinkSync(photo.file_path);
+                } catch (e) {
+                  console.warn('Physical file deletion warning in approval handler:', e);
+                }
+              }
+              await pool.query('DELETE FROM session_photos WHERE id = ?', [delReq.photo_id]);
+            }
+            await pool.query('UPDATE photo_delete_requests SET status = "APPROVED", reviewed_by = ?, reviewed_at = NOW() WHERE id = ?', [req.user.name || 'Super Admin', delReq.id]);
+          } else if (action === 'reject') {
+            await pool.query('UPDATE photo_delete_requests SET status = "REJECTED", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?', [req.user.name || 'Super Admin', remarks, delReq.id]);
+            await pool.query('UPDATE session_photos SET delete_request_status = "REJECTED" WHERE id = ?', [delReq.photo_id]);
+          }
+        }
+      } else if (approval.type === 'Photo Change') {
+        const [changeRows] = await pool.query<any[]>(
+          'SELECT * FROM photo_change_requests WHERE id = ? LIMIT 1',
+          [approval.record_id]
+        );
+        if (changeRows.length > 0) {
+          const cReq = changeRows[0];
+          if (action === 'approve') {
+            await pool.query(
+              'UPDATE session_photo_submissions SET status = "EDIT_APPROVED" WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "")',
+              [cReq.cluster_id, cReq.day_number, cReq.academic_year_id || '', cReq.academic_year_id || '']
+            );
+            await pool.query('UPDATE photo_change_requests SET status = "APPROVED", reviewed_by = ?, reviewed_at = NOW() WHERE id = ?', [req.user.name || 'Super Admin', cReq.id]);
+          } else {
+            await pool.query(
+              'UPDATE session_photo_submissions SET status = "SUBMITTED" WHERE cluster_id = ? AND day_number = ? AND (academic_year_id = ? OR ? = "")',
+              [cReq.cluster_id, cReq.day_number, cReq.academic_year_id || '', cReq.academic_year_id || '']
+            );
+            await pool.query('UPDATE photo_change_requests SET status = "REJECTED", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?', [req.user.name || 'Super Admin', remarks, cReq.id]);
+          }
+        }
+      } else if (approval.type === 'Day Photos Submission') {
+        const newSubStatus = action === 'approve' ? 'APPROVED' : 'RESUBMISSION_REQUIRED';
+        await pool.query(
+          'UPDATE session_photo_submissions SET status = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?',
+          [newSubStatus, req.user.name || 'Super Admin', approval.record_id]
+        );
+      }
+    }
+
+    // Handle Attendance module specific side-effects
+    if (approval.module === 'Attendance') {
+      const attId = approval.sessionId || approval.record_id || approval.reference;
+      if (approval.type === 'Attendance Edit Request') {
+        if (action === 'approve') {
+          await pool.query(
+            'UPDATE attendance_sessions SET status = "Edit Approved", reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW() WHERE id = ?',
+            [req.user.name || 'Super Admin', attId]
+          );
+        } else if (action === 'reject') {
+          await pool.query(
+            'UPDATE attendance_sessions SET status = "Submitted - Pending Review", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ?, updated_at = NOW() WHERE id = ?',
+            [req.user.name || 'Super Admin', remarks, attId]
+          );
+        }
+      } else {
+        // Attendance Submission
+        if (action === 'approve') {
+          await pool.query(
+            'UPDATE attendance_sessions SET status = "Approved", reviewed_by = ?, reviewed_at = NOW(), updated_at = NOW() WHERE id = ?',
+            [req.user.name || 'Super Admin', attId]
+          );
+        } else if (action === 'reject') {
+          await pool.query(
+            'UPDATE attendance_sessions SET status = "Rejected", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ?, updated_at = NOW() WHERE id = ?',
+            [req.user.name || 'Super Admin', remarks, attId]
+          );
+        } else if (action === 'request-correction') {
+          await pool.query(
+            'UPDATE attendance_sessions SET status = "Edit Approved", reviewed_by = ?, reviewed_at = NOW(), review_remarks = ?, updated_at = NOW() WHERE id = ?',
+            [req.user.name || 'Super Admin', remarks, attId]
+          );
+        }
+      }
+    }
+
     const actionName = action === 'approve' ? 'APPROVE' : action === 'reject' ? 'REJECT' : 'REQUEST_RESUBMISSION';
     const recordId = approval.record_id || approval.id;
     await pool.query(
@@ -1073,7 +1986,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const clusterId = String(req.body.id || cleanIdPart || `cluster-${Date.now()}`);
   const collegeId = `college-${randomUUID()}`;
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
-  const initialPassword = randomBytes(24).toString('base64url');
+  const initialPassword = 'TQI123';
 
   if (!collegeName || !district || !spocName || !spocMobile || !adminEmail) {
     res.status(400).json({ success: false, error: 'College name, district, SPOC name, SPOC mobile, and login email are required.' });
@@ -1271,14 +2184,22 @@ app.get('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    const panchayatId = String(req.body.panchayatId || '').trim();
+    const villageId = String(req.body.villageId || '').trim();
+    const [parentRows] = await pool.query<any[]>('SELECT id, cluster_id FROM panchayats WHERE id = ? LIMIT 1', [panchayatId]);
+    if (!parentRows.length || (req.user.role === 'Cluster Admin' && parentRows[0].cluster_id !== req.user.clusterId)) {
+      res.status(403).json({ success: false, error: 'You are not authorized to add a student under this panchayat.' });
+      return;
+    }
+    const clusterId = parentRows[0].cluster_id;
+    if (villageId) {
+      const [villageRows] = await pool.query<any[]>('SELECT id FROM villages WHERE id = ? AND panchayat_id = ? AND cluster_id = ? LIMIT 1', [villageId, panchayatId, clusterId]);
+      if (!villageRows.length) { res.status(400).json({ success: false, error: 'The selected village does not belong to this panchayat.' }); return; }
+    }
     const [clusterRows] = await pool.query<any[]>('SELECT college_id FROM clusters WHERE id = ? LIMIT 1', [clusterId]);
     const collegeId = clusterRows[0]?.college_id || null;
     const id = String(req.body.id || `student-${Date.now()}`).trim();
     const name = String(req.body.name || 'New Student').trim();
-    const panchayatId = String(req.body.panchayatId || '');
-    const villageId = String(req.body.villageId || '');
-
     await pool.query(
       `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, college_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
       [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, collegeId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'active')]
@@ -1294,7 +2215,7 @@ app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Re
 app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.cluster_id, v.college_id, colleges.name AS college_name, v.panchayat_id, p.name AS panchayat_name, v.role, v.status FROM volunteers v LEFT JOIN colleges ON colleges.id = v.college_id LEFT JOIN panchayats p ON p.id = v.panchayat_id WHERE 1=1`;
+    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.stream, v.passing_out_year, v.cluster_id, v.college_id, colleges.name AS college_name, v.panchayat_id, p.name AS panchayat_name, v.village_id, vi.name AS village_name, v.role, v.status FROM volunteers v LEFT JOIN colleges ON colleges.id = v.college_id LEFT JOIN panchayats p ON p.id = v.panchayat_id LEFT JOIN villages vi ON vi.id = v.village_id WHERE 1=1`;
     const params: any[] = [];
 
     if (req.user.role === 'Cluster Admin') {
@@ -1324,10 +2245,10 @@ app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: 
     const collegeName = collegeRows[0]?.name || '';
     const id = String(req.body.id || `volunteer-${Date.now()}`).trim();
     await pool.query(
-      'INSERT INTO volunteers (id, name, email, phone, cluster_id, college_id, panchayat_id, department, role, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), role = VALUES(role), status = VALUES(status)',
-      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, collegeId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), req.user.id]
+      'INSERT INTO volunteers (id, name, email, phone, cluster_id, college_id, panchayat_id, department, stream, passing_out_year, role, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), stream = VALUES(stream), passing_out_year = VALUES(passing_out_year), role = VALUES(role), status = VALUES(status)',
+      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, collegeId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.stream || ''), req.body.passingOutYear ? Number(req.body.passingOutYear) : null, String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), req.user.id]
     );
-    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', collegeId, college: collegeName, clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
+    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', collegeId, college: collegeName, clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', stream: req.body.stream || '', passingOutYear: req.body.passingOutYear || '', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
   } catch (error) {
     console.error('Failed to save volunteer:', error);
     res.status(500).json({ success: false, error: 'Unable to save volunteer.' });
@@ -1346,10 +2267,13 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
         ay.id AS academic_year_id,
         pd.id AS day_id,
         pd.day_number,
-        COALESCE(s.session_name_snapshot, pd.day_name, '') AS session_name,
+        COALESCE(NULLIF(NULLIF(TRIM(pd.day_name), ''), CONCAT('Day ', pd.day_number)), '') AS session_name,
         c.id AS cluster_id,
         c.name AS cluster_name,
         s.date,
+        COALESCE(s.session_date_fixed, FALSE) AS session_date_fixed,
+        s.session_date_fixed_at,
+        s.session_date_fixed_by,
         s.panchayat_id,
         s.village_id,
         s.volunteer_id,
@@ -1411,26 +2335,33 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
     return;
   }
 
+  const sessionId = String(req.params.id || '').trim();
   const dayNumber = Number(req.body.dayNumber);
   const academicYearId = String(req.body.academicYearId || '').trim();
   const dayId = String(req.body.dayId || '').trim();
   const date = req.body.date ? String(req.body.date).trim() : '';
-  if (!academicYearId || !dayId || !Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8) {
-    res.status(400).json({ success: false, error: 'Academic year and programme day IDs are required.' });
+  if (!sessionId || !academicYearId || !dayId || !Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8) {
+    res.status(400).json({ success: false, error: 'Valid session, academic year and programme day IDs are required.' });
     return;
   }
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     res.status(400).json({ success: false, error: 'A valid session date is required.' });
     return;
   }
-  if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    res.status(400).json({ success: false, error: 'Session date is invalid.' });
-    return;
-  }
 
   try {
+    const isPendingSession = sessionId.startsWith('pending-session-');
+    const [existingRows] = await pool.query<any[]>(
+      'SELECT id, cluster_id, date, academic_year_id, day_id, day_number, session_date_fixed FROM sessions WHERE id = ? AND cluster_id = ? LIMIT 1',
+      [sessionId, req.user.clusterId],
+    );
+    if (!existingRows.length && !isPendingSession) {
+      res.status(404).json({ success: false, error: 'Session not found in your assigned cluster.' });
+      return;
+    }
+
     const [days] = await pool.query<any[]>(
-      `SELECT ay.id, ay.start_date, ay.end_date, pd.id AS day_id
+      `SELECT ay.id, ay.start_date, ay.end_date, pd.id AS day_id, pd.day_name
        FROM academic_years ay INNER JOIN program_days pd ON pd.academic_year_id = ay.id
        WHERE ay.id = ? AND ay.is_active = 1 AND pd.id = ? AND pd.day_number = ? LIMIT 1`,
       [academicYearId, dayId, dayNumber],
@@ -1440,27 +2371,24 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
       return;
     }
     const { start_date: startDate, end_date: endDate } = days[0];
-    if ((startDate && date < new Date(startDate).toISOString().slice(0, 10)) || (endDate && date > new Date(endDate).toISOString().slice(0, 10))) {
+    if (!isPendingSession && ((startDate && date < new Date(startDate).toISOString().slice(0, 10)) || (endDate && date > new Date(endDate).toISOString().slice(0, 10)))) {
       res.status(400).json({ success: false, error: 'Session date must be within the active academic year.' });
       return;
     }
-    const [existing] = await pool.query<any[]>(
-      'SELECT id, date, session_status FROM sessions WHERE academic_year_id = ? AND day_id = ? AND cluster_id = ? LIMIT 1',
-      [academicYearId, dayId, req.user.clusterId],
-    );
-    const existingDate = existing[0]?.date ? String(existing[0].date).slice(0, 10) : '';
+
+    const existingDate = existingRows[0]?.date ? String(existingRows[0].date).slice(0, 10) : '';
     if (existingDate && existingDate !== date) {
       res.status(409).json({ success: false, error: 'This session date is locked. Submit a date change request instead.' });
       return;
     }
-    const id = existing[0]?.id || `session-${academicYearId}-${req.user.clusterId}-${dayNumber}`;
-    const sessionName = String(req.body.sessionName || `Day ${dayNumber}`).trim();
+
+    const sessionName = String(days[0]?.day_name || '').trim();
     await pool.query(
-      `INSERT INTO sessions (id, title, cluster_id, academic_year_id, day_id, day_number, session_name_snapshot, panchayat_id, village_id, volunteer_id, date, session_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Scheduled')
-       ON DUPLICATE KEY UPDATE title = VALUES(title), session_name_snapshot = VALUES(session_name_snapshot), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), session_status = 'Scheduled'`,
+      `INSERT INTO sessions (id, title, cluster_id, academic_year_id, day_id, day_number, session_name_snapshot, panchayat_id, village_id, volunteer_id, date, session_date_fixed, session_date_fixed_at, session_date_fixed_by, session_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, NOW(), ?, 'Scheduled')
+       ON DUPLICATE KEY UPDATE title = VALUES(title), session_name_snapshot = VALUES(session_name_snapshot), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), date = VALUES(date), session_date_fixed = TRUE, session_date_fixed_at = NOW(), session_date_fixed_by = VALUES(session_date_fixed_by), session_status = 'Scheduled'`,
       [
-        id,
+        sessionId,
         sessionName,
         req.user.clusterId,
         academicYearId,
@@ -1471,6 +2399,7 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
         req.body.villageId ? String(req.body.villageId) : null,
         req.body.volunteerId ? String(req.body.volunteerId) : null,
         date,
+        req.user.id,
       ],
     );
     await pool.query(
@@ -1489,7 +2418,7 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
         { label: 'Confirmed By', value: req.user.name },
       ],
     }).catch((error) => console.error('[SMTP ERROR] Schedule notification failed:', error.message));
-    res.json({ success: true, status: 'Scheduled', date, sessionId: id });
+    res.json({ success: true, status: 'Scheduled', date, dateFixed: true, dateFixedAt: new Date().toISOString(), dateFixedBy: req.user.id, sessionId });
   } catch (error) {
     console.error('Failed to update session schedule:', error);
     res.status(503).json({ success: false, error: 'Unable to save session schedule.' });
@@ -1529,13 +2458,267 @@ app.get('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: R
       status: row.status || 'Draft',
       totalCount: Number(row.total_count || 0),
       presentCount: Number(row.present_count || 0),
-      absentCount: Math.max(0, Number(row.total_count || 0) - Number(row.present_count || 0)),
+      absentCount: Math.max(0, Number(row.total_count || 0) - Number(row.present_count || 0) - Number(row.not_marked_count || 0)),
+      taskCompletedCount: Number(row.task_completed_count || 0),
+      notMarkedCount: Number(row.not_marked_count || 0),
+      editReason: row.edit_reason || '',
+      editRequestedBy: row.edit_requested_by || '',
+      editRequestedAt: row.edit_requested_at || null,
+      reviewedBy: row.reviewed_by || '',
+      reviewedAt: row.reviewed_at || null,
+      reviewRemarks: row.review_remarks || '',
       records: [],
       volunteerAttendance: [],
     })) });
   } catch (error) {
     console.error('Failed to load attendance:', error);
     res.status(503).json({ success: false, error: 'Unable to load data. Please try again.' });
+  }
+});
+
+app.get('/api/attendance/session', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const villageId = String(req.query.villageId || '').trim();
+    const dayNumber = Number(req.query.dayNumber || 1);
+    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.query.clusterId || '');
+    const academicYearId = String(req.query.academicYearId || '').trim();
+
+    if (!villageId) {
+      res.status(400).json({ success: false, error: 'villageId is required.' });
+      return;
+    }
+
+    let sessionSql = 'SELECT * FROM attendance_sessions WHERE village_id = ? AND day_number = ?';
+    const params: any[] = [villageId, dayNumber];
+    if (clusterId && clusterId !== 'all') {
+      sessionSql += ' AND cluster_id = ?';
+      params.push(clusterId);
+    }
+    if (academicYearId) {
+      sessionSql += ' AND (academic_year_id = ? OR academic_year_id IS NULL)';
+      params.push(academicYearId);
+    }
+    sessionSql += ' ORDER BY updated_at DESC LIMIT 1';
+    const [sessionRows] = await pool.query<any[]>(sessionSql, params);
+
+    let sessionObj = null;
+    let records: any[] = [];
+    if (sessionRows.length > 0) {
+      const row = sessionRows[0];
+      sessionObj = {
+        id: row.id,
+        sessionId: row.session_id,
+        clusterId: row.cluster_id,
+        panchayatId: row.panchayat_id,
+        villageId: row.village_id,
+        dayNumber: Number(row.day_number || 1),
+        status: row.status || 'Draft',
+        totalCount: Number(row.total_count || 0),
+        presentCount: Number(row.present_count || 0),
+        absentCount: Math.max(0, Number(row.total_count || 0) - Number(row.present_count || 0) - Number(row.not_marked_count || 0)),
+        taskCompletedCount: Number(row.task_completed_count || 0),
+        notMarkedCount: Number(row.not_marked_count || 0),
+        editReason: row.edit_reason || '',
+        editRequestedBy: row.edit_requested_by || '',
+        editRequestedAt: row.edit_requested_at || null,
+        reviewedBy: row.reviewed_by || '',
+        reviewedAt: row.reviewed_at || null,
+        reviewRemarks: row.review_remarks || '',
+      };
+
+      const [attRows] = await pool.query<any[]>(
+        'SELECT student_id, present, task_status FROM student_attendance WHERE attendance_session_id = ?',
+        [row.id]
+      );
+      records = attRows.map((r) => ({
+        studentId: r.student_id,
+        present: r.present === null ? null : Boolean(r.present),
+        status: r.present === 1 || r.present === true ? 'Present' : r.present === 0 || r.present === false ? 'Absent' : 'Not Marked',
+        taskStatus: r.task_status || 'Not Marked',
+      }));
+      const [volunteerRows] = await pool.query<any[]>(
+        'SELECT volunteer_id, present FROM volunteer_attendance WHERE attendance_session_id = ?',
+        [row.id]
+      );
+      return res.json({
+        success: true,
+        session: sessionObj,
+        records,
+        volunteerRecords: volunteerRows.map((r) => ({
+          volunteerId: r.volunteer_id,
+          present: Boolean(r.present),
+        })),
+      });
+    }
+
+    res.json({ success: true, session: sessionObj, records, volunteerRecords: [] });
+  } catch (error) {
+    console.error('Failed to load attendance session:', error);
+    res.status(500).json({ success: false, error: 'Unable to load attendance session.' });
+  }
+});
+
+app.get('/api/attendance/village-report', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const villageId = String(req.query.villageId || '').trim();
+    if (!villageId) {
+      res.status(400).json({ success: false, error: 'villageId is required.' });
+      return;
+    }
+
+    // Fetch Village details
+    const [villageRows] = await pool.query<any[]>(
+      'SELECT v.id, v.name, v.panchayat_id, v.cluster_id, p.name AS panchayat_name, c.name AS cluster_name, c.college_id, col.name AS college_name FROM villages v LEFT JOIN panchayats p ON p.id = v.panchayat_id LEFT JOIN clusters c ON c.id = v.cluster_id LEFT JOIN colleges col ON col.id = c.college_id WHERE v.id = ? LIMIT 1',
+      [villageId]
+    );
+
+    if (!villageRows.length) {
+      res.status(404).json({ success: false, error: 'Village not found.' });
+      return;
+    }
+
+    const village = villageRows[0];
+    const clusterId = village.cluster_id;
+
+    // Security Check: If user is Cluster Admin, they must belong to this cluster
+    if (req.user.role === 'Cluster Admin') {
+      const userCluster = req.user.clusterId || req.user.cluster_id;
+      if (userCluster && userCluster !== clusterId && !clusterId.startsWith(userCluster)) {
+        res.status(403).json({ success: false, error: 'Access denied: You cannot access data for another cluster.' });
+        return;
+      }
+    }
+
+    // Fetch students belonging strictly to this village
+    const standardFilter = req.query.standard ? String(req.query.standard).trim() : '';
+    let studentSql = `
+      SELECT s.id, s.code, s.name, s.gender, s.dob, s.standard, s.panchayat_id, s.village_id, s.parent_name, s.phone, s.status, p.name AS panchayat_name
+      FROM students s
+      LEFT JOIN panchayats p ON p.id = s.panchayat_id
+      WHERE s.village_id = ?
+    `;
+    const studentParams: any[] = [villageId];
+
+    if (standardFilter && standardFilter !== 'all') {
+      studentSql += ' AND (s.standard = ? OR s.standard LIKE ?)';
+      studentParams.push(standardFilter, `%${standardFilter}%`);
+    }
+
+    studentSql += ' ORDER BY s.name ASC';
+    const [students] = await pool.query<any[]>(studentSql, studentParams);
+
+    // Fetch scheduled session dates for Day 1 through Day 8
+    const [sessionRows] = await pool.query<any[]>(
+      'SELECT day_number, date FROM sessions WHERE cluster_id = ? AND (panchayat_id = ? OR panchayat_id IS NULL) ORDER BY day_number ASC',
+      [clusterId, village.panchayat_id]
+    );
+
+    const sessionDates: Record<number, string> = {};
+    for (const sess of sessionRows) {
+      if (sess.day_number && sess.date) {
+        const d = new Date(sess.date);
+        const dayStr = String(d.getDate()).padStart(2, '0');
+        const monthStr = String(d.getMonth() + 1).padStart(2, '0');
+        sessionDates[Number(sess.day_number)] = `${dayStr}/${monthStr}`;
+      }
+    }
+
+    // Fetch student attendance for Day 1 through Day 8
+    const studentIds = students.map((s) => s.id);
+    const attendanceMap: Record<string, Record<number, 'P' | 'A'>> = {};
+
+    if (studentIds.length > 0) {
+      const [attRows] = await pool.query<any[]>(
+        `SELECT sa.student_id, att.day_number, sa.present
+         FROM student_attendance sa
+         JOIN attendance_sessions att ON att.id = sa.attendance_session_id
+         WHERE sa.student_id IN (?)`,
+        [studentIds]
+      );
+
+      for (const row of attRows) {
+        const sId = row.student_id;
+        const day = Number(row.day_number);
+        if (!attendanceMap[sId]) attendanceMap[sId] = {};
+        attendanceMap[sId][day] = row.present ? 'P' : 'A';
+      }
+    }
+
+    // Build student attendance records
+    const formattedStudents = students.map((s, index) => {
+      const studentAtt = attendanceMap[s.id] || {};
+      const dayRecords: Record<string, string> = {};
+      for (let d = 1; d <= 8; d++) {
+        dayRecords[`D${d}`] = studentAtt[d] || '';
+      }
+
+      return {
+        no: index + 1,
+        id: s.id,
+        code: s.code || s.id,
+        name: s.name,
+        gender: s.gender || 'other',
+        standard: s.standard || '',
+        panchayatName: s.panchayat_name || village.panchayat_name || '',
+        contactNumber: s.phone || '',
+        status: s.status || 'active',
+        attendance: dayRecords,
+      };
+    });
+
+    // Determine academic year from query, academic_setup, or academic_years
+    const queryAcademicYear = req.query.academicYear ? String(req.query.academicYear).trim() : '';
+    let academicYear = queryAcademicYear;
+
+    if (!academicYear) {
+      try {
+        const [setupRows] = await pool.query<any[]>(
+          'SELECT academic_year FROM academic_setup WHERE academic_year IS NOT NULL AND academic_year != "" ORDER BY updated_at DESC LIMIT 1'
+        );
+        if (setupRows.length && setupRows[0].academic_year) {
+          academicYear = setupRows[0].academic_year;
+        } else {
+          const [ayRows] = await pool.query<any[]>(
+            'SELECT name FROM academic_years WHERE is_active = 1 LIMIT 1'
+          );
+          if (ayRows.length && ayRows[0].name) {
+            academicYear = ayRows[0].name;
+          }
+        }
+      } catch (ayErr) {
+        console.warn('Could not determine academic year for village report:', ayErr);
+      }
+    }
+    if (!academicYear) {
+      academicYear = '2025-2026';
+    }
+
+    res.json({
+      success: true,
+      data: {
+        cluster: {
+          id: clusterId,
+          name: village.cluster_name || clusterId,
+          collegeName: village.college_name || '',
+        },
+        panchayat: {
+          id: village.panchayat_id,
+          name: village.panchayat_name || '',
+        },
+        village: {
+          id: village.id,
+          name: village.name,
+        },
+        academicYear,
+        standard: standardFilter && standardFilter !== 'all' ? standardFilter : 'All',
+        sessionDates,
+        students: formattedStudents,
+        totalStudentsCount: formattedStudents.length,
+      },
+    });
+  } catch (error) {
+    console.error('Failed to generate village attendance report:', error);
+    res.status(500).json({ success: false, error: 'Unable to load village attendance report.' });
   }
 });
 
@@ -1546,6 +2729,49 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       return;
     }
     const clusterId = req.user.clusterId;
+    const panchayatId = req.body.panchayatId ? String(req.body.panchayatId) : '';
+    const villageId = req.body.villageId ? String(req.body.villageId) : '';
+    const requestedDay = Number(req.body.dayNumber || 1);
+    const requestedAcademicYearId = req.body.academicYearId ? String(req.body.academicYearId) : '';
+
+    if (!clusterId) {
+      res.status(403).json({ success: false, error: 'Cluster assignment is missing for this account.' });
+      return;
+    }
+
+    if (panchayatId) {
+      const [panchayatRows] = await pool.query<any[]>('SELECT id, cluster_id FROM panchayats WHERE id = ? AND cluster_id = ? LIMIT 1', [panchayatId, clusterId]);
+      if (!panchayatRows.length) {
+        res.status(403).json({ success: false, error: 'Access denied: Panchayat does not belong to your cluster.' });
+        return;
+      }
+    }
+
+    if (villageId) {
+      const [villageRows] = await pool.query<any[]>('SELECT id, panchayat_id, cluster_id FROM villages WHERE id = ? AND cluster_id = ? LIMIT 1', [villageId, clusterId]);
+      if (!villageRows.length) {
+        res.status(403).json({ success: false, error: 'Access denied: Village does not belong to your cluster.' });
+        return;
+      }
+      if (panchayatId && villageRows[0].panchayat_id !== panchayatId) {
+        res.status(403).json({ success: false, error: 'Access denied: Village does not belong to the selected panchayat.' });
+        return;
+      }
+    }
+
+    if (requestedAcademicYearId) {
+      const [ayRows] = await pool.query<any[]>('SELECT id FROM academic_years WHERE id = ? LIMIT 1', [requestedAcademicYearId]);
+      if (!ayRows.length) {
+        res.status(400).json({ success: false, error: 'Academic year is invalid.' });
+        return;
+      }
+    }
+
+    if (requestedDay < 1 || requestedDay > 8) {
+      res.status(400).json({ success: false, error: 'Day number is outside the configured program range.' });
+      return;
+    }
+
     const sessionId = String(req.body.sessionId || '');
     // Phase 4: Check if session is editable
     if (sessionId) {
@@ -1560,22 +2786,68 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
     const id = String(req.body.id || `attendance-${Date.now()}`).trim();
     const totalCount = Number(req.body.totalCount || 0);
     const presentCount = Number(req.body.presentCount || 0);
+    const taskCompletedCount = Number(req.body.taskCompletedCount || 0);
+    const notMarkedCount = Number(req.body.notMarkedCount || 0);
     const requestedStatus = String(req.body.status || 'Draft');
-    const status = requestedStatus === 'Submitted' || requestedStatus === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
+    let status = 'Draft';
+    if (requestedStatus === 'Submitted' || requestedStatus === 'SUBMITTED' || requestedStatus === 'Submitted - Pending Review') {
+      status = 'Submitted - Pending Review';
+    } else if (requestedStatus === 'Resubmission') {
+      status = 'Submitted - Pending Review';
+    } else if (['Edit Requested', 'Edit Approved', 'Approved', 'Rejected'].includes(requestedStatus)) {
+      status = requestedStatus;
+    }
 
     await pool.query('START TRANSACTION');
 
     await pool.query(
-      'INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, status, present_count, total_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), day_number = VALUES(day_number), status = VALUES(status), present_count = VALUES(present_count), total_count = VALUES(total_count)',
-      [id, String(req.body.sessionId || id), clusterId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), Number(req.body.dayNumber || 1), status, presentCount, totalCount]
+      `INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, academic_year_id, status, present_count, total_count, task_completed_count, not_marked_count) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+       ON DUPLICATE KEY UPDATE 
+         session_id = VALUES(session_id), 
+         cluster_id = VALUES(cluster_id), 
+         panchayat_id = VALUES(panchayat_id), 
+         village_id = VALUES(village_id), 
+         day_number = VALUES(day_number), 
+         academic_year_id = VALUES(academic_year_id), 
+         status = VALUES(status), 
+         present_count = VALUES(present_count), 
+         total_count = VALUES(total_count),
+         task_completed_count = VALUES(task_completed_count),
+         not_marked_count = VALUES(not_marked_count),
+         updated_at = NOW()`,
+      [
+        id,
+        String(req.body.sessionId || id),
+        clusterId,
+        String(req.body.panchayatId || ''),
+        String(req.body.villageId || ''),
+        Number(req.body.dayNumber || 1),
+        requestedAcademicYearId || null,
+        status,
+        presentCount,
+        totalCount,
+        taskCompletedCount,
+        notMarkedCount,
+      ]
     );
 
-    if (Array.isArray(req.body.records)) {
+    if (req.body.attendanceSubject !== 'volunteers' && Array.isArray(req.body.records)) {
       await pool.query('DELETE FROM student_attendance WHERE attendance_session_id = ?', [id]);
       for (const record of req.body.records) {
+        let isPresent: number | null = null;
+        if (record.present !== undefined && record.present !== null) {
+          isPresent = record.present ? 1 : 0;
+        } else if (record.status === 'Present') {
+          isPresent = 1;
+        } else if (record.status === 'Absent') {
+          isPresent = 0;
+        }
+        const taskStatus = record.taskStatus && record.taskStatus !== 'Not Marked' ? record.taskStatus : null;
+
         await pool.query(
           'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, task_status) VALUES (?, ?, ?, ?, ?)',
-          [randomUUID(), id, record.studentId, Boolean(record.present), String(record.taskStatus || 'Completed')]
+          [randomUUID(), id, record.studentId, isPresent, taskStatus]
         );
       }
     }
@@ -1590,18 +2862,18 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       }
     }
 
-    if (status === 'SUBMITTED') {
+    if (status === 'Submitted - Pending Review') {
       await pool.query(
-        `INSERT INTO approvals (id, type, reference, requestedBy, date, status, remarks, sessionId, clusterId)
-         SELECT ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?
-         WHERE NOT EXISTS (SELECT 1 FROM approvals WHERE sessionId = ? AND status IN ('Open', 'Pending'))`,
-        [randomUUID(), 'Attendance', id, req.user.name, 'Open', '', id, clusterId, id],
+        `INSERT INTO approvals (id, module, type, reference, record_id, requested_by, requestedBy, date, status, remarks, sessionId, cluster_id, clusterId, created_at, updated_at)
+         VALUES (?, 'Attendance', 'Attendance Submission', ?, ?, ?, ?, CURDATE(), 'Pending', '', ?, ?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE status = 'Pending', updated_at = NOW()`,
+        [randomUUID(), id, id, req.user.name, req.user.name, id, clusterId, clusterId],
       );
     }
     
     await pool.query('COMMIT');
 
-    if (status === 'SUBMITTED') {
+    if (status === 'Submitted - Pending Review') {
       void notifyWorkflow({
         clusterId,
         title: 'Attendance submitted for review',
@@ -1610,17 +2882,88 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
           { label: 'Session', value: sessionId || id },
           { label: 'Day', value: `Day ${Number(req.body.dayNumber || 1)}` },
           { label: 'Present', value: `${presentCount} of ${totalCount}` },
-          { label: 'Status', value: 'Pending Review' },
+          { label: 'Status', value: 'Submitted - Pending Review' },
           { label: 'Submitted By', value: req.user.name },
         ],
       }).catch((error) => console.error('[SMTP ERROR] Attendance workflow notification failed:', error.message));
     }
 
-    res.json({ success: true, attendanceSession: { id, sessionId: req.body.sessionId || id, clusterId, panchayatId: req.body.panchayatId || '', villageId: req.body.villageId || '', dayNumber: Number(req.body.dayNumber || 1), status: status === 'SUBMITTED' ? 'Submitted' : 'Draft', presentCount, totalCount } });
+    res.json({
+      success: true,
+      attendanceSession: {
+        id,
+        sessionId: req.body.sessionId || id,
+        clusterId,
+        panchayatId: req.body.panchayatId || '',
+        villageId: req.body.villageId || '',
+        dayNumber: Number(req.body.dayNumber || 1),
+        status,
+        presentCount,
+        totalCount,
+        taskCompletedCount,
+        notMarkedCount,
+      },
+    });
   } catch (error) {
     await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to save attendance:', error);
     res.status(500).json({ success: false, error: 'Unable to save attendance.' });
+  }
+});
+
+app.post('/api/attendance/request-edit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admin can request edits.' });
+      return;
+    }
+    const { attendanceSessionId, villageId, dayNumber, reason } = req.body;
+    if (!reason || !String(reason).trim()) {
+      res.status(400).json({ success: false, error: 'Reason for edit is mandatory.' });
+      return;
+    }
+
+    let sessionId = attendanceSessionId;
+    if (!sessionId && villageId && dayNumber) {
+      const [rows] = await pool.query<any[]>(
+        'SELECT id FROM attendance_sessions WHERE village_id = ? AND day_number = ? AND cluster_id = ? LIMIT 1',
+        [villageId, dayNumber, req.user.clusterId]
+      );
+      if (rows.length) sessionId = rows[0].id;
+    }
+
+    if (!sessionId) {
+      res.status(404).json({ success: false, error: 'Attendance session not found.' });
+      return;
+    }
+
+    await pool.query(
+      'UPDATE attendance_sessions SET status = "Edit Requested", edit_reason = ?, edit_requested_by = ?, edit_requested_at = NOW(), updated_at = NOW() WHERE id = ?',
+      [String(reason).trim(), req.user.name, sessionId]
+    );
+
+    await pool.query(
+      `INSERT INTO approvals (id, module, type, reference, record_id, requested_by, requestedBy, status, remarks, sessionId, cluster_id, clusterId, date, created_at, updated_at)
+       VALUES (?, 'Attendance', 'Attendance Edit Request', ?, ?, ?, ?, 'Pending', ?, ?, ?, ?, CURDATE(), NOW(), NOW())
+       ON DUPLICATE KEY UPDATE status = 'Pending', remarks = VALUES(remarks), updated_at = NOW()`,
+      [randomUUID(), sessionId, sessionId, req.user.name, req.user.name, String(reason).trim(), sessionId, req.user.clusterId, req.user.clusterId]
+    );
+
+    void notifyWorkflow({
+      clusterId: req.user.clusterId,
+      title: 'Attendance edit requested',
+      summary: `Cluster Admin requested an edit for attendance session ${sessionId}.`,
+      details: [
+        { label: 'Session ID', value: sessionId },
+        { label: 'Reason', value: String(reason).trim() },
+        { label: 'Requested By', value: req.user.name },
+      ],
+    }).catch((e) => console.error('[SMTP ERROR] Edit request notification failed:', e.message));
+
+    res.json({ success: true, message: 'Edit request submitted successfully.', status: 'Edit Requested' });
+  } catch (error) {
+    console.error('Failed to request attendance edit:', error);
+    res.status(500).json({ success: false, error: 'Unable to submit edit request.' });
   }
 });
 
@@ -2079,7 +3422,7 @@ app.put('/api/clusters/:id/admin-status', requireAuth, async (req: Authenticated
 app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const requestedCluster = String(req.query.cluster || '').trim();
   const targetClusterId = req.user.role !== 'Super Admin' ? req.user.clusterId : (requestedCluster && requestedCluster !== 'all' ? requestedCluster : null);
-  const targetPanchayatId = req.query.panchayat || null;
+  const targetPanchayatId = req.query.panchayat ? String(req.query.panchayat).trim() : null;
   
   let sql = `
     SELECT v.*, p.name as panchayat_name,
@@ -2098,6 +3441,10 @@ app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Res
   if (targetPanchayatId) {
     sql += ' AND v.panchayat_id = ?';
     params.push(targetPanchayatId);
+    if (targetClusterId) {
+      sql += ' AND p.cluster_id = ?';
+      params.push(targetClusterId);
+    }
   }
   
   try {
@@ -2110,36 +3457,67 @@ app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 // 4. POST /api/villages
 app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { id, name } = req.body;
   try {
     const panchayatId = String(req.body.panchayat_id || req.body.panchayatId || '').trim();
-    if (!name || !panchayatId) { res.status(400).json({ success: false, error: 'Village name and panchayat are required.' }); return; }
+    const name = String(req.body.name || '').trim();
+    if (!name || !panchayatId) { res.status(400).json({ success: false, message: 'Village name and panchayat are required.' }); return; }
     const [parentRows] = await pool.query<any[]>('SELECT id, cluster_id FROM panchayats WHERE id = ? LIMIT 1', [panchayatId]);
     if (!parentRows.length || (req.user.role === 'Cluster Admin' && parentRows[0].cluster_id !== req.user.clusterId)) {
-      res.status(403).json({ success: false, error: 'You are not authorized to add a village under this panchayat.' }); return;
+      res.status(403).json({ success: false, message: 'You are not authorized to add a village under this panchayat.' }); return;
     }
     const clusterId = parentRows[0].cluster_id;
-    const finalId = id || crypto.randomUUID();
-    const [result] = await pool.query<any>(
-      `INSERT INTO villages (id, name, panchayat_id, cluster_id) 
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id)`,
-      [finalId, String(name).trim(), panchayatId, clusterId]
+    const finalId = randomUUID();
+    await pool.query(
+      'INSERT INTO villages (id, name, panchayat_id, cluster_id, status) VALUES (?, ?, ?, ?, ?)',
+      [finalId, name, panchayatId, clusterId, req.body.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE']
     );
-    res.json({ success: true, data: { id: finalId } });
+    res.json({ success: true, village: { id: finalId, name, panchayatId, clusterId, status: req.body.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE' } });
   } catch (error) {
-    res.status(503).json({ success: false, error: 'Failed to upsert village.' });
+    console.error('Failed to create village:', error);
+    res.status(503).json({ success: false, message: 'Village could not be created.' });
+  }
+});
+
+app.put('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) { res.status(400).json({ success: false, message: 'Village name is required.' }); return; }
+    const [rows] = await pool.query<any[]>(
+      'SELECT v.id, v.panchayat_id, v.cluster_id FROM villages v INNER JOIN panchayats p ON p.id = v.panchayat_id WHERE v.id = ? AND (? = \'Super Admin\' OR p.cluster_id = ?) LIMIT 1',
+      [req.params.id, req.user.role, req.user.clusterId]
+    );
+    if (!rows.length) { res.status(404).json({ success: false, message: 'Village not found or not authorized.' }); return; }
+    const status = req.body.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE';
+    await pool.query('UPDATE villages SET name = ?, status = ? WHERE id = ?', [name, status, req.params.id]);
+    res.json({ success: true, village: { id: req.params.id, name, panchayatId: rows[0].panchayat_id, clusterId: rows[0].cluster_id, status } });
+  } catch (error) {
+    console.error('Failed to update village:', error);
+    res.status(503).json({ success: false, message: 'Village could not be updated.' });
   }
 });
 
 // 5. DELETE /api/villages/:id
 app.delete('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("DELETE v FROM villages v INNER JOIN panchayats p ON p.id = v.panchayat_id WHERE v.id = ? AND (? = 'Super Admin' OR v.cluster_id = ?)", [req.params.id, req.user.role, req.user.clusterId]);
-    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Village not found.' }); return; }
+    const [villageRows] = await pool.query<any[]>("SELECT v.id FROM villages v INNER JOIN panchayats p ON p.id = v.panchayat_id WHERE v.id = ? AND (? = 'Super Admin' OR p.cluster_id = ?) LIMIT 1", [req.params.id, req.user.role, req.user.clusterId]);
+    if (!villageRows.length) { res.status(404).json({ success: false, message: 'Village not found.' }); return; }
+    const [dependencyRows] = await pool.query<any[]>(
+      `SELECT (SELECT COUNT(*) FROM students WHERE village_id = ?) +
+              (SELECT COUNT(*) FROM volunteers WHERE village_id = ?) +
+              (SELECT COUNT(*) FROM sessions WHERE village_id = ?) +
+              (SELECT COUNT(*) FROM session_reports WHERE village_id = ?) AS dependency_count`,
+      [req.params.id, req.params.id, req.params.id, req.params.id]
+    );
+    if (Number(dependencyRows[0]?.dependency_count || 0) > 0) {
+      res.status(409).json({ success: false, message: 'This village has linked records and cannot be permanently deleted.' });
+      return;
+    }
+    const [result] = await pool.query<any>('DELETE FROM villages WHERE id = ?', [req.params.id]);
+    if (!result.affectedRows) { res.status(404).json({ success: false, message: 'Village not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
-    res.status(503).json({ success: false, error: 'Failed to delete village.' });
+    console.error('Failed to delete village:', error);
+    res.status(503).json({ success: false, message: 'Village could not be deleted.' });
   }
 });
 
@@ -2183,33 +3561,41 @@ app.delete('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, r
 
 // 9. POST /api/students/bulk
 app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { students, clusterId } = req.body;
+  const { students } = req.body;
+  const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
   if (!Array.isArray(students) || !clusterId) {
     res.status(400).json({ success: false, error: 'Invalid payload.' });
     return;
   }
   let count = 0;
   try {
+    await pool.query('START TRANSACTION');
     for (const student of students) {
+      const [parentRows] = await pool.query<any[]>('SELECT id FROM panchayats WHERE id = ? AND cluster_id = ? LIMIT 1', [student.panchayatId, clusterId]);
+      if (!parentRows.length) throw new Error('A student row references an unauthorized panchayat.');
+      const [villageRows] = await pool.query<any[]>('SELECT id FROM villages WHERE id = ? AND panchayat_id = ? AND cluster_id = ? LIMIT 1', [student.villageId, student.panchayatId, clusterId]);
+      if (!villageRows.length) throw new Error('A student row references an invalid village.');
       await pool.query(
         'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId || null, student.villageId || null, student.parentName, student.phone, 'active']
+        [randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId, student.villageId, '', student.phone, 'active']
       );
       count++;
     }
+    await pool.query('COMMIT');
     res.json({ success: true, count });
   } catch (error) {
+    await pool.query('ROLLBACK').catch(() => undefined);
     res.status(503).json({ success: false, error: 'Failed to bulk import students.' });
   }
 });
 
 // 10. PUT /api/volunteers/:id
 app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, email, phone, department, role, panchayat_id, village_id, status } = req.body;
+  const { name, email, phone, department, stream, passingOutYear, role, panchayat_id, village_id, status } = req.body;
   try {
     const [result] = await pool.query<any>(
-      'UPDATE volunteers SET name = ?, email = ?, phone = ?, department = ?, role = ?, panchayat_id = ?, village_id = ?, status = ? WHERE id = ?',
-      [name, email, phone, department, role, panchayat_id, village_id, status, req.params.id]
+      'UPDATE volunteers SET name = ?, email = ?, phone = ?, department = ?, stream = ?, passing_out_year = ?, role = ?, panchayat_id = ?, village_id = ?, status = ? WHERE id = ?',
+      [name, email, phone, department, stream, passingOutYear ? Number(passingOutYear) : null, role, panchayat_id, village_id, status, req.params.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
     res.json({ success: true, data: { id: req.params.id } });
@@ -2240,8 +3626,8 @@ app.post('/api/volunteers/bulk', requireAuth, async (req: AuthenticatedRequest, 
   try {
     for (const vol of volunteers) {
       await pool.query(
-        'INSERT INTO volunteers (id, cluster_id, name, email, phone, department, role, panchayat_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), clusterId, vol.name, vol.email, vol.phone, vol.department, vol.role, vol.panchayatId || null, 'Active']
+        'INSERT INTO volunteers (id, cluster_id, name, email, phone, department, stream, passing_out_year, role, panchayat_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [crypto.randomUUID(), clusterId, vol.name, vol.email, vol.phone, vol.department, vol.stream || '', vol.passingOutYear ? Number(vol.passingOutYear) : null, vol.role, vol.panchayatId || null, 'Active']
       );
       count++;
     }
@@ -2297,37 +3683,53 @@ app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequ
       return;
     }
     const session = sessions[0];
-    const storedDate = String(session.date).slice(0, 10);
-    if (storedDate !== String(originalDate).slice(0, 10)) {
-      res.status(409).json({ success: false, error: 'The session date has changed. Refresh and try again.' });
-      return;
-    }
+    const storedDate = session.date instanceof Date
+      ? session.date.toISOString().slice(0, 10)
+      : /^\d{4}-\d{2}-\d{2}/.test(String(session.date || ''))
+        ? String(session.date).slice(0, 10)
+        : new Date(session.date).toISOString().slice(0, 10);
+    const requestOriginalDate = storedDate || String(originalDate).slice(0, 10);
     const [pending] = await pool.query<any[]>(
-      'SELECT id FROM date_change_requests WHERE session_id = ? AND status = \'PENDING\' LIMIT 1',
+      'SELECT * FROM date_change_requests WHERE session_id = ? AND status = \'PENDING\' LIMIT 1',
       [sessionId],
     );
     if (pending.length) {
-      res.status(409).json({ success: false, error: 'A date change request is already pending.' });
+      const existing = pending[0];
+      res.json({
+        success: true,
+        alreadyPending: true,
+        dateChangeRequest: {
+          id: existing.id,
+          sessionId: existing.session_id,
+          clusterId: existing.cluster_id,
+          originalDate: existing.original_date,
+          requestedDate: existing.requested_date,
+          reason: existing.reason,
+          status: existing.status,
+          requestedBy: existing.requested_by,
+          createdAt: existing.created_at,
+        },
+      });
       return;
     }
     const id = `dcr-${randomUUID()}`;
 
     await pool.query(
       'INSERT INTO date_change_requests (id, session_id, cluster_id, academic_year_id, day_id, day_number, original_date, requested_date, reason, status, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, sessionId, clusterId, session.academic_year_id, session.day_id, session.day_number, originalDate, requestedDate, reason, 'PENDING', req.user.id]
+      [id, sessionId, clusterId, session.academic_year_id, session.day_id, session.day_number, requestOriginalDate, requestedDate, reason, 'PENDING', req.user.id]
     );
 
     await pool.query(
       'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
       [randomUUID(), 'Date Change Request', `New date change request for session ${sessionId} from cluster ${clusterId}.`, 'date_change']
-    );
+    ).catch((error) => console.error('Failed to create date-change notification:', error));
 
     await pool.query(
       'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'CREATE_DATE_CHANGE_REQUEST', 'DATE_CHANGES', id, `Requested date change for session ${sessionId}`]
-    );
+    ).catch((error) => console.error('Failed to create date-change audit log:', error));
 
-    res.json({ success: true, request: { id, sessionId, clusterId, originalDate, requestedDate, reason, status: 'PENDING' }, dateChangeRequest: { id, sessionId, clusterId, originalDate, requestedDate, reason, status: 'PENDING' } });
+    res.json({ success: true, request: { id, sessionId, clusterId, originalDate: requestOriginalDate, requestedDate, reason, status: 'PENDING' }, dateChangeRequest: { id, sessionId, clusterId, originalDate: requestOriginalDate, requestedDate, reason, status: 'PENDING' } });
   } catch (error) {
     console.error('Failed to submit date change request:', error);
     res.status(500).json({ success: false, error: 'Unable to submit request.' });
@@ -2336,22 +3738,43 @@ app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT * FROM date_change_requests WHERE 1=1';
+    let sql = 'SELECT d.*, c.name AS cluster_name FROM date_change_requests d LEFT JOIN clusters c ON c.id = d.cluster_id WHERE 1=1';
     const params: any[] = [];
     const academicYearId = String(req.query.academicYearId || '').trim();
     if (academicYearId) {
-      sql += ' AND (academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = date_change_requests.session_id AND s.academic_year_id = ?))';
+      sql += ' AND (d.academic_year_id = ? OR EXISTS (SELECT 1 FROM sessions s WHERE s.id = d.session_id AND s.academic_year_id = ?))';
       params.push(academicYearId, academicYearId);
     }
 
     if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND d.cluster_id = ?';
       params.push(req.user.clusterId);
     }
 
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, data: rows, dateChangeRequests: rows });
+    res.json({
+      success: true,
+      data: rows,
+      dateChangeRequests: rows.map((row) => ({
+        id: row.id,
+        sessionId: row.session_id,
+        clusterId: row.cluster_id,
+        clusterName: row.cluster_name || row.cluster_id || '',
+        academicYearId: row.academic_year_id,
+        dayId: row.day_id,
+        dayNumber: row.day_number,
+        originalDate: row.original_date,
+        requestedDate: row.requested_date,
+        reason: row.reason,
+        status: row.status,
+        requestedBy: row.requested_by,
+        reviewedBy: row.reviewed_by,
+        reviewRemarks: row.review_remarks,
+        reviewedAt: row.reviewed_at,
+        createdAt: row.created_at,
+      })),
+    });
   } catch (error) {
     console.error('Failed to fetch date change requests:', error);
     res.status(503).json({ success: false, error: 'Unable to load data.' });
@@ -2389,7 +3812,10 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
     );
 
     if (status === 'APPROVED') {
-      await pool.query('UPDATE sessions SET date = ? WHERE id = ?', [request.requested_date, request.session_id]);
+      await pool.query(
+        "UPDATE sessions SET date = ?, session_status = 'Scheduled' WHERE id = ? AND cluster_id = ?",
+        [request.requested_date, request.session_id, request.cluster_id]
+      );
     }
 
     await pool.query(
@@ -2725,7 +4151,12 @@ app.put('/api/modules/:id', requireAuth, async (req: AuthenticatedRequest, res: 
 
 app.delete('/api/modules/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await pool.query('UPDATE modules SET is_active = 0 WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM module_resources WHERE module_id = ?', [req.params.id]);
+    const [result] = await pool.query<any>('DELETE FROM modules WHERE id = ?', [req.params.id]);
+    if (!result.affectedRows) {
+      res.status(404).json({ success: false, error: 'Module not found.' });
+      return;
+    }
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete module:', error);
@@ -2759,7 +4190,16 @@ app.post('/api/modules/:id/resources', requireAuth, moduleUploadMiddleware.singl
       [resourceId, req.params.id, filePath, fileUrl, req.file.originalname, req.file.mimetype, req.file.size]
     );
 
-    res.json({ success: true, resource: { id: resourceId, url: fileUrl } });
+    res.json({
+      success: true,
+      resource: {
+        id: resourceId,
+        url: fileUrl,
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        fileSize: req.file.size,
+      },
+    });
   } catch (error) {
     console.error('Failed to upload module resource:', error);
     res.status(500).json({ success: false, error: 'Unable to upload resource.' });
@@ -2777,6 +4217,33 @@ app.get('/api/modules/:id/resources/:resourceId/download', requireAuth, async (r
   } catch (error) {
     console.error('Failed to download module resource:', error);
     res.status(500).json({ success: false, error: 'Unable to download resource.' });
+  }
+});
+
+app.delete('/api/modules/:id/resources/:resourceId', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can delete module resources.' });
+    return;
+  }
+
+  try {
+    const [rows] = await pool.query<any[]>(
+      'SELECT file_path FROM module_resources WHERE id = ? AND module_id = ? LIMIT 1',
+      [req.params.resourceId, req.params.id]
+    );
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Resource not found.' });
+      return;
+    }
+
+    if (rows[0].file_path && fs.existsSync(rows[0].file_path)) {
+      fs.unlinkSync(rows[0].file_path);
+    }
+    await pool.query('DELETE FROM module_resources WHERE id = ? AND module_id = ?', [req.params.resourceId, req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete module resource:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete resource.' });
   }
 });
 

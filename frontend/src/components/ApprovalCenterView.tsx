@@ -10,6 +10,7 @@ import {
 import { Search, CheckCircle2, AlertCircle, XCircle, Clock, Eye, Check, RefreshCw } from './ui/icons';
 import { ActionButton } from './ui/action-button';
 import { Badge } from './ui/badge';
+import { DateChangeRequestView } from './DateChangeRequestView';
 
 interface ApprovalCenterViewProps {
   approvals: ApprovalItem[];
@@ -19,6 +20,12 @@ interface ApprovalCenterViewProps {
   onRequestCorrection: (id: string, module: string, recordId: string, reason: string) => void;
   onReject: (id: string, module: string, recordId: string, reason: string) => void;
   onNavigate: (tab: TabType, targetId?: string) => void;
+  dateChangeRequests: import('../types').DateChangeRequest[];
+  sessions: import('../types').Session[];
+  currentUserId: string;
+  currentUserClusterId: string;
+  onSubmitDateChange: (sessionId: string, originalDate: string, requestedDate: string, reason: string) => Promise<void>;
+  onReviewDateChange: (requestId: string, action: 'approve' | 'reject', remarks: string) => Promise<void>;
 }
 
 export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
@@ -29,6 +36,12 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   onRequestCorrection,
   onReject,
   onNavigate,
+  dateChangeRequests,
+  sessions,
+  currentUserId,
+  currentUserClusterId,
+  onSubmitDateChange,
+  onReviewDateChange,
 }) => {
   const [selectedModuleTab, setSelectedModuleTab] = useState<string>('all');
   const [selectedClusterFilter, setSelectedClusterFilter] = useState<string>('all');
@@ -41,16 +54,44 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   const [showCorrectionForm, setShowCorrectionForm] = useState<boolean>(false);
   const [isRejecting, setIsRejecting] = useState<boolean>(false);
 
+  const matchesApprovalCategory = (item: ApprovalItem, category: string) => {
+    const module = item.module.toLowerCase();
+    const type = String((item as ApprovalItem & { type?: string }).type || '').toLowerCase();
+    const title = item.recordTitle.toLowerCase();
+    const searchable = `${module} ${type} ${title}`;
+
+    switch (category) {
+      case 'dateChanges':
+        return searchable.includes('date change') || searchable.includes('schedule change');
+      case 'photos':
+        return module === 'session photos' || searchable.includes('photo');
+      case 'sessions':
+        return module === 'sessions' || module === 'session' || searchable.includes('session');
+      case 'attendance':
+        return module === 'attendance' || searchable.includes('attendance');
+      case 'lessonPlan':
+        return module === 'lesson plan';
+      case 'finance':
+        return module === 'finance';
+      case 'corrections':
+        return module === 'correction request';
+      default:
+        return true;
+    }
+  };
+
   // Counts for tabs
   const tabCounts = useMemo(() => {
     const pendingOnly = approvals.filter((a) => a.status === 'Pending');
     return {
       all: pendingOnly.length,
+      dateChanges: pendingOnly.filter((a) => matchesApprovalCategory(a, 'dateChanges')).length,
       attendance: pendingOnly.filter((a) => a.module === 'Attendance').length,
       lessonPlan: pendingOnly.filter((a) => a.module === 'Lesson Plan').length,
       finance: pendingOnly.filter((a) => a.module === 'Finance').length,
       sessions: pendingOnly.filter((a) => a.module === 'Sessions').length,
       corrections: pendingOnly.filter((a) => a.module === 'Correction Request').length,
+      photos: pendingOnly.filter((a) => matchesApprovalCategory(a, 'photos')).length,
     };
   }, [approvals]);
 
@@ -58,11 +99,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   const filteredApprovals = useMemo(() => {
     return approvals.filter((item) => {
       // Module tab filter
-      if (selectedModuleTab === 'attendance' && item.module !== 'Attendance') return false;
-      if (selectedModuleTab === 'lessonPlan' && item.module !== 'Lesson Plan') return false;
-      if (selectedModuleTab === 'finance' && item.module !== 'Finance') return false;
-      if (selectedModuleTab === 'sessions' && item.module !== 'Sessions') return false;
-      if (selectedModuleTab === 'corrections' && item.module !== 'Correction Request') return false;
+      if (selectedModuleTab !== 'all' && !matchesApprovalCategory(item, selectedModuleTab)) return false;
 
       // Status filter
       if (selectedStatusFilter !== 'all' && item.status !== selectedStatusFilter) return false;
@@ -130,6 +167,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
         return 'bg-amber-50 text-amber-900 border-amber-200';
       case 'Correction Request':
         return 'bg-orange-50 text-orange-900 border-orange-200';
+      case 'Session Photos':
+        return 'bg-pink-50 text-pink-900 border-pink-200';
       default:
         return 'bg-slate-50 text-slate-800 border-slate-200';
     }
@@ -145,6 +184,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
         return 'payments';
       case 'Correction Request':
         return 'edit_note';
+      case 'Session Photos':
+        return 'photo_library';
       default:
         return 'verified';
     }
@@ -186,11 +227,14 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
       {/* Module Navigation Tabs */}
       <div className="flex items-center gap-6 border-b border-border/40 text-xs font-medium overflow-x-auto">
         {[
-          { id: 'all', label: 'All Items', count: tabCounts.all },
+          { id: 'all', label: 'All', count: tabCounts.all },
+          { id: 'dateChanges', label: 'Date Changes', count: tabCounts.dateChanges },
+          { id: 'photos', label: 'Photos', count: tabCounts.photos },
+          { id: 'sessions', label: 'Sessions', count: tabCounts.sessions },
           { id: 'attendance', label: 'Attendance', count: tabCounts.attendance },
           { id: 'lessonPlan', label: 'Lesson Plans', count: tabCounts.lessonPlan },
-          { id: 'finance', label: 'Finance Claims', count: tabCounts.finance },
-          { id: 'corrections', label: 'Correction Requests', count: tabCounts.corrections },
+          { id: 'finance', label: 'Finance', count: tabCounts.finance },
+          { id: 'corrections', label: 'Corrections', count: tabCounts.corrections },
         ].map((tab) => {
           const isActive = selectedModuleTab === tab.id;
           return (
@@ -220,6 +264,18 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
         })}
       </div>
 
+      {selectedModuleTab === 'dateChanges' ? (
+        <DateChangeRequestView
+          dateChangeRequests={dateChangeRequests}
+          sessions={sessions}
+          currentUserRole={userRole}
+          currentUserId={currentUserId}
+          currentUserClusterId={currentUserClusterId}
+          onSubmitRequest={onSubmitDateChange}
+          onReviewRequest={onReviewDateChange}
+        />
+      ) : (
+        <>
       {/* Filter & Search Bar - Cardless */}
       <div className="flex flex-wrap items-center justify-between gap-3 py-1">
         <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
@@ -389,6 +445,9 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        </>
+      )}
 
       {/* DETAILED REVIEW & APPROVAL MODAL */}
       {reviewItem && (
