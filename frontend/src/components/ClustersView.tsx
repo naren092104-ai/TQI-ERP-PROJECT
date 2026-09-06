@@ -15,23 +15,29 @@ import {
   AlertCircle,
   Trash2
 } from './ui/icons';
-import { Cluster, TabType } from '../types';
+import { Cluster, Session, TabType } from '../types';
 import Badge from './ui/badge';
 import { ActionButton } from './ui/action-button';
 
 interface ClustersViewProps {
   clusters: Cluster[];
+  sessions?: Session[];
   userRole?: string;
   onNavigate: (tab: TabType, targetId?: string) => void;
   onAddCluster?: (cluster: Partial<Cluster>) => void | Promise<void | boolean>;
+  onUpdateCluster?: (id: string, cluster: Partial<Cluster>) => void | Promise<void | boolean>;
+  onUpdateAdminStatus?: (id: string, status: 'ACTIVE' | 'BLOCKED', reason?: string) => void | Promise<void>;
   onDeleteCluster?: (id: string) => void | Promise<void>;
 }
 
 export const ClustersView: React.FC<ClustersViewProps> = ({
   clusters = [],
+  sessions = [],
   userRole = 'Super Admin',
   onNavigate,
   onAddCluster,
+  onUpdateCluster,
+  onUpdateAdminStatus,
   onDeleteCluster,
 }) => {
   const isSuperAdmin = !userRole || userRole === 'Super Admin' || userRole.toLowerCase().includes('super');
@@ -40,8 +46,10 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [clusterToDelete, setClusterToDelete] = useState<Cluster | null>(null);
+  const [clusterToEdit, setClusterToEdit] = useState<Cluster | null>(null);
 
   const [newCollegeName, setNewCollegeName] = useState('');
+  const [newClusterName, setNewClusterName] = useState('');
   const [newClusterDistrict, setNewClusterDistrict] = useState('');
   const [newSpocName, setNewSpocName] = useState('');
   const [newSpocMobile, setNewSpocMobile] = useState('');
@@ -64,6 +72,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     if (
       !newCollegeName.trim() ||
       !newClusterDistrict.trim() ||
+      !newClusterName.trim() ||
       !newSpocName.trim() ||
       !newSpocMobile.trim() ||
       !newSpocEmail.trim()
@@ -74,32 +83,37 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
 
     setIsSubmitting(true);
     try {
-      if (onAddCluster) {
-        const res = await onAddCluster({
+      const clusterPayload: Partial<Cluster> = {
           collegeName: newCollegeName.trim(),
           district: newClusterDistrict.trim(),
-          name: `${newCollegeName.trim()} (${newClusterDistrict.trim()})`,
+          name: newClusterName.trim(),
           spocName: newSpocName.trim(),
           spocMobile: newSpocMobile.trim(),
           adminName: newSpocName.trim(),
           adminEmail: newSpocEmail.trim().toLowerCase(),
           adminPhone: newSpocMobile.trim(),
           status: 'Active',
-        });
+        };
+      const res = clusterToEdit && onUpdateCluster
+        ? await onUpdateCluster(clusterToEdit.id, clusterPayload)
+        : onAddCluster
+          ? await onAddCluster(clusterPayload)
+          : true;
 
-        if (res === false) {
-          setIsSubmitting(false);
-          return;
-        }
+      if (res === false) {
+        setIsSubmitting(false);
+        return;
       }
 
       setIsAddModalOpen(false);
       setNewCollegeName('');
+      setNewClusterName('');
       setNewClusterDistrict('');
       setNewSpocName('');
       setNewSpocMobile('');
       setNewSpocEmail('');
       setFormError('');
+      setClusterToEdit(null);
     } catch (err: any) {
       setFormError(err?.message || 'Failed to onboard college cluster.');
     } finally {
@@ -217,13 +231,19 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {filteredClusters.map((cluster) => {
+            const clusterSessions = sessions.filter((session) => session.clusterId === cluster.id);
+            const scheduledSessions = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'Completed' || session.status === 'In Progress');
             const completionRate = Math.round(
-              ((cluster.completedSessions || 0) / (cluster.totalSessions || 48)) * 100
+              ((cluster.completedSessions || 0) / Math.max(cluster.totalSessions || 8, 1)) * 100
             );
 
             return (
               <div
                 key={cluster.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => onNavigate('sessions', cluster.id)}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onNavigate('sessions', cluster.id); }}
                 className="group rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800 flex flex-col justify-between"
               >
                 <div className="space-y-4">
@@ -272,6 +292,14 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                     </div>
                   </div>
 
+                  <div className="rounded-xl border border-brand-100 bg-brand-50/50 p-3 dark:border-brand-900/40 dark:bg-brand-500/10">
+                    <div className="flex items-center justify-between text-xs font-semibold text-gray-700 dark:text-gray-200">
+                      <span>Sessions</span>
+                      <span className="text-brand-600 dark:text-brand-300">{scheduledSessions.length} scheduled</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-gray-500 dark:text-gray-400">Open session schedule for this cluster</p>
+                  </div>
+
                   {/* SPOC Details */}
                   <div className="rounded-xl border border-gray-100 p-3 space-y-1 text-xs dark:border-gray-800/80">
                     <div className="flex items-center justify-between font-semibold text-gray-800 dark:text-gray-200">
@@ -299,12 +327,35 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                   ) : <div />}
                   <button
                     type="button"
-                    onClick={() => onNavigate('panchayats', cluster.id)}
+                    onClick={(event) => { event.stopPropagation(); onNavigate('sessions', cluster.id); }}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-500 hover:text-brand-600 dark:text-brand-400 transition-colors"
                   >
-                    <span>View Panchayats & Scope</span>
+                    <span>View Sessions</span>
                     <ArrowRight className="h-3.5 w-3.5" />
                   </button>
+                  {isSuperAdmin && onUpdateCluster && (
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setClusterToEdit(cluster);
+                        setNewCollegeName(cluster.collegeName || cluster.name || '');
+                        setNewClusterName(cluster.name || '');
+                        setNewClusterDistrict(cluster.district || '');
+                        setNewSpocName(cluster.spocName || cluster.adminName || '');
+                        setNewSpocMobile(cluster.spocMobile || cluster.adminPhone || '');
+                        setNewSpocEmail(cluster.adminEmail || '');
+                        setFormError('');
+                        setIsAddModalOpen(true);
+                      }}
+                      className="text-xs font-semibold text-gray-500 hover:text-brand-500"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {isSuperAdmin && onUpdateAdminStatus && (
+                    <button type="button" onClick={async (event) => { event.stopPropagation(); const blocked = cluster.adminStatus === 'BLOCKED'; const reason = blocked ? '' : window.prompt('Reason for blocking this Cluster Admin:') || ''; if (!blocked && !reason) return; try { await onUpdateAdminStatus(cluster.id, blocked ? 'ACTIVE' : 'BLOCKED', reason); } catch (error: any) { setFormError(error?.message || 'Unable to update administrator status.'); } }} className="text-xs font-semibold text-gray-500 hover:text-brand-500">{cluster.adminStatus === 'BLOCKED' ? 'Unblock' : 'Block'}</button>
+                  )}
                 </div>
               </div>
             );
@@ -319,7 +370,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
               <div>
                 <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                  Onboard Partner College
+                  {clusterToEdit ? 'Edit Cluster / College' : 'Onboard Partner College'}
                 </h3>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   Register institution and provision SPOC cluster admin credentials.
@@ -367,6 +418,19 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                     placeholder="e.g. Dharmapuri"
                     value={newClusterDistrict}
                     onChange={(e) => setNewClusterDistrict(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
+                    Cluster Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. KSR Cluster"
+                    value={newClusterName}
+                    onChange={(e) => setNewClusterName(e.target.value)}
                     className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                 </div>
@@ -445,7 +509,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                   disabled={isSubmitting}
                   className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition disabled:opacity-50"
                 >
-                  {isSubmitting ? 'Onboarding College...' : 'Onboard College & Send Credentials'}
+                  {isSubmitting ? (clusterToEdit ? 'Saving Changes...' : 'Onboarding College...') : (clusterToEdit ? 'Save Changes' : 'Onboard College & Send Credentials')}
                 </button>
               </div>
             </form>

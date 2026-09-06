@@ -3,6 +3,7 @@ import path from 'path';
 import nodemailer from 'nodemailer';
 import { renderOtpEmail } from './templates/otpEmailTemplate.js';
 import { renderOnboardingEmail } from './templates/onboardingEmailTemplate.js';
+import { renderWorkflowEmail, WorkflowEmailProps } from './templates/workflowEmailTemplate.js';
 
 export async function sendLoginOtp({
   recipient,
@@ -158,6 +159,43 @@ export async function sendOnboardingCredentialsEmail({
     console.log(`[FALLBACK ONBOARDING CREDENTIALS] User: ${name} (${recipient})`);
     console.log(`[FALLBACK ONBOARDING CREDENTIALS] Temporary Password: ${temporaryPassword}`);
     console.log(`========================================================\n`);
+  }
+}
+
+export async function sendWorkflowEmail({
+  recipient,
+  projectRoot,
+  ...template
+}: WorkflowEmailProps & { recipient: string; projectRoot: string }): Promise<void> {
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = (process.env.SMTP_USER || '').trim();
+  const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
+  const { html, text } = renderWorkflowEmail(template);
+  if (!smtpUser || !smtpPass) {
+    console.warn(`[SMTP WARNING] SMTP credentials not set. Workflow email for ${recipient} was not sent.`);
+    return;
+  }
+  const isGmail = smtpHost.includes('gmail') || smtpUser.endsWith('@gmail.com');
+  const transporter = nodemailer.createTransport(isGmail
+    ? { service: 'gmail', auth: { user: smtpUser, pass: smtpPass } }
+    : { host: smtpHost, port: smtpPort, secure: smtpPort === 465, auth: { user: smtpUser, pass: smtpPass } });
+  const mailOptions: nodemailer.SendMailOptions = {
+    from: `TQI Workflow <${smtpFrom}>`,
+    to: recipient,
+    subject: `TQI ERP: ${template.title}`,
+    text,
+    html,
+    headers: { 'X-Auto-Response-Suppress': 'All', 'Auto-Submitted': 'auto-generated' },
+  };
+  const logoPath = path.join(projectRoot, 'frontend', 'public', 'logo.png');
+  if (fs.existsSync(logoPath)) mailOptions.attachments = [{ filename: 'tqi-logo.png', path: logoPath, cid: 'tqi-logo@tqi.org', contentType: 'image/png' }];
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[SMTP] Workflow email sent to ${recipient}: ${template.title}`);
+  } catch (error: any) {
+    console.error(`[SMTP ERROR] Workflow email failed for ${recipient}:`, error.message);
   }
 }
 

@@ -23,6 +23,7 @@ import {
   TqiModule,
 } from './types';
 import { Navigation } from './components/Navigation';
+import { MobileBottomNav } from './components/MobileBottomNav';
 import { LoginPage, AuthSession } from './components/LoginPage';
 import { DashboardView } from './components/DashboardView';
 import { ApprovalCenterView } from './components/ApprovalCenterView';
@@ -151,6 +152,7 @@ export default function App() {
   const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
   const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState('');
   const [modules, setModules] = useState<TqiModule[]>([]);
 
   // Sync with API Backend
@@ -207,7 +209,7 @@ export default function App() {
         get(`/api/panchayats?clusterId=${currentUserClusterId}`),
         get(`/api/students?clusterId=${currentUserClusterId}`),
         get(`/api/volunteers?clusterId=${currentUserClusterId}`),
-        get(`/api/sessions?clusterId=${currentUserClusterId}`),
+        get(`/api/sessions?clusterId=${currentUserClusterId}${selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : ''}`),
         get(`/api/attendance?clusterId=${currentUserClusterId}`),
         get(`/api/finance?clusterId=${currentUserClusterId}`),
         get(`/api/lesson-plans?clusterId=${currentUserClusterId}`),
@@ -246,7 +248,7 @@ export default function App() {
     } catch {
       // Network error or abort — keep existing in-memory state.
     }
-  }, [currentUser?.token, currentUserRole, currentUserClusterId]);
+  }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
@@ -481,14 +483,37 @@ export default function App() {
   // Delete Cluster Mutation
   const handleDeleteCluster = async (clusterId: string) => {
     try {
-      await fetch(apiUrl(`/api/clusters/${clusterId}`), {
+      const response = await fetch(apiUrl(`/api/clusters/${clusterId}`), {
         method: 'DELETE',
         headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
       });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete cluster.');
       setClusters((prev) => prev.filter((c) => c.id !== clusterId));
     } catch (error: any) {
-      setClusters((prev) => prev.filter((c) => c.id !== clusterId));
+      throw error;
     }
+  };
+
+  const handleUpdateCluster = async (id: string, cluster: Partial<Cluster>) => {
+    const response = await fetch(apiUrl(`/api/clusters/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+      body: JSON.stringify(cluster),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update cluster.');
+    const clustersResponse = await fetch(apiUrl('/api/clusters'), { headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' } });
+    const clustersData = await clustersResponse.json();
+    if (Array.isArray(clustersData?.clusters)) setClusters(clustersData.clusters);
+    return true;
+  };
+
+  const handleUpdateClusterAdminStatus = async (clusterId: string, status: 'ACTIVE' | 'BLOCKED', reason?: string) => {
+    const response = await fetch(apiUrl(`/api/clusters/${clusterId}/admin-status`), { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' }, body: JSON.stringify({ status, reason }) });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update Cluster Admin status.');
+    setClusters((prev) => prev.map((cluster) => cluster.id === clusterId ? { ...cluster, adminStatus: status } : cluster));
   };
 
   // Add User Mutation
@@ -796,6 +821,8 @@ export default function App() {
         body: JSON.stringify({
           ...existing,
           ...updated,
+          academicYearId: existing.academicYearId,
+          dayId: existing.dayId,
           academicYear: existing.academicYear,
           dayNumber: existing.dayNumber,
           sessionName: existing.name,
@@ -1258,6 +1285,12 @@ export default function App() {
     >
       <ErrorBoundary key={`${currentTab}-${currentUserRole}`}>
 
+              <MobileBottomNav
+                currentTab={currentTab}
+                onNavigate={handleNavigate}
+                onMore={() => setMobileSidebarOpen(true)}
+              />
+
               {currentTab === 'dashboard' && (
                 <DashboardView
                   onNavigate={handleNavigate}
@@ -1291,6 +1324,8 @@ export default function App() {
                 <AcademicSetupView
                   authToken={currentUser.token}
                   onSetupSaved={() => fetchBackendData(new AbortController().signal)}
+                  onAcademicYearChange={setSelectedAcademicYearId}
+                  onOpenDay={(academicYearId) => { setSelectedAcademicYearId(academicYearId); setCurrentTab('sessions'); }}
                 />
               )}
 
@@ -1309,9 +1344,12 @@ export default function App() {
               {currentTab === 'clusters' && (
                 <ClustersView
                   clusters={clusters}
+                  sessions={displaySessions}
                   userRole={currentUserRole}
                   onNavigate={handleNavigate}
                   onAddCluster={handleAddCluster}
+                  onUpdateCluster={handleUpdateCluster}
+                  onUpdateAdminStatus={handleUpdateClusterAdminStatus}
                   onDeleteCluster={handleDeleteCluster}
                 />
               )}
@@ -1381,6 +1419,7 @@ export default function App() {
               {currentTab === 'sessions' && (
                 <SessionsView
                   sessions={displaySessions}
+                  clusters={clusters}
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
                   onNavigate={handleNavigate}

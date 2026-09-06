@@ -56,6 +56,7 @@ export interface Cluster {
   adminName: string;
   adminEmail: string;
   adminPhone: string;
+  adminStatus?: 'ACTIVE' | 'INACTIVE' | 'BLOCKED';
   status: 'Active' | 'Under Review' | 'Inactive';
   completedSessions?: number;
   totalSessions?: number;
@@ -138,10 +139,12 @@ export interface Session {
   clusterId?: string;
   clusterName?: string;
   academicYear?: string;
+  academicYearId?: string;
+  dayId?: string;
   dayNumber?: number;
   date: string;
   day?: string;
-  time: string;
+  time?: string;
   endTime?: string;
   panchayatId: string;
   panchayatName: string;
@@ -149,7 +152,7 @@ export interface Session {
   villageName: string;
   volunteerId?: string;
   volunteerName: string;
-  status: 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Needs Attention' | 'Draft' | 'Action Req.' | 'Submitted' | 'Pending Review' | 'Approved' | 'Resubmission Required';
+  status: 'Pending' | 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Needs Attention' | 'Draft' | 'Action Req.' | 'Submitted' | 'Pending Review' | 'Approved' | 'Resubmission Required';
   sessionType?: 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation';
   description?: string;
   lessonPlanId?: string;

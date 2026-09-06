@@ -485,6 +485,23 @@ export const TABLE_DEFINITIONS: { name: string; ddl: string }[] = [
     `,
   },
   {
+    name: 'program_days',
+    ddl: `
+      CREATE TABLE IF NOT EXISTS program_days (
+        id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        day_number INT NOT NULL,
+        day_name VARCHAR(100) NOT NULL,
+        status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uk_program_days_year_day (academic_year_id, day_number),
+        INDEX idx_program_days_year (academic_year_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `,
+  },
+  {
     name: 'session_reports',
     ddl: `
       CREATE TABLE IF NOT EXISTS session_reports (
@@ -582,6 +599,8 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'sessions', column: 'panchayatId', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'villageId', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'volunteerId', definition: 'VARCHAR(64) NULL' },
+  { table: 'sessions', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'sessions', column: 'day_id', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'clusterId', definition: 'VARCHAR(64) NULL' },
   { table: 'sessions', column: 'time', definition: 'VARCHAR(50) NULL' },
   { table: 'sessions', column: 'endTime', definition: 'VARCHAR(50) NULL' },
@@ -624,6 +643,9 @@ export const COLUMN_PATCHES: { table: string; column: string; definition: string
   { table: 'lesson_plans', column: 'learning_outcomes', definition: 'TEXT NULL' },
   { table: 'lesson_plans', column: 'day_number', definition: 'INT NULL' },
   { table: 'lesson_plans', column: 'volunteer_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'academic_years', column: 'status', definition: 'VARCHAR(32) NOT NULL DEFAULT \'DRAFT\'' },
+  { table: 'date_change_requests', column: 'academic_year_id', definition: 'VARCHAR(64) NULL' },
+  { table: 'date_change_requests', column: 'day_id', definition: 'VARCHAR(64) NULL' },
 ];
 
 export async function initDatabaseSchema(): Promise<void> {
@@ -654,6 +676,17 @@ export async function initDatabaseSchema(): Promise<void> {
     }
   }
 
+  try {
+    await pool.query('CREATE UNIQUE INDEX uk_sessions_year_day_cluster ON sessions (academic_year_id, day_id, cluster_id)');
+  } catch {
+    // The index already exists or legacy duplicate rows require manual cleanup.
+  }
+  try {
+    await pool.query("ALTER TABLE users MODIFY COLUMN status ENUM('ACTIVE','INACTIVE','BLOCKED') NOT NULL DEFAULT 'ACTIVE'");
+  } catch {
+    // Existing installations may already have the expanded status enum.
+  }
+
   // 3. Seed default Super Admin account if not present
   const defaultPasswordHash = await bcrypt.hash('admin123', 10);
   try {
@@ -661,16 +694,17 @@ export async function initDatabaseSchema(): Promise<void> {
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status)
        VALUES
          ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-         ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
+         ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
+         ('usr-admin-gmail', 'Admin', 'admin@gmail.com', ?, 'SUPER_ADMIN', NULL, NULL, FALSE, 'ACTIVE')
        ON DUPLICATE KEY UPDATE
          password_hash = VALUES(password_hash),
          name = VALUES(name),
          role = VALUES(role),
          must_change_password = FALSE,
          status = 'ACTIVE'`,
-      [defaultPasswordHash, defaultPasswordHash]
+      [defaultPasswordHash, defaultPasswordHash, defaultPasswordHash]
     );
-    console.log('[DB] Super Admin verified (admin@tqi.org / admin).');
+    console.log('[DB] Super Admin accounts verified.');
   } catch (err: any) {
     console.warn('[DB WARNING] Could not seed Super Admin:', err.message);
   }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from 'react';
-import { TabType, Session, Panchayat, Volunteer } from '../types';
+import { TabType, Session, Panchayat, Volunteer, Cluster } from '../types';
 import { Badge } from './ui/badge';
 import {
   Select,
@@ -9,10 +9,11 @@ import {
   SelectValue,
 } from './ui/select';
 import { ActionButton } from './ui/action-button';
-import { Search, X, Calendar, Lock, Trash2 } from './ui/icons';
+import { Search, X, Calendar, Lock, Trash2, ArrowRight } from './ui/icons';
 
 interface SessionsViewProps {
   sessions: Session[];
+  clusters?: Cluster[];
   panchayats: Panchayat[];
   volunteers: Volunteer[];
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
@@ -26,6 +27,7 @@ interface SessionsViewProps {
 
 export const SessionsView: React.FC<SessionsViewProps> = ({
   sessions = [],
+  clusters = [],
   panchayats = [],
   volunteers = [],
   onNavigate,
@@ -37,6 +39,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   userRole = 'Super Admin',
 }) => {
   const isClusterAdmin = userRole === 'Cluster Admin';
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(isClusterAdmin ? sessions[0]?.clusterId || null : null);
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedPanchayat, setSelectedPanchayat] = useState('all');
@@ -76,8 +79,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     module: 'Spoken English',
     day: 'Saturday',
     date: new Date().toISOString().split('T')[0],
-    time: '10:00 AM',
-    endTime: '11:30 AM',
     panchayatId: panchayats[0]?.id || 'vedakkattamaduvu',
     panchayatName: panchayats[0]?.name || 'Vedakkattamaduvu',
     villageName: panchayats[0]?.villages[0]?.name || 'Ammapettai',
@@ -210,6 +211,31 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     return sessions[0] || null;
   }, [sessions]);
 
+  const visibleClusters = useMemo(() => {
+    const allowed = isClusterAdmin ? clusters.filter((cluster) => cluster.id === sessions[0]?.clusterId) : clusters;
+    return allowed.filter((cluster) => sessions.some((session) => session.clusterId === cluster.id));
+  }, [clusters, isClusterAdmin, sessions]);
+
+  const daysUntil = (date: string) => {
+    if (!date) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(`${date}T00:00:00`);
+    const difference = Math.round((target.getTime() - today.getTime()) / 86400000);
+    return difference === 0 ? 'Today' : difference > 0 ? `In ${difference} days` : `${Math.abs(difference)} days ago`;
+  };
+
+  const renderClusterSchedule = (cluster: Cluster) => {
+    const clusterSessions = sessions.filter((session) => session.clusterId === cluster.id);
+    const completed = clusterSessions.filter((session) => session.status === 'Completed').length;
+    const scheduled = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'In Progress').length;
+    const pending = clusterSessions.filter((session) => !session.date || session.status === 'Pending' || session.status === 'Draft').length;
+    const upcoming = clusterSessions
+      .filter((session) => session.date && session.status !== 'Completed')
+      .sort((a, b) => a.date.localeCompare(b.date))[0];
+    return { clusterSessions, completed, scheduled, pending, upcoming, remaining: Math.max(0, clusterSessions.length - completed) };
+  };
+
   // Clear all filters
   const handleClearFilters = () => {
     setSearchTerm('');
@@ -234,8 +260,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       module: 'Spoken English',
       day: 'Saturday',
       date: new Date().toISOString().split('T')[0],
-      time: '10:00 AM',
-      endTime: '11:30 AM',
       panchayatId: defaultP?.id || 'vedakkattamaduvu',
       panchayatName: defaultP?.name || 'Vedakkattamaduvu',
       villageName: defaultP?.villages[0]?.name || 'Ammapettai',
@@ -260,8 +284,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       module: session.module || 'Spoken English',
       day: session.day || 'Saturday',
       date: session.date || '',
-      time: session.time || '10:00 AM',
-      endTime: session.endTime || '11:30 AM',
       panchayatId: session.panchayatId || (panchayats[0]?.id || ''),
       panchayatName: session.panchayatName || (panchayats[0]?.name || ''),
       villageName: session.villageName || '',
@@ -343,8 +365,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         module: formData.module,
         day: formData.day,
         date: formData.date,
-        time: formData.time,
-        endTime: formData.endTime,
         panchayatId: formData.panchayatId,
         panchayatName: formData.panchayatName,
         villageName: formData.villageName,
@@ -366,8 +386,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         module: formData.module,
         day: formData.day,
         date: formData.date,
-        time: formData.time,
-        endTime: formData.endTime,
         panchayatId: formData.panchayatId,
         panchayatName: formData.panchayatName,
         villageName: formData.villageName,
@@ -396,7 +414,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       'Topic',
       'Module',
       'Date',
-      'Time',
       'Day',
       'Panchayat',
       'Village',
@@ -410,7 +427,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       `"${(s.name || s.title || '').replace(/"/g, '""')}"`,
       `"${(s.module || s.moduleId || '').replace(/"/g, '""')}"`,
       `"${s.date}"`,
-      `"${s.time}"`,
       `"${s.day || ''}"`,
       `"${s.panchayatName}"`,
       `"${s.villageName}"`,
@@ -434,8 +450,50 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     document.body.removeChild(link);
   };
 
+  const activeClusterId = selectedClusterId || (isClusterAdmin ? sessions[0]?.clusterId || null : null);
+  const activeCluster = clusters.find((cluster) => cluster.id === activeClusterId);
+
+  if (!activeClusterId) {
+    return (
+      <div className="w-full space-y-6">
+        <div><h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Sessions</h1><p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Cluster-wise 8-day session progress</p></div>
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {visibleClusters.map((cluster) => {
+            const summary = renderClusterSchedule(cluster);
+            return <button key={cluster.id} type="button" onClick={() => setSelectedClusterId(cluster.id)} className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-theme-xs transition hover:border-brand-300 dark:border-gray-800 dark:bg-white/[0.03] dark:hover:border-brand-700">
+              <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-gray-900 group-hover:text-brand-500 dark:text-white">{cluster.name}</h2><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{cluster.collegeName || cluster.name}</p></div><ArrowRight className="h-5 w-5 text-gray-400 transition group-hover:translate-x-1 group-hover:text-brand-500" /></div>
+              <p className="mt-4 text-xs text-gray-500">SPOC: <span className="font-semibold text-gray-800 dark:text-gray-200">{cluster.spocName || cluster.adminName || 'Not assigned'}</span></p>
+              <p className="text-xs text-gray-500">{cluster.spocMobile || cluster.adminPhone || 'No phone'}</p>
+              <div className="mt-5 grid grid-cols-4 gap-2 border-t border-gray-100 pt-4 text-center dark:border-gray-800"><div><p className="text-[10px] uppercase text-gray-400">Total</p><p className="mt-1 font-bold text-gray-900 dark:text-white">{summary.clusterSessions.length}</p></div><div><p className="text-[10px] uppercase text-gray-400">Done</p><p className="mt-1 font-bold text-emerald-600">{summary.completed}</p></div><div><p className="text-[10px] uppercase text-gray-400">Scheduled</p><p className="mt-1 font-bold text-brand-600">{summary.scheduled}</p></div><div><p className="text-[10px] uppercase text-gray-400">Pending</p><p className="mt-1 font-bold text-amber-600">{summary.pending}</p></div></div>
+              <div className="mt-4 rounded-lg bg-gray-50 p-3 dark:bg-white/[0.04]"><p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Next Session</p>{summary.upcoming ? <><p className="mt-1 text-sm font-bold text-gray-900 dark:text-white">{summary.upcoming.date}</p><p className="text-xs text-gray-500">{daysUntil(summary.upcoming.date)}</p></> : <p className="mt-1 text-sm text-gray-500">No scheduled date</p>}</div>
+              <p className="mt-4 text-sm font-semibold text-brand-500">{summary.remaining > 0 ? `${summary.remaining} days left to complete` : 'Completed'}</p>
+            </button>;
+          })}
+        </div>
+        {visibleClusters.length === 0 && <div className="rounded-xl border border-dashed border-gray-300 p-10 text-center text-sm text-gray-500">No clusters or sessions available for this academic year.</div>}
+      </div>
+    );
+  }
+
+  if (activeClusterId && activeCluster) {
+    const summary = renderClusterSchedule(activeCluster);
+    return (
+      <div className="w-full space-y-6">
+        <button type="button" onClick={() => setSelectedClusterId(null)} className="text-sm font-semibold text-brand-500 hover:text-brand-600">← Back to Clusters</button>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{activeCluster.name}</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{activeCluster.collegeName || activeCluster.name} · SPOC: {activeCluster.spocName || activeCluster.adminName || 'Not assigned'} · {activeCluster.spocMobile || activeCluster.adminPhone || 'No phone'}</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {[['Total Days', summary.clusterSessions.length], ['Completed Days', summary.completed], ['Scheduled Days', summary.scheduled], ['Pending Days', summary.pending], ['Days Left To Complete', summary.remaining]].map(([label, value]) => <div key={String(label)} className="rounded-xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"><p className="text-xs font-semibold uppercase tracking-wider text-gray-500">{label}</p><p className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{value}</p></div>)}
+        </div>
+        <div><h2 className="text-xl font-bold text-gray-900 dark:text-white">8-Day Session Schedule</h2><div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">{summary.clusterSessions.map((session) => <article key={session.id} className="rounded-xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]"><p className="text-xs font-bold uppercase tracking-wider text-gray-500">Day {session.dayNumber}</p><h3 className="mt-2 min-h-12 text-base font-bold text-gray-900 dark:text-white">{session.name}</h3><div className="mt-3">{renderStatusBadge(session.status)}</div>{session.date ? <><p className="mt-3 text-sm font-semibold text-gray-800 dark:text-gray-200">📅 {session.date}</p><p className="mt-1 text-xs text-gray-500">{session.status === 'Completed' ? 'Completed' : daysUntil(session.date)}</p></> : <p className="mt-3 text-sm text-gray-500">Not planned</p>}<button type="button" onClick={() => onNavigate('attendance', session.id)} className="mt-4 text-sm font-semibold text-brand-500">View →</button></article>)}</div></div>
+      </div>
+    );
+  }
+
   // Render Status Badge
-  const renderStatusBadge = (status: string) => {
+  function renderStatusBadge(status: string) {
     switch (status) {
       case 'Scheduled':
         return (
@@ -482,7 +540,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
           </span>
         );
     }
-  };
+  }
 
   return (
     <div className="w-full space-y-6">
@@ -491,7 +549,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         <div>
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Learning Sessions
+              Sessions
             </h1>
             <Badge color="primary" size="sm">
               {filteredSessions.length} Total
@@ -509,13 +567,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
           >
             <span>Export CSV</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenNewModal}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
-          >
-            <span>Add Session</span>
           </button>
         </div>
       </div>
@@ -560,7 +611,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 )}
               </h3>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-500 dark:text-gray-400 font-medium">
-                <span>{nextSession.date} &middot; {nextSession.time}</span>
+                <span>{nextSession.date || 'Not planned'}</span>
                 <span>Panchayat: <strong className="text-gray-800 dark:text-gray-200">{nextSession.panchayatName}</strong></span>
                 <span>Village: <strong className="text-gray-800 dark:text-gray-200">{nextSession.villageName}</strong></span>
                 <span>Volunteer: <strong className="text-brand-500">{getSessionVolunteer(nextSession)}</strong></span>
@@ -777,7 +828,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
           <table className="tqi-table-compact w-full text-left border-collapse">
             <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
               <tr>
-                <th className="px-5 py-3.5">Date &amp; Time</th>
+                <th className="px-5 py-3.5">Session Date</th>
                 <th className="px-5 py-3.5">Session Topic &amp; Module</th>
                 <th className="px-5 py-3.5">Panchayat &amp; Village</th>
                 <th className="px-5 py-3.5">Volunteer</th>
@@ -798,12 +849,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                     key={session.id}
                     className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors group"
                   >
-                    {/* Date & Time */}
+                    {/* Session date */}
                     <td className="px-5 py-3.5 whitespace-nowrap">
-                      <div className="font-bold text-gray-900 dark:text-white">{session.date}</div>
-                      <div className="text-[11px] text-gray-400 mt-0.5">
-                        {session.time}
-                      </div>
+                      <div className="font-bold text-gray-900 dark:text-white">{session.date || 'Not planned'}</div>
+                      {session.date && <div className="text-[11px] text-gray-400 mt-0.5">Locked</div>}
                     </td>
 
                     {/* Topic & Module */}
@@ -887,7 +936,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                           <span className="material-symbols-outlined text-[16px]">how_to_reg</span>
                         </button>
 
-                        {isClusterAdmin && onRequestDateChange && (
+                        {isClusterAdmin && (onRequestDateChange || !session.date) && (
                           <button
                             type="button"
                             onClick={() => {
@@ -896,7 +945,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                               setDateChangeReason('');
                             }}
                             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                            title="Request Date Change"
+                            title={session.date ? 'Request Date Change' : 'Confirm Session Date'}
                           >
                             <Calendar className="h-4 w-4" />
                           </button>
@@ -911,7 +960,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                           >
                             <Lock className="h-4 w-4" />
                           </button>
-                        ) : (
+                        ) : !isClusterAdmin ? (
                           <button
                             type="button"
                             onClick={() => handleOpenEditModal(session)}
@@ -920,7 +969,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                           >
                             <span className="material-symbols-outlined text-[16px]">edit</span>
                           </button>
-                        )}
+                        ) : null}
 
                         {onDeleteSession && (
                           <button
@@ -1019,7 +1068,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </div>
               </div>
 
-              {/* Row 2: Date, Day & Time */}
+              {/* Row 2: Session date */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1062,18 +1111,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   </Select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Time Slot
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 10:00 AM - 12:30 PM"
-                    value={formData.time}
-                    onChange={(e) => setFormData({ ...formData, time: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
               </div>
 
               {/* Row 3: Panchayat & Village */}
@@ -1339,15 +1376,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
                 <div>
                   <span className="text-[10px] font-semibold uppercase text-slate-400 block">
-                    Time Window
-                  </span>
-                  <span className="font-bold text-slate-800 text-xs mt-0.5 block">
-                    {activeSessionDetail.time} - {activeSessionDetail.endTime || '11:30 AM'}
-                  </span>
-                </div>
-
-                <div>
-                  <span className="text-[10px] font-semibold uppercase text-slate-400 block">
                     Panchayat &amp; Village
                   </span>
                   <span className="font-bold text-slate-800 text-xs mt-0.5 block">
@@ -1547,23 +1575,27 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
               <Calendar className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-base font-bold text-slate-900">Request Date Change</h3>
+              <h3 className="text-base font-bold text-slate-900">{dateChangeSession.date ? 'Request Date Change' : 'Confirm Session Date'}</h3>
               <p className="text-xs text-slate-600 mt-1">
-                Submit a date change request for &quot;{getSessionTitle(dateChangeSession)}&quot;.
+                {dateChangeSession.date
+                  ? <>Submit a date change request for &quot;{getSessionTitle(dateChangeSession)}&quot;.</>
+                  : <>Choose the date for &quot;{getSessionTitle(dateChangeSession)}&quot;.</>}
               </p>
             </div>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Current Date</label>
-                <input
-                  type="text"
-                  readOnly
-                  value={dateChangeSession.date}
-                  className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-md text-xs text-slate-500"
-                />
+                {dateChangeSession.date && <>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Current Date</label>
+                  <input
+                    type="text"
+                    readOnly
+                    value={dateChangeSession.date}
+                    className="w-full px-3 py-2 border border-slate-200 bg-slate-50 rounded-md text-xs text-slate-500"
+                  />
+                </>}
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">New Date</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Session Date</label>
                 <input
                   type="date"
                   value={dateChangeNewDate}
@@ -1571,7 +1603,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                 />
               </div>
-              <div>
+              {dateChangeSession.date && <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Reason for change</label>
                 <textarea
                   rows={3}
@@ -1580,7 +1612,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   placeholder="Explain why the date needs to be changed..."
                   className="w-full px-3 py-2 border border-slate-300 rounded-md text-xs focus:outline-none focus:border-[#0B3D91]"
                 />
-              </div>
+              </div>}
             </div>
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
@@ -1593,7 +1625,12 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
               <button
                 type="button"
                 onClick={async () => {
-                  if (onRequestDateChange && dateChangeNewDate && dateChangeReason) {
+                  if (!dateChangeNewDate) {
+                    alert('Please select a date.');
+                  } else if (!dateChangeSession.date) {
+                    onUpdateSession(dateChangeSession.id, { date: dateChangeNewDate, status: 'Scheduled' });
+                    setDateChangeSession(null);
+                  } else if (onRequestDateChange && dateChangeReason) {
                     await onRequestDateChange(
                       dateChangeSession.id,
                       dateChangeSession.date || '',
@@ -1601,13 +1638,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                       dateChangeReason
                     );
                     setDateChangeSession(null);
-                  } else {
-                    alert('Please provide a new date and a reason.');
-                  }
+                  } else alert('Please provide a reason for the date change.');
                 }}
                 className="px-4 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white text-xs font-semibold rounded-md shadow-xs cursor-pointer"
               >
-                Submit Request
+                {dateChangeSession.date ? 'Submit Request' : 'Confirm Date'}
               </button>
             </div>
           </div>
