@@ -101,6 +101,7 @@ export const Navigation: React.FC<NavigationProps> = ({
         { id: 'students', label: 'Students Roster', icon: Student },
         { id: 'volunteers', label: 'Volunteers Directory', icon: Users },
         { id: 'attendance', label: 'Attendance', icon: CalendarCheck },
+        { id: 'volunteer-attendance', label: 'Volunteer Attendance', icon: Users },
         { id: 'sessions', label: 'Session Scheduling', icon: ClipboardText },
         { id: 'session-photos', label: 'Session Photos', icon: Camera },
         { id: 'session-reports', label: 'Session Reports', icon: FileText },

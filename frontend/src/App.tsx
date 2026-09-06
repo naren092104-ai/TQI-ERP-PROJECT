@@ -80,7 +80,7 @@ const parseStudentRoute = (): StudentDirectoryRoute | null => {
 const KNOWN_TABS: Set<string> = new Set([
   'dashboard', 'academic-setup', 'approvals', 'clusters', 'audit-logs', 'users',
   'panchayats', 'panchayat-detail', 'students', 'volunteers', 'sessions',
-  'attendance', 'lesson-plan', 'session-photos',
+  'attendance', 'volunteer-attendance', 'lesson-plan', 'session-photos',
   'finance', 'finance-statement', 'reports', 'report-preview',
   'notifications', 'settings', 'date-change-requests',
   'session-reports', 'session-submissions', 'module-library',
@@ -1736,10 +1736,11 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'attendance' && (
+              {(currentTab === 'attendance' || currentTab === 'volunteer-attendance') && (
                 <AttendanceView
                   attendanceSessions={displayAttendance}
                   students={displayStudents}
+                  volunteers={displayVolunteers}
                   panchayats={displayPanchayats}
                   sessions={displaySessions}
                   programDays={programDays}
@@ -1748,6 +1749,7 @@ export default function App() {
                   userRole={currentUserRole}
                   clusterName={activeClusterName}
                   authToken={currentUser?.token}
+                  initialSubject={currentTab === 'volunteer-attendance' ? 'volunteers' : 'students'}
                   onNavigate={handleNavigate}
                   onSaveAttendance={handleSaveAttendance}
                 />

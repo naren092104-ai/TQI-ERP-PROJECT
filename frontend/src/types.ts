@@ -10,6 +10,7 @@ export type TabType =
   | 'volunteers'
   | 'sessions'
   | 'attendance'
+  | 'volunteer-attendance'
   | 'attendance-draft'
   | 'lesson-plan'
   | 'session-photos'
@@ -514,6 +515,7 @@ export interface VolunteerAttendanceRecord {
   volunteerId: string;
   volunteerName: string;
   role?: string;
+  roundNumber?: 1 | 2;
   status: 'Present' | 'Absent';
 }
 
@@ -528,6 +530,7 @@ export interface AttendanceRecord {
   taskStatus?: 'Completed' | 'Incomplete' | 'Not Completed' | 'Not Marked';
   taskTitle?: string;
   remarks?: string;
+  roundNumber?: 1 | 2;
 }
 
 export interface AttendanceSession {

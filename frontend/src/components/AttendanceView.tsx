@@ -39,6 +39,7 @@ interface AttendanceViewProps {
   userRole?: string;
   clusterName?: string;
   authToken?: string;
+  initialSubject?: 'students' | 'volunteers';
   onNavigate: (tab: TabType) => void;
   onSaveAttendance: (session: AttendanceSession) => void;
 }
@@ -66,15 +67,16 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   userRole = 'Cluster Admin',
   clusterName = 'KSR (Dharmapuri)',
   authToken,
+  initialSubject = 'students',
   onNavigate,
   onSaveAttendance,
 }) => {
   // Navigation levels: 'days' (Screen 1) -> 'panchayats' (Screen 2) -> 'villages' (Screen 3) -> 'mark' (Screen 4, 6, 8)
-  const [navLevel, setNavLevel] = useState<'days' | 'panchayats' | 'villages' | 'mark'>('days');
+  const [navLevel, setNavLevel] = useState<'days' | 'panchayats' | 'villages' | 'mark' | 'volunteers'>('days');
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('');
   const [selectedVillageId, setSelectedVillageId] = useState<string>('');
-  const [attendanceSubject, setAttendanceSubject] = useState<'students' | 'volunteers'>('students');
+  const [attendanceSubject, setAttendanceSubject] = useState<'students' | 'volunteers'>(initialSubject);
 
   // Active village attendance state
   const [activeSession, setActiveSession] = useState<AttendanceSession | null>(null);
@@ -96,6 +98,44 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   const showToast = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToastMessage({ type, text });
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  const handleSubmitDirectVolunteerAttendance = async () => {
+    setIsSubmittingAction(true);
+    try {
+      const volunteerAttendance = volunteers.map((volunteer) => ({
+        volunteerId: volunteer.id,
+        present: getRoundRecord(volunteer.id, 1).status === 'Present',
+        roundNumber: 1,
+      }));
+      const response = await fetch(apiUrl('/api/attendance'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          id: `volunteer-attendance-day-${selectedDayNumber}`,
+          sessionId: `volunteer-attendance-day-${selectedDayNumber}`,
+          dayNumber: selectedDayNumber,
+          status: 'Submitted - Pending Review',
+          totalCount: volunteers.length,
+          presentCount: volunteerAttendance.filter((record) => record.present).length,
+          notMarkedCount: volunteerAttendance.filter((record) => !record.present).length,
+          attendanceSubject: 'volunteers',
+          records: [],
+          volunteerAttendance,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok || !data.success) throw new Error(data.error || 'Failed to submit volunteer attendance.');
+      setActiveSession(data.attendanceSession || { id: `volunteer-attendance-day-${selectedDayNumber}`, status: 'Submitted - Pending Review' });
+      showToast('Volunteer attendance submitted successfully.', 'success');
+    } catch (error: any) {
+      showToast(error?.message || 'Failed to submit volunteer attendance.', 'error');
+    } finally {
+      setIsSubmittingAction(false);
+    }
   };
 
   // 1. Configured Program Days: "Show only Super Admin configured days"
@@ -344,7 +384,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         const map: Record<string, { status: 'Present' | 'Absent' | 'Not Marked'; taskStatus: 'Completed' | 'Incomplete' | 'Not Marked' }> = {};
         if (Array.isArray(data.records) && data.records.length > 0) {
           data.records.forEach((r: any) => {
-            map[r.studentId] = {
+            map[r.roundNumber === 2 ? `${r.studentId}::round2` : r.studentId] = {
               status: r.status || (r.present ? 'Present' : 'Absent'),
               taskStatus: r.taskStatus || 'Not Marked',
             };
@@ -352,7 +392,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         }
         if (Array.isArray(data.volunteerRecords)) {
           data.volunteerRecords.forEach((r: any) => {
-            map[r.volunteerId] = {
+            map[r.roundNumber === 2 ? `${r.volunteerId}::round2` : r.volunteerId] = {
               status: r.present ? 'Present' : 'Absent',
               taskStatus: 'Not Marked',
             };
@@ -369,7 +409,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           const map: Record<string, { status: 'Present' | 'Absent' | 'Not Marked'; taskStatus: 'Completed' | 'Incomplete' | 'Not Marked' }> = {};
           if (existing.records && existing.records.length > 0) {
             existing.records.forEach((r) => {
-              map[r.studentId] = {
+              map[r.roundNumber === 2 ? `${r.studentId}::round2` : r.studentId] = {
                 status: (r.status as any) || 'Not Marked',
                 taskStatus: (r.taskStatus as any) || 'Not Marked',
               };
@@ -391,7 +431,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   // Navigation handlers
   const handleSelectDay = (dayNum: number) => {
     setSelectedDayNumber(dayNum);
-    setNavLevel('panchayats');
+    setNavLevel(attendanceSubject === 'volunteers' ? 'volunteers' : 'panchayats');
   };
 
   const handleSelectPanchayat = (panchayatId: string) => {
@@ -421,10 +461,15 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   }, [activeSession]);
 
   // Round Indicator click toggles
-  const handleToggleAttendance = (studentId: string) => {
+  const getRoundRecord = (personId: string, roundNumber: 1 | 2) => {
+    return recordsMap[roundNumber === 2 ? `${personId}::round2` : personId] || { status: 'Not Marked', taskStatus: 'Not Marked' };
+  };
+
+  const handleToggleAttendance = (personId: string, roundNumber: 1 | 2 = 1) => {
     if (isLocked) return;
     setRecordsMap((prev) => {
-      const current = prev[studentId] || { status: 'Not Marked', taskStatus: 'Not Marked' };
+      const recordKey = roundNumber === 2 ? `${personId}::round2` : personId;
+      const current = prev[recordKey] || { status: 'Not Marked', taskStatus: 'Not Marked' };
       let nextStatus: 'Present' | 'Absent' | 'Not Marked';
       let nextTask = current.taskStatus;
 
@@ -441,12 +486,34 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
       return {
         ...prev,
-        [studentId]: {
+        [recordKey]: {
           status: nextStatus,
           taskStatus: nextTask,
         },
       };
     });
+  };
+
+  const setAttendanceStatus = (personId: string, status: 'Present' | 'Absent') => {
+    if (isLocked) return;
+    setRecordsMap((prev) => ({
+      ...prev,
+      [personId]: {
+        ...(prev[personId] || { taskStatus: 'Not Marked' }),
+        status,
+      },
+    }));
+  };
+
+  const setTaskStatus = (studentId: string, taskStatus: 'Completed' | 'Incomplete') => {
+    if (isLocked) return;
+    setRecordsMap((prev) => ({
+      ...prev,
+      [studentId]: {
+        ...(prev[studentId] || { status: 'Not Marked' }),
+        taskStatus,
+      },
+    }));
   };
 
   const handleToggleTask = (studentId: string) => {
@@ -480,7 +547,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
     const sessionId = activeSession?.id || `att-${currentVillage.id}-day${selectedDayNumber}`;
     const recordsList: AttendanceRecord[] = villageStudents.map((st) => {
-      const rec = recordsMap[st.id] || { status: 'Not Marked', taskStatus: 'Not Marked' };
+      const rec = getRoundRecord(st.id, 1);
       return {
         studentId: st.id,
         studentName: st.name,
@@ -490,6 +557,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         villageName: currentVillage.name,
         status: rec.status,
         taskStatus: rec.taskStatus,
+        roundNumber: 1,
         remarks: '',
       };
     });
@@ -534,7 +602,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           volunteerAttendance: attendanceSubject === 'volunteers'
             ? villageVolunteers.map((volunteer) => ({
                 volunteerId: volunteer.id,
-                present: recordsMap[volunteer.id]?.status === 'Present',
+                present: getRoundRecord(volunteer.id, 1).status === 'Present',
+                roundNumber: 1,
               }))
             : [],
         }),
@@ -763,6 +832,83 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {navLevel === 'volunteers' && (
+        <div className="max-w-5xl mx-auto space-y-6">
+          <div className="flex items-center justify-between text-sm">
+            <button
+              onClick={() => setNavLevel('days')}
+              className="inline-flex items-center gap-2 font-semibold text-slate-600 hover:text-slate-900 transition-colors"
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Day List</span>
+            </button>
+            <div className="text-slate-400 font-medium">Volunteer Attendance &gt; Day {selectedDayNumber}</div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+            <h2 className="text-xl font-bold text-slate-900">Volunteer Attendance</h2>
+            <p className="mt-1 text-xs font-medium text-slate-500">Day {selectedDayNumber} · {currentDayObj.day_name}</p>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[11px]">
+                    <th className="py-3 px-4 w-12 text-center">#</th>
+                    <th className="py-3 px-4">Volunteer Name</th>
+                    <th className="py-3 px-4">College</th>
+                    <th className="py-3 px-4">Phone Number</th>
+                    <th className="py-3 px-4 text-center">Attendance</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {volunteers.map((volunteer, index) => {
+                    const record = getRoundRecord(volunteer.id, 1);
+                    return (
+                      <tr key={volunteer.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3.5 px-4 text-center font-semibold text-slate-400">{index + 1}</td>
+                        <td className="py-3.5 px-4 font-bold text-slate-900">{volunteer.name}</td>
+                        <td className="py-3.5 px-4 text-slate-600">{volunteer.college || '—'}</td>
+                        <td className="py-3.5 px-4 text-slate-600">{volunteer.phone || '—'}</td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(volunteer.id, 'Present')} aria-label="Present" className={`h-6 w-6 rounded-full bg-emerald-500 ring-2 ring-emerald-200 disabled:opacity-50 ${record.status === 'Present' ? 'ring-4' : 'opacity-40'}`} />
+                            <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(volunteer.id, 'Absent')} aria-label="Absent" className={`h-6 w-6 rounded-full bg-rose-500 ring-2 ring-rose-200 disabled:opacity-50 ${record.status === 'Absent' ? 'ring-4' : 'opacity-40'}`} />
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {volunteers.length === 0 && (
+                    <tr><td colSpan={5} className="py-10 text-center text-slate-400">No volunteers found for this cluster.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              disabled={isSubmittingAction || Boolean(activeSession && isLocked)}
+              onClick={handleSubmitDirectVolunteerAttendance}
+              className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Submit Volunteer Attendance
+            </button>
+            {activeSession && isLocked && (
+              <button
+                type="button"
+                onClick={() => setShowEditRequestModal(true)}
+                className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-semibold text-amber-800"
+              >
+                Request Correction
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -1155,7 +1301,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                     const query = searchQuery.toLowerCase().trim();
                     return !query || volunteer.name.toLowerCase().includes(query) || volunteer.id.toLowerCase().includes(query);
                   }).map((volunteer, index) => {
-                    const rec = recordsMap[volunteer.id] || { status: 'Not Marked', taskStatus: 'Not Marked' };
+                    const rec = getRoundRecord(volunteer.id, 1);
                     return (
                       <tr key={volunteer.id} className="hover:bg-slate-50/50 transition-colors">
                         <td className="py-3.5 px-4 text-center font-semibold text-slate-400">{index + 1}</td>
@@ -1170,6 +1316,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                           >
                             {rec.status !== 'Not Marked' && <div className="w-2 h-2 rounded-full bg-white" />}
                           </button>
+                        </td>
+                        <td className="py-3.5 px-4 text-center">
+                          <div className="flex items-center justify-center gap-2">
+                            <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(volunteer.id, 'Present')} aria-label="Present" className="h-6 w-6 rounded-full bg-emerald-500 ring-2 ring-emerald-200 disabled:opacity-50" />
+                            <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(volunteer.id, 'Absent')} aria-label="Absent" className="h-6 w-6 rounded-full bg-rose-500 ring-2 ring-rose-200 disabled:opacity-50" />
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1205,7 +1357,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                     </tr>
                   ) : (
                     displayedStudents.map((st, index) => {
-                      const rec = recordsMap[st.id] || { status: 'Not Marked', taskStatus: 'Not Marked' };
+                      const rec = getRoundRecord(st.id, 1);
 
                       return (
                         <tr key={st.id} className="hover:bg-slate-50/50 transition-colors">
@@ -1214,57 +1366,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                           <td className="py-3.5 px-4 font-medium text-slate-500">{st.code || st.id}</td>
                           <td className="py-3.5 px-4 text-center font-semibold text-slate-700">{st.standard || '-'}</td>
 
-                          {/* Attendance Round Indicator Column */}
                           <td className="py-3.5 px-4 text-center">
-                            <div className="flex items-center justify-center">
-                              <button
-                                type="button"
-                                disabled={isLocked}
-                                onClick={() => handleToggleAttendance(st.id)}
-                                title={isLocked ? 'Locked' : `Click to change: ${rec.status}`}
-                                className={`w-6 h-6 rounded-full transition-transform active:scale-90 flex items-center justify-center ${
-                                  isLocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'
-                                } ${
-                                  rec.status === 'Present'
-                                    ? 'bg-emerald-500 ring-2 ring-emerald-200'
-                                    : rec.status === 'Absent'
-                                    ? 'bg-rose-500 ring-2 ring-rose-200'
-                                    : 'border-2 border-slate-300 bg-slate-50 hover:border-slate-400'
-                                }`}
-                              >
-                                {rec.status === 'Present' ? (
-                                  <div className="w-2 h-2 rounded-full bg-white" />
-                                ) : rec.status === 'Absent' ? (
-                                  <div className="w-2 h-2 rounded-full bg-white" />
-                                ) : null}
-                              </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(st.id, 'Present')} aria-label="Present" className={`h-6 w-6 rounded-full bg-emerald-500 ring-2 ring-emerald-200 disabled:opacity-50 ${rec.status === 'Present' ? 'ring-4' : 'opacity-40'}`} />
+                              <button type="button" disabled={isLocked} onClick={() => setAttendanceStatus(st.id, 'Absent')} aria-label="Absent" className={`h-6 w-6 rounded-full bg-rose-500 ring-2 ring-rose-200 disabled:opacity-50 ${rec.status === 'Absent' ? 'ring-4' : 'opacity-40'}`} />
                             </div>
                           </td>
 
                           {/* Task Round Indicator Column */}
                           <td className="py-3.5 px-4 text-center">
-                            <div className="flex items-center justify-center">
-                              <button
-                                type="button"
-                                disabled={isLocked}
-                                onClick={() => handleToggleTask(st.id)}
-                                title={isLocked ? 'Locked' : `Click to change task: ${rec.taskStatus}`}
-                                className={`w-6 h-6 rounded-full transition-transform active:scale-90 flex items-center justify-center ${
-                                  isLocked ? 'cursor-not-allowed opacity-90' : 'cursor-pointer'
-                                } ${
-                                  rec.taskStatus === 'Completed'
-                                    ? 'bg-emerald-500 text-white ring-2 ring-emerald-200'
-                                    : rec.taskStatus === 'Incomplete'
-                                    ? 'bg-rose-500 text-white ring-2 ring-rose-200'
-                                    : 'border-2 border-slate-300 bg-slate-50 hover:border-slate-400'
-                                }`}
-                              >
-                                {rec.taskStatus === 'Completed' ? (
-                                  <Check size={12} className="stroke-[3]" />
-                                ) : rec.taskStatus === 'Incomplete' ? (
-                                  <span className="font-bold text-xs">!</span>
-                                ) : null}
-                              </button>
+                            <div className="flex items-center justify-center gap-2">
+                              <button type="button" disabled={isLocked} onClick={() => setTaskStatus(st.id, 'Completed')} aria-label="Complete" className={`h-6 w-6 rounded-full bg-emerald-500 ring-2 ring-emerald-200 disabled:opacity-50 ${rec.taskStatus === 'Completed' ? 'ring-4' : 'opacity-40'}`} />
+                              <button type="button" disabled={isLocked} onClick={() => setTaskStatus(st.id, 'Incomplete')} aria-label="Incomplete" className={`h-6 w-6 rounded-full bg-rose-500 ring-2 ring-rose-200 disabled:opacity-50 ${rec.taskStatus === 'Incomplete' ? 'ring-4' : 'opacity-40'}`} />
                             </div>
                           </td>
                         </tr>

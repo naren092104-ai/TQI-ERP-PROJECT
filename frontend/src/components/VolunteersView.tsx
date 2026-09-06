@@ -122,6 +122,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
     name: '',
     email: '',
     phone: '',
+    panchayatId: '',
+    villageId: '',
     college: collegeName,
     department: '',
     stream: 'Engineering',
@@ -204,6 +206,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
       name: '',
       email: '',
       phone: '',
+      panchayatId: panchayats[0]?.id || '',
+      villageId: panchayats[0]?.villages?.[0]?.id || '',
       college: collegeName || (collegeOptions[0] || ''),
       department: '',
       stream: 'Engineering',
@@ -223,6 +227,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
       name: vol.name,
       email: vol.email,
       phone: vol.phone,
+      panchayatId: vol.panchayatId || '',
+      villageId: vol.villageId || '',
       college: getVolunteerCollege(vol),
       department: vol.department || '',
       stream,
@@ -247,6 +253,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
         name: formData.name.trim(),
         email: formData.email.trim(),
         phone: formData.phone.trim(),
+        panchayatId: formData.panchayatId,
+        villageId: formData.villageId,
         college: formData.college.trim(),
         department: formData.department,
         stream: formData.stream,
@@ -274,6 +282,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
         name: formData.name.trim(),
         email: formData.email.trim(),
         phone: formData.phone.trim(),
+        panchayatId: formData.panchayatId,
+        villageId: formData.villageId,
         college: formData.college.trim(),
         department: formData.department,
         stream: formData.stream,
@@ -1009,6 +1019,44 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
                       Locked to your assigned cluster college.
                     </p>
                   )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Panchayat</label>
+                    <Select
+                      value={formData.panchayatId || 'unassigned'}
+                      onValueChange={(value) => {
+                        const panchayat = panchayats.find((item) => item.id === value);
+                        setFormData({
+                          ...formData,
+                          panchayatId: value === 'unassigned' ? '' : value,
+                          villageId: panchayat?.villages?.[0]?.id || '',
+                        });
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Panchayat" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {panchayats.map((panchayat) => <SelectItem key={panchayat.id} value={panchayat.id}>{panchayat.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">Village</label>
+                    <Select
+                      value={formData.villageId || 'unassigned'}
+                      onValueChange={(value) => setFormData({ ...formData, villageId: value === 'unassigned' ? '' : value })}
+                    >
+                      <SelectTrigger className="h-9 text-xs"><SelectValue placeholder="Select Village" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        {(panchayats.find((panchayat) => panchayat.id === formData.panchayatId)?.villages || []).map((village) => (
+                          <SelectItem key={village.id} value={village.id}>{village.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

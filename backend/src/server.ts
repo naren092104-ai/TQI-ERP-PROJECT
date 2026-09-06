@@ -2245,8 +2245,8 @@ app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: 
     const collegeName = collegeRows[0]?.name || '';
     const id = String(req.body.id || `volunteer-${Date.now()}`).trim();
     await pool.query(
-      'INSERT INTO volunteers (id, name, email, phone, cluster_id, college_id, panchayat_id, department, stream, passing_out_year, role, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), stream = VALUES(stream), passing_out_year = VALUES(passing_out_year), role = VALUES(role), status = VALUES(status)',
-      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, collegeId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.stream || ''), req.body.passingOutYear ? Number(req.body.passingOutYear) : null, String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), req.user.id]
+      'INSERT INTO volunteers (id, name, email, phone, cluster_id, college_id, panchayat_id, village_id, department, stream, passing_out_year, role, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), college_id = VALUES(college_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), department = VALUES(department), stream = VALUES(stream), passing_out_year = VALUES(passing_out_year), role = VALUES(role), status = VALUES(status)',
+      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, collegeId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), String(req.body.department || 'Community Program'), String(req.body.stream || ''), req.body.passingOutYear ? Number(req.body.passingOutYear) : null, String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), req.user.id]
     );
     res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', collegeId, college: collegeName, clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', stream: req.body.stream || '', passingOutYear: req.body.passingOutYear || '', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
   } catch (error) {
@@ -2527,7 +2527,7 @@ app.get('/api/attendance/session', requireAuth, async (req: AuthenticatedRequest
       };
 
       const [attRows] = await pool.query<any[]>(
-        'SELECT student_id, present, task_status FROM student_attendance WHERE attendance_session_id = ?',
+        'SELECT student_id, present, round_number, task_status FROM student_attendance WHERE attendance_session_id = ?',
         [row.id]
       );
       records = attRows.map((r) => ({
@@ -2535,9 +2535,10 @@ app.get('/api/attendance/session', requireAuth, async (req: AuthenticatedRequest
         present: r.present === null ? null : Boolean(r.present),
         status: r.present === 1 || r.present === true ? 'Present' : r.present === 0 || r.present === false ? 'Absent' : 'Not Marked',
         taskStatus: r.task_status || 'Not Marked',
+        roundNumber: Number(r.round_number || 1),
       }));
       const [volunteerRows] = await pool.query<any[]>(
-        'SELECT volunteer_id, present FROM volunteer_attendance WHERE attendance_session_id = ?',
+        'SELECT volunteer_id, present, round_number FROM volunteer_attendance WHERE attendance_session_id = ?',
         [row.id]
       );
       return res.json({
@@ -2547,6 +2548,7 @@ app.get('/api/attendance/session', requireAuth, async (req: AuthenticatedRequest
         volunteerRecords: volunteerRows.map((r) => ({
           volunteerId: r.volunteer_id,
           present: Boolean(r.present),
+          roundNumber: Number(r.round_number || 1),
         })),
       });
     }
@@ -2846,8 +2848,8 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
         const taskStatus = record.taskStatus && record.taskStatus !== 'Not Marked' ? record.taskStatus : null;
 
         await pool.query(
-          'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, task_status) VALUES (?, ?, ?, ?, ?)',
-          [randomUUID(), id, record.studentId, isPresent, taskStatus]
+          'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, round_number, task_status) VALUES (?, ?, ?, ?, ?, ?)',
+          [randomUUID(), id, record.studentId, isPresent, Number(record.roundNumber || 1), taskStatus]
         );
       }
     }
@@ -2856,8 +2858,8 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       await pool.query('DELETE FROM volunteer_attendance WHERE attendance_session_id = ?', [id]);
       for (const record of req.body.volunteerAttendance) {
         await pool.query(
-          'INSERT INTO volunteer_attendance (id, attendance_session_id, volunteer_id, present) VALUES (?, ?, ?, ?)',
-          [randomUUID(), id, record.volunteerId, Boolean(record.present)]
+          'INSERT INTO volunteer_attendance (id, attendance_session_id, volunteer_id, present, round_number) VALUES (?, ?, ?, ?, ?)',
+          [randomUUID(), id, record.volunteerId, Boolean(record.present), Number(record.roundNumber || 1)]
         );
       }
     }
@@ -3591,7 +3593,9 @@ app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, re
 
 // 10. PUT /api/volunteers/:id
 app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, email, phone, department, stream, passingOutYear, role, panchayat_id, village_id, status } = req.body;
+  const { name, email, phone, department, stream, passingOutYear, role, status } = req.body;
+  const panchayat_id = req.body.panchayat_id || req.body.panchayatId || '';
+  const village_id = req.body.village_id || req.body.villageId || '';
   try {
     const [result] = await pool.query<any>(
       'UPDATE volunteers SET name = ?, email = ?, phone = ?, department = ?, stream = ?, passing_out_year = ?, role = ?, panchayat_id = ?, village_id = ?, status = ? WHERE id = ?',
