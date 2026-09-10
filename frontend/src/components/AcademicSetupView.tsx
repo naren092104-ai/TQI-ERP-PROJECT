@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react';
-import { 
-  Edit3, 
-  Save, 
-  Search,
+import {
+  Edit3,
+  Save,
   BookOpen,
   MapPin,
-  CheckCircle2
+  CheckCircle2,
+  Calendar,
+  Plus,
 } from './ui/icons';
 import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -23,109 +23,97 @@ interface AcademicSetupViewProps {
   onSetupSaved?: () => void;
 }
 
+interface DayEntry {
+  sessionName: string;
+  topic: string;
+  location: string;
+  sessionDate: string; // DD-MM-YY
+}
+
+// Format a YYYY-MM-DD string as DD-MM-YY.
+const formatDateDDMMYY = (iso: string | null | undefined): string => {
+  if (!iso) return '';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[3].slice(0, 2)}`;
+  return '';
+};
+
+// Parse a DD-MM-YY string back into YYYY-MM-DD for the native date input.
+const parseDDMMYY = (input: string): string => {
+  const trimmed = (input || '').trim();
+  if (!trimmed) return '';
+  const m = trimmed.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+  if (m) return `20${m[3]}-${m[2]}-${m[1]}`;
+  const ymd = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (ymd) return trimmed;
+  return '';
+};
+
+const emptyDay = (): DayEntry => ({ sessionName: '', topic: '', location: '', sessionDate: '' });
+
 export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({ authToken, onSetupSaved }) => {
   const [modules, setModules] = useState<TqiModule[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [academicYear, setAcademicYear] = useState('2026-2027');
-  const [sessionNames, setSessionNames] = useState<Record<number, string>>({});
+  // Day 1 always exists. Days 2..8 are added on demand via the "Add Day" button.
+  const [days, setDays] = useState<DayEntry[]>([emptyDay()]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [isEditing, setIsEditing] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const defaultSuggestedNames: Record<number, { name: string; month: string; description: string; topic: string; location: string }> = {
-    1: { 
-      name: 'Spoken English & Goal Setting', 
-      month: 'February', 
-      description: 'Foundational conversational drills, student goal setting and self-confidence building.',
-      topic: 'Communication & Life Skills',
-      location: 'Panchayat Community Centers'
-    },
-    2: { 
-      name: 'Basic Arithmetic & Logic Puzzles', 
-      month: 'February', 
-      description: 'Mental math drills, interactive logic puzzles and practical number operations.',
-      topic: 'Quantitative & Logical Aptitude',
-      location: 'Village Study Hubs'
-    },
-    3: { 
-      name: 'Hands-on Science & Daily Observation', 
-      month: 'March', 
-      description: 'Simple science experiments, natural observation and curiosity-driven inquiry.',
-      topic: 'Applied Physical & Nature Sciences',
-      location: 'Panchayat Community Centers'
-    },
-    4: { 
-      name: 'Life Skills, Health & Hygiene', 
-      month: 'March', 
-      description: 'Personal wellness, sanitation awareness, peer teamwork and emotional resilience.',
-      topic: 'Health, Sanitation & Teamwork',
-      location: 'Village Study Hubs'
-    },
-    5: { 
-      name: 'Creative Arts & Expression', 
-      month: 'March', 
-      description: 'Artistic crafts, expressive storytelling, drawing and collaborative group drama.',
-      topic: 'Creative & Expressive Arts',
-      location: 'Panchayat Community Centers'
-    },
-    6: { 
-      name: 'Digital Literacy & Computer Basics', 
-      month: 'April', 
-      description: 'Computer fundamentals, typing practice, basic tools and cyber safety habits.',
-      topic: 'Digital & Technology Literacy',
-      location: 'Cluster Digital Centers'
-    },
-    7: { 
-      name: 'Environment & Community Action', 
-      month: 'April', 
-      description: 'Tree plantation drives, local water conservation and clean village initiatives.',
-      topic: 'Environmental & Social Responsibility',
-      location: 'Village Open Grounds'
-    },
-    8: { 
-      name: 'Culmination Showcase & Feedback', 
-      month: 'April', 
-      description: 'Student project exhibitions, recognition certificates and academic cycle review.',
-      topic: 'Showcase & Term Review',
-      location: 'Main Cluster Hall'
-    },
-  };
 
   useEffect(() => {
     const controller = new AbortController();
-    fetch(apiUrl('/api/modules'), {
-      signal: controller.signal,
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-    })
-      .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load academic term.');
-        const loadedModules: TqiModule[] = Array.isArray(data.modules) ? data.modules : [];
-        setModules(loadedModules);
-        const firstYear = loadedModules.find((module) => module.academicYear)?.academicYear;
-        if (firstYear) setAcademicYear(firstYear);
-        const setupResponse = await fetch(apiUrl('/api/academic-setup'), { 
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} 
-        });
-        const setupData = await setupResponse.json().catch(() => null);
-        if (!setupResponse.ok || !setupData?.success) throw new Error(setupData?.error || `Unable to load session data (${setupResponse.status}).`);
-        const setup = Array.isArray(setupData.setup) ? setupData.setup : [];
-        const firstSetupYear = setup.find((day: { academic_year?: string }) => day.academic_year)?.academic_year;
-        if (firstSetupYear) setAcademicYear(firstSetupYear);
-        
-        const initialMap: Record<number, string> = {};
-        for (let i = 1; i <= 8; i++) {
-          const found = setup.find((day: { day_number: number }) => day.day_number === i);
-          initialMap[i] = found?.session_name || defaultSuggestedNames[i].name;
+    (async () => {
+      try {
+        const [modulesRes, setupRes] = await Promise.all([
+          fetch(apiUrl('/api/modules'), {
+            signal: controller.signal,
+            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+          }),
+          fetch(apiUrl('/api/academic-setup'), {
+            signal: controller.signal,
+            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+          }),
+        ]);
+
+        const modulesData = await modulesRes.json().catch(() => null);
+        if (modulesRes.ok && modulesData?.success) {
+          setModules(Array.isArray(modulesData.modules) ? modulesData.modules : []);
         }
-        setSessionNames(initialMap);
-      })
-      .catch((error) => {
-        if (error.name !== 'AbortError') setErrorMessage(error instanceof Error ? error.message : 'Unable to load academic term.');
-      })
-      .finally(() => setIsLoading(false));
+
+        const setupData = await setupRes.json().catch(() => null);
+        if (!setupRes.ok || !setupData?.success) {
+          throw new Error(setupData?.error || `Unable to load session data (${setupRes.status}).`);
+        }
+        const setup = Array.isArray(setupData.setup) ? setupData.setup : [];
+        const firstYear = setup.find((day: { academic_year?: string }) => day.academic_year)?.academic_year;
+        if (firstYear) setAcademicYear(firstYear);
+
+        // Build day entries from the API rows that have data. The first day is
+        // always shown even if blank — everything else only appears if the
+        // Super Admin created it.
+        const filled: DayEntry[] = [emptyDay()];
+        for (let i = 2; i <= 8; i++) {
+          const row = setup.find((day: { day_number: number }) => day.day_number === i);
+          if (row && (row.session_name || row.session_date)) {
+            filled.push({
+              sessionName: row.session_name || '',
+              topic: '',
+              location: '',
+              sessionDate: formatDateDDMMYY(row.session_date),
+            });
+          }
+        }
+        setDays(filled);
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') {
+          setErrorMessage(error instanceof Error ? error.message : 'Unable to load academic term.');
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    })();
     return () => controller.abort();
   }, [authToken]);
 
@@ -134,78 +122,77 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({ authToken,
     setSaveMessage(null);
     setErrorMessage(null);
     try {
+      // Persist the visible day slots in order (Day 1 first, then any extras).
+      const payloadDays = days.map((day, index) => ({
+        dayNumber: index + 1,
+        sessionName: day.sessionName.trim(),
+        topic: day.topic.trim(),
+        location: day.location.trim(),
+        sessionDate: day.sessionDate.trim() || null,
+      }));
       const response = await fetch(apiUrl('/api/academic-setup'), {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         },
-        body: JSON.stringify({ 
-          academicYear, 
-          days: Array.from({ length: 8 }, (_, index) => ({ 
-            dayNumber: index + 1, 
-            sessionName: sessionNames[index + 1] || defaultSuggestedNames[index + 1].name 
-          })) 
-        }),
+        body: JSON.stringify({ academicYear, days: payloadDays }),
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) throw new Error(data?.error || `Unable to save academic term (${response.status}).`);
+      if (!response.ok || !data?.success) {
+        throw new Error(data?.error || `Unable to save academic term (${response.status}).`);
+      }
       setSaveMessage('Academic term saved successfully.');
       setIsEditing(false);
       onSetupSaved?.();
-    } catch (error) {
+    } catch (error: any) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to save academic term.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const updateSessionName = (dayNumber: number, sessionName: string) => {
-    setSessionNames((current) => ({ ...current, [dayNumber]: sessionName }));
+  const updateDay = (index: number, patch: Partial<DayEntry>) => {
+    setDays((current) => current.map((day, i) => (i === index ? { ...day, ...patch } : day)));
     setSaveMessage(null);
   };
 
-  const filteredDays = Array.from({ length: 8 }, (_, i) => i + 1).filter((dayNum) => {
-    const meta = defaultSuggestedNames[dayNum];
-    const name = sessionNames[dayNum] || meta.name;
-    const query = searchQuery.toLowerCase();
-    return (
-      name.toLowerCase().includes(query) ||
-      meta.month.toLowerCase().includes(query) ||
-      meta.topic.toLowerCase().includes(query) ||
-      meta.location.toLowerCase().includes(query) ||
-      `day ${dayNum}`.includes(query)
-    );
-  });
+  const addDay = () => {
+    if (days.length >= 8) return;
+    setDays((current) => [...current, emptyDay()]);
+  };
+
+  const removeDay = (index: number) => {
+    // Day 1 cannot be removed.
+    if (index === 0) return;
+    setDays((current) => current.filter((_, i) => i !== index));
+    setSaveMessage(null);
+  };
 
   return (
     <div className="w-full space-y-8">
-      {/* Top Header */}
+      {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border/50 pb-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Academic Term
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            {academicYear} Academic Term • 8 Curriculum Milestones (Feb – Apr)
+            {academicYear} • {days.length} {days.length === 1 ? 'Day' : 'Days'}
           </p>
         </div>
 
         <div className="flex items-center gap-3">
           {isEditing ? (
-            <Button 
-              onClick={saveSetup} 
-              disabled={isLoading || isSaving}
-              size="sm"
-            >
+            <Button onClick={saveSetup} disabled={isLoading || isSaving} size="sm">
               <Save className="h-4 w-4" />
               <span>{isSaving ? 'Saving...' : 'Save Term'}</span>
             </Button>
           ) : (
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               size="sm"
-              onClick={() => { setIsEditing(true); setSaveMessage(null); }} 
+              onClick={() => { setIsEditing(true); setSaveMessage(null); }}
               disabled={isLoading}
             >
               <Edit3 className="h-4 w-4" />
@@ -229,86 +216,142 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({ authToken,
         </div>
       )}
 
-      {/* Search Bar & Edit Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div className="relative w-full max-w-sm">
-          <Search className="h-4 w-4 text-muted-foreground absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+      {/* Year input (only visible in edit mode) */}
+      {isEditing && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold text-muted-foreground">Academic Year:</span>
           <input
-            type="text"
-            placeholder="Search sessions, topics, locations..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-transparent border border-border/70 rounded-xl pl-10 pr-4 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            className="bg-transparent border border-border/70 rounded-lg px-3 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-primary"
+            value={academicYear}
+            placeholder="2026-2027"
+            onChange={(e) => { setAcademicYear(e.target.value); setSaveMessage(null); }}
           />
         </div>
+      )}
 
-        {isEditing && (
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-muted-foreground">Academic Year:</span>
-            <input 
-              className="bg-transparent border border-border/70 rounded-lg px-3 py-1.5 text-sm font-semibold text-foreground outline-none focus:border-primary" 
-              value={academicYear} 
-              placeholder="2026-2027" 
-              onChange={(e) => { setAcademicYear(e.target.value); setSaveMessage(null); }} 
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Clean Grid of Cards with Proper Text Spacing */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        {filteredDays.map((dayNumber) => {
-          const meta = defaultSuggestedNames[dayNumber];
-          const sessionName = sessionNames[dayNumber] || meta.name;
-          const linkedModule = modules.find((m) => m.dayNumber === dayNumber || m.moduleName.toLowerCase().includes(sessionName.toLowerCase()));
+      {/* Day cards */}
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {days.map((day, index) => {
+          const dayNumber = index + 1;
+          const linkedModule = modules.find((m) => m.dayNumber === dayNumber);
 
           return (
             <Card key={dayNumber} className="flex flex-col justify-between p-6 space-y-4 hover:border-primary/50 transition-colors">
               <CardHeader className="p-0 space-y-3">
-                {/* Header Tag */}
+                {/* Day label */}
                 <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  <span>Day 0{dayNumber}</span>
-                  <span className="text-primary font-semibold">{meta.month}</span>
+                  <span>Day {String(dayNumber).padStart(2, '0')}</span>
+                  {isEditing && dayNumber > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeDay(index)}
+                      className="text-[10px] font-medium text-error-500 hover:text-error-600"
+                      aria-label={`Remove Day ${dayNumber}`}
+                    >
+                      Remove
+                    </button>
+                  )}
                 </div>
 
                 {/* Title */}
                 {isEditing ? (
                   <input
                     className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-bold text-foreground outline-none focus:border-primary"
-                    value={sessionNames[dayNumber] || ''}
-                    placeholder={meta.name}
-                    onChange={(e) => updateSessionName(dayNumber, e.target.value)}
+                    value={day.sessionName}
+                    placeholder="Session title"
+                    onChange={(e) => updateDay(index, { sessionName: e.target.value })}
                   />
                 ) : (
                   <CardTitle className="text-base font-bold text-foreground leading-snug">
-                    {sessionName}
+                    {day.sessionName || 'Untitled session'}
                   </CardTitle>
                 )}
-
-                {/* Description */}
-                <CardDescription className="text-sm text-muted-foreground leading-relaxed">
-                  {meta.description}
-                </CardDescription>
               </CardHeader>
 
-              {/* Content / Metadata with Proper Spacing */}
               <CardContent className="p-0 pt-3 space-y-2.5 border-t border-border/40">
+                {/* Date (DD-MM-YY) */}
+                <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                  <Calendar className="h-4 w-4 text-brand-500 shrink-0" />
+                  {isEditing ? (
+                    <div className="flex flex-1 items-center gap-1.5">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="DD-MM-YY"
+                        maxLength={8}
+                        value={day.sessionDate}
+                        onChange={(e) => updateDay(index, { sessionDate: e.target.value })}
+                        className="w-[88px] rounded-md border border-border bg-background px-2 py-1 font-mono text-xs text-foreground outline-none focus:border-primary tabular-nums"
+                        aria-label={`Date for Day ${dayNumber}`}
+                      />
+                      <input
+                        type="date"
+                        value={parseDDMMYY(day.sessionDate)}
+                        onChange={(e) => updateDay(index, { sessionDate: e.target.value })}
+                        className="rounded-md border border-border bg-background px-1.5 py-1 text-xs text-foreground outline-none focus:border-primary [color-scheme:light_dark]"
+                        aria-label={`Calendar picker for Day ${dayNumber}`}
+                      />
+                    </div>
+                  ) : (
+                    <span className="truncate font-medium tabular-nums text-foreground/80">
+                      {day.sessionDate || 'Date not set'}
+                    </span>
+                  )}
+                </div>
+
                 {/* Topic */}
                 <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
                   <BookOpen className="h-4 w-4 text-primary shrink-0" />
-                  <span className="truncate font-medium">{linkedModule?.topic || meta.topic}</span>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      placeholder="Topic"
+                      value={day.topic}
+                      onChange={(e) => updateDay(index, { topic: e.target.value })}
+                      className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
+                      aria-label={`Topic for Day ${dayNumber}`}
+                    />
+                  ) : (
+                    <span className="truncate font-medium">{day.topic || (linkedModule?.topic ?? '')}</span>
+                  )}
                 </div>
 
                 {/* Location */}
                 <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
                   <MapPin className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                  <span className="truncate">{meta.location}</span>
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      placeholder="Location"
+                      value={day.location}
+                      onChange={(e) => updateDay(index, { location: e.target.value })}
+                      className="flex-1 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground outline-none focus:border-primary"
+                      aria-label={`Location for Day ${dayNumber}`}
+                    />
+                  ) : (
+                    <span className="truncate">{day.location || '—'}</span>
+                  )}
                 </div>
               </CardContent>
             </Card>
           );
         })}
       </div>
+
+      {/* Add Day button (edit mode only, max 8) */}
+      {isEditing && (
+        <div className="flex justify-center pt-2">
+          <button
+            type="button"
+            onClick={addDay}
+            disabled={days.length >= 8}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border bg-transparent px-4 py-2 text-xs font-medium text-muted-foreground transition-colors hover:border-brand-400 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add Day {days.length + 1}
+          </button>
+        </div>
+      )}
     </div>
   );
 };

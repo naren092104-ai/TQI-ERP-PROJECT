@@ -1284,6 +1284,7 @@ export default function App() {
                   sessions={displaySessions}
                   students={displayStudents}
                   volunteers={displayVolunteers}
+                  authToken={currentUser.token}
                 />
               )}
 
@@ -1319,6 +1320,7 @@ export default function App() {
               {currentTab === 'audit-logs' && (
                 <AuditLogView
                   auditLogs={displayAuditLogs}
+                  users={users}
                   userRole={currentUserRole}
                 />
               )}
@@ -1396,6 +1398,8 @@ export default function App() {
                   attendanceSessions={displayAttendance}
                   students={displayStudents}
                   panchayats={displayPanchayats}
+                  clusters={clusters}
+                  userRole={currentUserRole}
                   draftId={activeDraftId}
                   onNavigate={handleNavigate}
                   onSaveAttendance={handleSaveAttendance}

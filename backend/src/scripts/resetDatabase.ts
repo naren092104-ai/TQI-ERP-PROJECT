@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { pool, initializeDatabase } from '../db/connection.js';
 
 async function resetAndSeed() {
@@ -9,34 +10,32 @@ async function resetAndSeed() {
     console.log('[RESET] Disabling foreign key checks...');
     await pool.query('SET FOREIGN_KEY_CHECKS = 0');
 
+    // v2 table set (finance_drafts and correction_requests were dropped;
+    // finance_bills / finance_transactions never existed).
     const tables = [
       'audit_logs',
       'auth_otps',
-      'student_attendance',
       'volunteer_attendance',
+      'student_attendance',
       'attendance_sessions',
-      'correction_requests',
       'approvals',
-      'finance_bills',
-      'finance_transactions',
-      'finance_drafts',
-      'finance_entries',
       'notifications',
       'session_photos',
       'session_reports',
       'date_change_requests',
       'session_submissions',
       'lesson_plans',
+      'module_resources',
       'sessions',
+      'finance_entries',
       'students',
       'volunteers',
       'villages',
       'panchayats',
-      'clusters',
       'users',
+      'clusters',
       'academic_setup',
       'academic_years',
-      'module_resources',
       'modules',
     ];
 
@@ -53,16 +52,15 @@ async function resetAndSeed() {
     console.log('[RESET] Re-enabling foreign key checks...');
     await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 
-    // Create default super admin: username "admin" / email "admin@tqi.org" with password "admin123"
-    const passwordHash = await bcrypt.hash('admin123', 10);
+    // Create default super admin with a random password.
+    const rawPassword = randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+    const passwordHash = await bcrypt.hash(rawPassword, 10);
 
-    console.log('[RESET] Seeding default Super Admin user (name: Admin, email: admin@tqi.org / admin, password: admin123)...');
+    console.log('[RESET] Seeding default Super Admin user...');
     await pool.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES
-       ('usr-super-admin', 'Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-alias', 'Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), must_change_password = FALSE, status = 'ACTIVE'`,
-      [passwordHash, passwordHash],
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status)
+       VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', TRUE, 'Active')`,
+      [passwordHash],
     );
 
     // Seed standard reference modules
@@ -79,9 +77,9 @@ async function resetAndSeed() {
     console.log('✅ DATABASE RESET COMPLETED SUCCESSFULLY');
     console.log('------------------------------------------------------');
     console.log('👤 Super Admin Account:');
-    console.log('   Identifier / Email : admin  OR  admin@tqi.org');
-    console.log('   Password           : admin123');
-    console.log('   Role               : Super Admin');
+    console.log('   Email    : admin@tqi.org');
+    console.log(`   Password : ${rawPassword}`);
+    console.log('   Role     : Super Admin');
     console.log('======================================================\n');
     process.exit(0);
   } catch (error: any) {

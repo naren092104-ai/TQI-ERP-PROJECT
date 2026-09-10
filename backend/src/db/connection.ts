@@ -24,6 +24,11 @@ import { initDatabaseSchema } from './init.js';
 
 export let pool: Pool;
 
+/**
+ * Connect to MySQL, create the database if missing, set up the pool.
+ * Does NOT run schema migrations or the post-migration bootstrap — those
+ * run later in startServer, after runSqlFiles has applied the v2 schema.
+ */
 export async function initializeDatabase(): Promise<void> {
   if (pool) {
     return;
@@ -46,9 +51,6 @@ export async function initializeDatabase(): Promise<void> {
     database: DB_NAME,
   });
   console.log(`[DB] Connection pool created for '${DB_NAME}'.`);
-
-  // Automatically initialize all tables, columns, and initial Super Admin
-  await initDatabaseSchema();
 }
 
 export { initDatabaseSchema };

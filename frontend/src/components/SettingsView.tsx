@@ -1,5 +1,15 @@
 import React, { useState } from "react";
-import { Check, Info, X, CheckCircle2 } from "lucide-react";
+import {
+  Check,
+  X,
+  Pencil,
+  Plus,
+  Mail,
+  Phone,
+  MapPin,
+  ShieldCheck,
+} from "./ui/icons";
+import { InputField, TextAreaField } from "./ui/Field";
 
 interface SettingsViewProps {
   currentUser?: {
@@ -14,15 +24,28 @@ interface SettingsViewProps {
   onUpdateProfile?: (updated: any) => void;
 }
 
+/**
+ * Personal Information — Profile settings view.
+ *
+ * Layout:
+ *   - Page hero (eyebrow + h1 + sub)
+ *   - Three .tqi-card sections: Basic, Contact, Addresses
+ *   - Each field rendered as a label/value pair using .tqi-field-label
+ *     (theme-aware contrast: var(--text-secondary) in light, #C8CCD3 in dark)
+ *   - Edit states swap label/value for the Field component
+ */
 export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   onUpdateProfile,
 }) => {
-  // Load saved profile or defaults matching the design
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem("tqi_personal_settings");
     if (saved) {
-      try { return JSON.parse(saved); } catch (e) {}
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        /* fall through to defaults */
+      }
     }
     return {
       name: currentUser?.name || "MITHUN P",
@@ -36,14 +59,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   });
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Inline edit toggle states
   const [isEditingBasic, setIsEditingBasic] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
   const [isEditingAddress, setIsEditingAddress] = useState(false);
 
-  // Form states
   const [basicForm, setBasicForm] = useState({
     name: profile.name,
     region: profile.region,
@@ -61,20 +81,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const saveProfile = (newProfile: typeof profile) => {
     setProfile(newProfile);
     localStorage.setItem("tqi_personal_settings", JSON.stringify(newProfile));
-    if (onUpdateProfile) {
-      onUpdateProfile(newProfile);
-    }
+    onUpdateProfile?.(newProfile);
   };
 
   const handleSaveBasic = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = {
+    saveProfile({
       ...profile,
       name: basicForm.name.trim() || profile.name,
       region: basicForm.region.trim() || profile.region,
       language: basicForm.language.trim() || profile.language,
-    };
-    saveProfile(updated);
+    });
     setIsEditingBasic(false);
     showToast("Basic information saved successfully");
   };
@@ -82,75 +99,186 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleSaveEmail = (e: React.FormEvent) => {
     e.preventDefault();
     if (!emailForm.trim()) return;
-    const updated = {
-      ...profile,
-      email: emailForm.trim(),
-      emailVerified: true,
-    };
-    saveProfile(updated);
+    saveProfile({ ...profile, email: emailForm.trim(), emailVerified: true });
     setIsEditingEmail(false);
     showToast("Primary email updated");
   };
 
   const handleSavePhone = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = {
-      ...profile,
-      phone: phoneForm.trim(),
-    };
-    saveProfile(updated);
+    saveProfile({ ...profile, phone: phoneForm.trim() });
     setIsEditingPhone(false);
     showToast(phoneForm.trim() ? "Phone number saved" : "Phone number removed");
   };
 
   const handleSaveAddress = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated = {
-      ...profile,
-      mailingAddress: addressForm.trim(),
-    };
-    saveProfile(updated);
+    saveProfile({ ...profile, mailingAddress: addressForm.trim() });
     setIsEditingAddress(false);
-    showToast(addressForm.trim() ? "Mailing address saved" : "Mailing address removed");
+    showToast(
+      addressForm.trim() ? "Mailing address saved" : "Mailing address removed",
+    );
   };
 
+  // Inline edit link — pencil + label, brand-tinted on hover
+  const EditLink: React.FC<{
+    onClick: () => void;
+    label: string;
+  }> = ({ onClick, label }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tqi-btn-ghost group inline-flex items-center gap-1.5 text-[13px] font-semibold"
+      style={{ color: "var(--text-secondary)" }}
+    >
+      <Pencil
+        size={14}
+        weight="light"
+        style={{ color: "var(--text-muted)" }}
+      />
+      <span className="group-hover:underline group-hover:underline-offset-4 group-hover:decoration-2 transition-colors" style={{ textUnderlineOffset: 4 }}>
+        {label}
+      </span>
+    </button>
+  );
+
+  const CancelLink: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="tqi-btn-ghost text-[13px] font-semibold"
+      style={{ color: "var(--text-muted)" }}
+    >
+      Cancel
+    </button>
+  );
+
+  // ReadField removed in favor of SettingsRow (label-left / value-right pattern).
+
+  /**
+   * SettingsRow — horizontal settings pattern (label-left / value-right).
+   * Matches Linear / Notion / Stripe Dashboard. Labels align in a fixed
+   * left column, values fill the right; the row stack lives inside a
+   * vertical list. Edit action sits at the row's right edge.
+   */
+  const SettingsRow: React.FC<{
+    label: string;
+    hint?: string;
+    children: React.ReactNode;
+    action?: React.ReactNode;
+    divider?: boolean;
+  }> = ({ label, hint, children, action, divider = true }) => (
+    <div
+      className="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-3 sm:gap-6 items-start"
+      style={{
+        padding: "1.1rem 0",
+        borderBottom: divider ? "1px solid var(--border-subtle)" : "none",
+      }}
+    >
+      <div className="sm:pt-0.5">
+        <div
+          style={{
+            fontSize: "0.8125rem",
+            fontWeight: 600,
+            color: "var(--text-secondary)",
+            letterSpacing: "-0.005em",
+          }}
+        >
+          {label}
+        </div>
+        {hint && (
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: "var(--text-muted)",
+              marginTop: 2,
+              lineHeight: 1.45,
+            }}
+          >
+            {hint}
+          </div>
+        )}
+      </div>
+      <div className="min-w-0">{children}</div>
+      {action && <div className="sm:pt-0.5 sm:justify-self-end">{action}</div>}
+    </div>
+  );
+
   return (
-    <div className="w-full max-w-4xl py-2 px-1 sm:px-4">
-      {/* Toast Notification */}
+    <div className="w-full max-w-5xl py-2 px-1 sm:px-4">
+      {/* Toast */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-[99999] flex items-center gap-2 rounded-xl bg-gray-900 px-4 py-3 text-xs font-semibold text-white shadow-theme-lg dark:bg-white dark:text-gray-900 animate-in fade-in-0 slide-in-from-bottom-5">
-          <CheckCircle2 className="h-4 w-4 text-success-500 shrink-0" />
+        <div
+          className="fixed bottom-6 right-6 z-[99999] flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold shadow-theme-lg animate-in fade-in-0 slide-in-from-bottom-5"
+          style={{ background: "var(--text)", color: "var(--card)" }}
+        >
+          <ShieldCheck size={16} weight="light" style={{ color: "var(--success)" }} />
           <span>{toastMessage}</span>
           <button
             type="button"
             onClick={() => setToastMessage(null)}
-            className="ml-2 text-gray-400 hover:text-white dark:hover:text-gray-900 cursor-pointer"
+            className="ml-2 cursor-pointer opacity-70 hover:opacity-100 transition-opacity"
           >
-            <X className="h-3.5 w-3.5" />
+            <X size={14} weight="light" />
           </button>
         </div>
       )}
 
-      {/* Main Header */}
-      <div className="mb-10">
-        <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+      {/* Header */}
+      <div className="tqi-page-hero mb-10" style={{ padding: "1.75rem 1.75rem" }}>
+        <div
+          className="tqi-section-eyebrow"
+          style={{
+            fontSize: "0.6875rem",
+            fontWeight: 600,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: "var(--brand)",
+            marginBottom: 8,
+          }}
+        >
+          Account & Profile
+        </div>
+        <h1
+          className="font-bold tracking-tight"
+          style={{
+            fontSize: "1.75rem",
+            lineHeight: 1.15,
+            color: "var(--text)",
+            letterSpacing: "-0.02em",
+          }}
+        >
           Personal Information
         </h1>
-        <p className="mt-1.5 text-sm text-gray-500 dark:text-gray-400">
-          Manage your basic information, contact methods, and addresses
+        <p
+          className="mt-2 text-sm"
+          style={{ color: "var(--text-muted)", maxWidth: "44ch" }}
+        >
+          Manage your basic information, contact methods, and addresses.
+          Changes are saved to this device.
         </p>
       </div>
 
-      <div className="space-y-12">
-        {/* Basic Information Section */}
-        <section className="space-y-6">
-          <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-              Basic Information
-            </h2>
+      <div className="space-y-6">
+        {/* Basic Information */}
+        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
+          <div
+            className="flex items-center justify-between"
+            style={{ marginBottom: "0.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <div>
+              <h2
+                className="font-bold tracking-tight"
+                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
+              >
+                Basic Information
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                How your identity is presented across TQI-ERP
+              </p>
+            </div>
             {!isEditingBasic ? (
-              <button
-                type="button"
+              <EditLink
                 onClick={() => {
                   setBasicForm({
                     name: profile.name,
@@ -159,322 +287,383 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   });
                   setIsEditingBasic(true);
                 }}
-                className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-100 underline underline-offset-4 hover:text-brand-500 dark:hover:text-brand-400 transition cursor-pointer"
-              >
-                Edit
-              </button>
+                label="Edit"
+              />
             ) : (
-              <button
-                type="button"
-                onClick={() => setIsEditingBasic(false)}
-                className="text-xs sm:text-sm font-semibold text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-white transition cursor-pointer"
-              >
-                Cancel
-              </button>
+              <CancelLink onClick={() => setIsEditingBasic(false)} />
             )}
           </div>
 
           {!isEditingBasic ? (
-            <div className="space-y-6 text-sm animate-in fade-in-0 duration-200">
-              <div>
-                <span className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  Name
-                </span>
-                <span className="font-bold text-gray-900 dark:text-white uppercase tracking-tight text-sm sm:text-base">
+            <div className="tqi-rise">
+              <SettingsRow
+                label="Full name"
+                hint="As shown across TQI-ERP"
+                divider
+              >
+                <span
+                  style={{
+                    color: "var(--text)",
+                    fontSize: "0.9375rem",
+                    fontWeight: 600,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
                   {profile.name}
                 </span>
-              </div>
-
-              <div>
-                <span className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  Region
-                </span>
-                <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
+              </SettingsRow>
+              <SettingsRow label="Region" hint="Country of operation" divider>
+                <span
+                  style={{
+                    color: "var(--text)",
+                    fontSize: "0.9375rem",
+                    fontWeight: 600,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
                   {profile.region}
                 </span>
-              </div>
-
-              <div>
-                <span className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
-                  Language
-                </span>
-                <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
+              </SettingsRow>
+              <SettingsRow label="Language" hint="Default app locale" divider={false}>
+                <span
+                  style={{
+                    color: "var(--text)",
+                    fontSize: "0.9375rem",
+                    fontWeight: 600,
+                    letterSpacing: "-0.005em",
+                  }}
+                >
                   {profile.language}
                 </span>
-              </div>
+              </SettingsRow>
             </div>
           ) : (
-            <form onSubmit={handleSaveBasic} className="space-y-4 max-w-lg animate-in fade-in-0 duration-200">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
+            <form onSubmit={handleSaveBasic} className="tqi-rise space-y-4 max-w-xl">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <InputField
+                  label="Full name"
                   required
                   value={basicForm.name}
-                  onChange={(e) => setBasicForm({ ...basicForm, name: e.target.value })}
-                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  onChange={(e) =>
+                    setBasicForm({ ...basicForm, name: e.target.value })
+                  }
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                  Region *
-                </label>
-                <input
-                  type="text"
+                <InputField
+                  label="Region"
                   required
                   value={basicForm.region}
-                  onChange={(e) => setBasicForm({ ...basicForm, region: e.target.value })}
-                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  onChange={(e) =>
+                    setBasicForm({ ...basicForm, region: e.target.value })
+                  }
                 />
               </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 mb-1.5">
-                  Language *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={basicForm.language}
-                  onChange={(e) => setBasicForm({ ...basicForm, language: e.target.value })}
-                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 pt-2">
+              <InputField
+                label="Language"
+                required
+                value={basicForm.language}
+                onChange={(e) =>
+                  setBasicForm({ ...basicForm, language: e.target.value })
+                }
+              />
+              <div className="flex items-center gap-3 pt-1">
                 <button
                   type="submit"
-                  className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
+                  className="tqi-btn-primary inline-flex items-center gap-2"
                 >
-                  Save Changes
+                  Save changes
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingBasic(false)}
-                  className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-                >
-                  Cancel
-                </button>
+                <CancelLink onClick={() => setIsEditingBasic(false)} />
               </div>
             </form>
           )}
         </section>
 
-        {/* Contact Information Section */}
-        <section className="space-y-6">
-          <div className="border-b border-gray-100 dark:border-gray-800 pb-2">
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-              Contact Information
-            </h2>
+        {/* Contact Information */}
+        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
+          <div
+            className="flex items-center justify-between"
+            style={{ marginBottom: "1.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <div>
+              <h2
+                className="font-bold tracking-tight"
+                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
+              >
+                Contact Information
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                Verified ways for TQI to reach you
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-8 text-sm">
-            {/* Primary Email */}
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                    <span>Primary Email</span>
-                    <Info className="h-3.5 w-3.5 text-gray-400" />
-                  </div>
-                  {!isEditingEmail && (
-                    <div className="flex flex-wrap items-center gap-3">
-                      <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
-                        {profile.email}
-                      </span>
-                      {profile.emailVerified && (
-                        <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
-                          <Check className="h-3.5 w-3.5 stroke-[2.5]" />
-                          Verified
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {!isEditingEmail && (
-                  <button
-                    type="button"
+          <div className="tqi-rise">
+            {/* Email */}
+            <SettingsRow
+              label="Primary email"
+              hint="Used for sign-in and important notifications"
+              action={
+                !isEditingEmail ? (
+                  <EditLink
                     onClick={() => {
                       setEmailForm(profile.email);
                       setIsEditingEmail(true);
                     }}
-                    className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-100 underline underline-offset-4 hover:text-brand-500 dark:hover:text-brand-400 transition cursor-pointer shrink-0 mt-1"
+                    label="Edit"
+                  />
+                ) : undefined
+              }
+              divider
+            >
+              {!isEditingEmail ? (
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span
+                    className="inline-flex items-center gap-2"
+                    style={{
+                      color: "var(--text)",
+                      fontSize: "0.9375rem",
+                      fontWeight: 600,
+                    }}
                   >
-                    Edit
-                  </button>
-                )}
-              </div>
-
-              {isEditingEmail && (
-                <form onSubmit={handleSaveEmail} className="space-y-3 max-w-md animate-in fade-in-0 duration-200">
-                  <input
+                    <Mail
+                      size={14}
+                      weight="light"
+                      style={{ color: "var(--text-muted)" }}
+                    />
+                    {profile.email}
+                  </span>
+                  {profile.emailVerified && (
+                    <span
+                      className="tqi-chip tqi-chip-success"
+                      style={{ fontSize: "0.6875rem" }}
+                    >
+                      <Check size={12} weight="bold" />
+                      Verified
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <form
+                  onSubmit={handleSaveEmail}
+                  className="tqi-rise space-y-3 max-w-md"
+                >
+                  <InputField
                     type="email"
                     required
                     value={emailForm}
                     onChange={(e) => setEmailForm(e.target.value)}
-                    className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                   <div className="flex items-center gap-3">
-                    <button
-                      type="submit"
-                      className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
-                    >
-                      Save Email
+                    <button type="submit" className="tqi-btn-primary">
+                      Save email
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingEmail(false)}
-                      className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-                    >
-                      Cancel
-                    </button>
+                    <CancelLink onClick={() => setIsEditingEmail(false)} />
                   </div>
                 </form>
               )}
-            </div>
+            </SettingsRow>
 
-            {/* Primary Phone Number */}
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-4">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                    <span>Primary Phone Number</span>
-                    <Info className="h-3.5 w-3.5 text-gray-400" />
-                  </div>
-                  {!isEditingPhone && (
-                    <div>
-                      {profile.phone ? (
-                        <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base font-mono">
-                          {profile.phone}
-                        </span>
-                      ) : (
-                        <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
-                          No phone number added
-                        </span>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {!isEditingPhone && (
+            {/* Phone */}
+            <SettingsRow
+              label="Primary phone"
+              hint="Optional — used for SMS alerts only"
+              action={
+                !isEditingPhone && profile.phone ? (
+                  <EditLink
+                    onClick={() => {
+                      setPhoneForm(profile.phone);
+                      setIsEditingPhone(true);
+                    }}
+                    label="Edit"
+                  />
+                ) : undefined
+              }
+              divider={false}
+            >
+              {!isEditingPhone ? (
+                profile.phone ? (
+                  <span
+                    className="inline-flex items-center gap-2"
+                    style={{
+                      color: "var(--text)",
+                      fontSize: "0.9375rem",
+                      fontWeight: 600,
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, monospace",
+                      letterSpacing: "-0.01em",
+                    }}
+                  >
+                    <Phone
+                      size={14}
+                      weight="light"
+                      style={{ color: "var(--text-muted)" }}
+                    />
+                    {profile.phone}
+                  </span>
+                ) : (
                   <button
                     type="button"
                     onClick={() => {
                       setPhoneForm(profile.phone);
                       setIsEditingPhone(true);
                     }}
-                    className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-100 underline underline-offset-4 hover:text-brand-500 dark:hover:text-brand-400 transition cursor-pointer shrink-0 mt-1"
+                    className="tqi-btn-ghost"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                      padding: "0.5rem 0.75rem",
+                      borderRadius: 10,
+                      border: "1px dashed var(--border)",
+                      color: "var(--text-muted)",
+                      background: "transparent",
+                      fontSize: "0.875rem",
+                      fontWeight: 500,
+                      cursor: "pointer",
+                      transition: "all 0.18s var(--ease-out-expo)",
+                    }}
                   >
-                    {profile.phone ? "Edit" : "Add"}
+                    <Plus
+                      size={14}
+                      weight="light"
+                      style={{ color: "var(--brand)" }}
+                    />
+                    Add a phone number
                   </button>
-                )}
-              </div>
-
-              {isEditingPhone && (
-                <form onSubmit={handleSavePhone} className="space-y-3 max-w-md animate-in fade-in-0 duration-200">
-                  <input
+                )
+              ) : (
+                <form
+                  onSubmit={handleSavePhone}
+                  className="tqi-rise space-y-3 max-w-md"
+                >
+                  <InputField
                     type="tel"
                     placeholder="+91 98765 43210"
                     value={phoneForm}
                     onChange={(e) => setPhoneForm(e.target.value)}
-                    className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                   <div className="flex items-center gap-3">
-                    <button
-                      type="submit"
-                      className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
-                    >
-                      Save Phone
+                    <button type="submit" className="tqi-btn-primary">
+                      Save phone
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingPhone(false)}
-                      className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-                    >
-                      Cancel
-                    </button>
+                    <CancelLink onClick={() => setIsEditingPhone(false)} />
                   </div>
                 </form>
               )}
-            </div>
+            </SettingsRow>
           </div>
         </section>
 
-        {/* Addresses Section */}
-        <section className="space-y-6">
-          <div className="border-b border-gray-100 dark:border-gray-800 pb-2">
-            <h2 className="text-lg sm:text-xl font-bold text-gray-900 dark:text-white tracking-tight">
-              Addresses
-            </h2>
+        {/* Addresses */}
+        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
+          <div
+            className="flex items-center justify-between"
+            style={{ marginBottom: "0.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
+          >
+            <div>
+              <h2
+                className="font-bold tracking-tight"
+                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
+              >
+                Addresses
+              </h2>
+              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
+                Postal address for physical correspondence
+              </p>
+            </div>
           </div>
 
-          <div className="space-y-3 text-sm">
-            {/* Mailing */}
-            <div className="flex items-start justify-between gap-4">
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">
-                  <span>Mailing</span>
-                  <Info className="h-3.5 w-3.5 text-gray-400" />
-                </div>
-                {!isEditingAddress && (
-                  <div>
-                    {profile.mailingAddress ? (
-                      <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base whitespace-pre-line">
-                        {profile.mailingAddress}
-                      </span>
-                    ) : (
-                      <span className="font-bold text-gray-900 dark:text-white text-sm sm:text-base">
-                        No mailing address added
-                      </span>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {!isEditingAddress && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAddressForm(profile.mailingAddress);
-                    setIsEditingAddress(true);
-                  }}
-                  className="text-xs sm:text-sm font-semibold text-gray-900 dark:text-gray-100 underline underline-offset-4 hover:text-brand-500 dark:hover:text-brand-400 transition cursor-pointer shrink-0 mt-1"
-                >
-                  {profile.mailingAddress ? "Edit" : "Add"}
-                </button>
-              )}
-            </div>
-
-            {isEditingAddress && (
-              <form onSubmit={handleSaveAddress} className="space-y-3 max-w-lg animate-in fade-in-0 duration-200">
-                <textarea
-                  rows={3}
-                  placeholder="e.g. 12/45, Gandhi Street, Dharmapuri, Tamil Nadu - 636701"
-                  value={addressForm}
-                  onChange={(e) => setAddressForm(e.target.value)}
-                  className="w-full rounded-xl border border-gray-300 bg-transparent px-3.5 py-2.5 text-sm text-gray-900 focus:border-brand-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white resize-none"
-                />
-                <div className="flex items-center gap-3">
-                  <button
-                    type="submit"
-                    className="rounded-xl bg-brand-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
+          <div className="tqi-rise">
+            <SettingsRow
+              label="Mailing address"
+              hint="Optional"
+              action={
+                !isEditingAddress && profile.mailingAddress ? (
+                  <EditLink
+                    onClick={() => {
+                      setAddressForm(profile.mailingAddress);
+                      setIsEditingAddress(true);
+                    }}
+                    label="Edit"
+                  />
+                ) : undefined
+              }
+              divider={false}
+            >
+              {!isEditingAddress ? (
+                profile.mailingAddress ? (
+                  <span
+                    className="inline-flex items-start gap-2"
+                    style={{
+                      color: "var(--text)",
+                      fontSize: "0.9375rem",
+                      fontWeight: 500,
+                      whiteSpace: "pre-line",
+                      lineHeight: 1.5,
+                    }}
                   >
-                    Save Address
-                  </button>
+                    <MapPin
+                      size={14}
+                      weight="light"
+                      style={{
+                        color: "var(--text-muted)",
+                        marginTop: 3,
+                        flexShrink: 0,
+                      }}
+                    />
+                    {profile.mailingAddress}
+                  </span>
+                ) : (
                   <button
                     type="button"
-                    onClick={() => setIsEditingAddress(false)}
-                    className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
+                    onClick={() => {
+                      setAddressForm(profile.mailingAddress);
+                      setIsEditingAddress(true);
+                    }}
+                    className="tqi-btn-ghost"
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 8,
+                        padding: "0.5rem 0.75rem",
+                        borderRadius: 10,
+                        border: "1px dashed var(--border)",
+                        color: "var(--text-muted)",
+                        background: "transparent",
+                        fontSize: "0.875rem",
+                        fontWeight: 500,
+                        cursor: "pointer",
+                        transition: "all 0.18s var(--ease-out-expo)",
+                      }}
+                    >
+                      <Plus
+                        size={14}
+                        weight="light"
+                        style={{ color: "var(--brand)" }}
+                      />
+                      Add a mailing address
+                    </button>
+                  )
+              ) : (
+                <form
+                  onSubmit={handleSaveAddress}
+                  className="tqi-rise space-y-3 max-w-lg"
+                >
+                  <TextAreaField
+                    rows={3}
+                    placeholder="e.g. 12/45, Gandhi Street, Dharmapuri, Tamil Nadu - 636701"
+                    value={addressForm}
+                    onChange={(e) => setAddressForm(e.target.value)}
+                  />
+                  <div className="flex items-center gap-3">
+                    <button type="submit" className="tqi-btn-primary">
+                      Save address
+                    </button>
+                    <CancelLink onClick={() => setIsEditingAddress(false)} />
+                  </div>
+                </form>
+              )}
+            </SettingsRow>
           </div>
         </section>
       </div>

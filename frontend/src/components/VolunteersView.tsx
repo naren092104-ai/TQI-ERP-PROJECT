@@ -71,15 +71,106 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
   });
 
   const departmentOptions = [
-    "Computer Science and Engineering",
-    "Electronics and Communication Engineering",
-    "Mechanical Engineering",
-    "Information Technology",
-    "Electrical and Electronics Engineering",
-    "Civil Engineering",
-    "Biotechnology",
-    "Artificial Intelligence & Data Science",
-    "Arts & Science / Commerce",
+    '— Engineering —',
+    'Aerospace Engineering',
+    'Agricultural Engineering',
+    'Artificial Intelligence & Data Science',
+    'Artificial Intelligence & Machine Learning',
+    'Automobile Engineering',
+    'Biomedical Engineering',
+    'Biotechnology',
+    'Ceramic Engineering',
+    'Chemical Engineering',
+    'Civil Engineering',
+    'Computer Science and Engineering',
+    'Computer Science and Business Systems',
+    'Cyber Security',
+    'Electrical and Electronics Engineering',
+    'Electronics and Communication Engineering',
+    'Electronics and Computer Engineering',
+    'Electronics and Instrumentation Engineering',
+    'Environmental Engineering',
+    'Food Technology',
+    'Industrial Engineering',
+    'Information Science Engineering',
+    'Information Technology',
+    'Instrumentation and Control Engineering',
+    'Marine Engineering',
+    'Materials Science and Engineering',
+    'Mechanical Engineering',
+    'Mechatronics Engineering',
+    'Metallurgical Engineering',
+    'Mining Engineering',
+    'Nanotechnology',
+    'Petroleum Engineering',
+    'Plastic Engineering',
+    'Production Engineering',
+    'Robotics and Automation',
+    'Structural Engineering',
+    'Textile Engineering',
+    '— Arts & Science —',
+    'Bachelor of Arts (B.A.)',
+    'Bachelor of Science (B.Sc.)',
+    'Bachelor of Commerce (B.Com.)',
+    'Bachelor of Business Administration (BBA)',
+    'Bachelor of Computer Applications (BCA)',
+    'Bachelor of Social Work (BSW)',
+    'English Literature',
+    'Tamil Literature',
+    'History',
+    'Political Science',
+    'Economics',
+    'Philosophy',
+    'Sociology',
+    'Psychology',
+    'Public Administration',
+    'Mathematics',
+    'Physics',
+    'Chemistry',
+    'Botany',
+    'Zoology',
+    'Microbiology',
+    'Biotechnology',
+    'Biochemistry',
+    'Geology',
+    'Geography',
+    'Statistics',
+    'Computer Science',
+    'Information Technology',
+    'Electronics',
+    'Visual Communication',
+    'Journalism and Mass Communication',
+    'Hotel Management and Catering Technology',
+    'Tourism and Travel Management',
+    'Fashion Technology',
+    'Interior Design',
+    'Fine Arts',
+    'Music',
+    'Dance',
+    'Physical Education',
+    'Library and Information Science',
+    '— Commerce & Management —',
+    'Master of Commerce (M.Com.)',
+    'Master of Business Administration (MBA)',
+    'Master of Computer Applications (MCA)',
+    'Cost and Management Accounting',
+    'Banking and Finance',
+    '— Postgraduate (Engineering) —',
+    'M.E. Computer Science and Engineering',
+    'M.E. Communication Systems',
+    'M.E. Power Electronics and Drives',
+    'M.E. Structural Engineering',
+    'M.E. Thermal Engineering',
+    'M.E. Applied Electronics',
+    'M.Tech. Information Technology',
+    'M.Tech. Data Science',
+    'M.Tech. Artificial Intelligence',
+    '— Ph.D. —',
+    'Ph.D. (Engineering)',
+    'Ph.D. (Science)',
+    'Ph.D. (Arts)',
+    'Ph.D. (Commerce)',
+    'Ph.D. (Management)',
   ];
 
   const yearOptions = [
@@ -350,8 +441,8 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Departments</SelectItem>
-                {departmentOptions.map((dept) => (
-                  <SelectItem key={dept} value={dept}>
+                {departmentOptions.map((dept, idx) => (
+                  <SelectItem key={`${idx}-${dept}`} value={dept}>
                     {dept}
                   </SelectItem>
                 ))}
@@ -613,7 +704,7 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveVolunteer} className="mt-5 space-y-4 text-xs">
+            <form onSubmit={handleSaveVolunteer} className="mt-5 space-y-3 text-xs">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5">
                   Full Name *
@@ -677,12 +768,12 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
                     value={formData.department}
                     onValueChange={(val) => setFormData({ ...formData, department: val })}
                   >
-                    <SelectTrigger className="w-full h-10 text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800">
+                    <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
                       <SelectValue placeholder="Select Department" />
                     </SelectTrigger>
                     <SelectContent>
-                      {departmentOptions.map((dept) => (
-                        <SelectItem key={dept} value={dept}>
+                      {departmentOptions.map((dept, idx) => (
+                        <SelectItem key={`${idx}-${dept}`} value={dept}>
                           {dept}
                         </SelectItem>
                       ))}
@@ -698,7 +789,7 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
                     value={formData.year}
                     onValueChange={(val) => setFormData({ ...formData, year: val })}
                   >
-                    <SelectTrigger className="w-full h-10 text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800">
+                    <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
                       <SelectValue placeholder="Select Year" />
                     </SelectTrigger>
                     <SelectContent>
@@ -712,7 +803,7 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
                 </div>
               </div>
 
-              <div className="pt-4 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
+              <div className="pt-3 mt-1 border-t border-gray-100 dark:border-gray-800 flex justify-end gap-2.5">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}

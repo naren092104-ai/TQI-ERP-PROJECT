@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import { pool, initializeDatabase } from '../db/connection.js';
 
 async function runCleanReset() {
@@ -28,36 +29,37 @@ async function runCleanReset() {
       console.log(`[CLEAN-RESET] Applied ${files.length} migrations.`);
     }
 
-    // 2. Truncate ALL tables
+    // 2. Truncate ALL v2 tables.
+    //    Order: child-first to avoid any FK violation edge cases.
+    //    (FKs in v2 use sensible cascades, but TRUNCATE doesn't fire them —
+    //    so we drop children first to be safe.)
     console.log('[CLEAN-RESET] Disabling foreign keys and truncating all operational tables...');
     await pool.query('SET FOREIGN_KEY_CHECKS = 0');
 
     const tables = [
       'audit_logs',
       'auth_otps',
-      'student_attendance',
       'volunteer_attendance',
+      'student_attendance',
       'attendance_sessions',
-      'correction_requests',
       'approvals',
-      'finance_drafts',
-      'finance_entries',
       'notifications',
       'session_photos',
       'session_reports',
       'date_change_requests',
       'session_submissions',
       'lesson_plans',
+      'module_resources',
       'sessions',
+      'finance_entries',
       'students',
       'volunteers',
       'villages',
       'panchayats',
-      'clusters',
       'users',
+      'clusters',
       'academic_setup',
       'academic_years',
-      'module_resources',
       'modules',
     ];
 
@@ -72,22 +74,22 @@ async function runCleanReset() {
 
     await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 
-    // 3. Seed ONLY default Super Admin
-    const passwordHash = await bcrypt.hash('admin123', 10);
+    // 3. Seed ONLY the default Super Admin (random password).
+    const rawPassword = randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+    const passwordHash = await bcrypt.hash(rawPassword, 10);
     console.log('[CLEAN-RESET] Seeding ONLY Super Admin...');
     await pool.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES
-       ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE'),
-       ('usr-admin-alias', 'Super Admin', 'admin', ?, 'SUPER_ADMIN', NULL, '+91 90000 00000', FALSE, 'ACTIVE')
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), name = VALUES(name), role = VALUES(role), must_change_password = FALSE, status = 'ACTIVE'`,
-      [passwordHash, passwordHash],
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status)
+       VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', TRUE, 'Active')`,
+      [passwordHash],
     );
 
     console.log('\n======================================================');
     console.log('✅ CLEAN DATABASE RESET COMPLETED');
     console.log('------------------------------------------------------');
     console.log('All tables wiped. Only Super Admin preserved.');
-    console.log('Login: admin / admin123 (or admin@tqi.org / admin123)');
+    console.log(`Email    : admin@tqi.org`);
+    console.log(`Password : ${rawPassword}`);
     console.log('======================================================\n');
     process.exit(0);
   } catch (error: any) {

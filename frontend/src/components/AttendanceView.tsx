@@ -1,13 +1,10 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AttendanceSession, Student, Panchayat, TabType, AttendanceRecord } from '../types';
-import { Badge } from './ui/badge';
-import { Check, X, Calendar, MapPin, Sparkles, CheckCircle2 } from './ui/icons';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  AttendanceSession, Student, Panchayat, Cluster, TabType, AttendanceRecord,
+} from '../types';
+import { Check, X, Calendar, MapPin, CheckCircle2, ChevronRight, ArrowLeft, Users, Plus } from './ui/icons';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from './ui/select';
 import { ActionButton } from './ui/action-button';
 
@@ -15,8 +12,10 @@ interface AttendanceViewProps {
   attendanceSessions: AttendanceSession[];
   students: Student[];
   panchayats: Panchayat[];
+  clusters?: Cluster[];
+  userRole?: string;
   draftId?: string;
-  onNavigate: (tab: TabType) => void;
+  onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
   onSaveAttendance: (session: AttendanceSession) => void;
 }
 
@@ -24,53 +23,51 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   attendanceSessions,
   students,
   panchayats,
-  draftId,
+  clusters = [],
+  userRole = 'Cluster Admin',
+  onNavigate,
   onSaveAttendance,
 }) => {
-  // Step 1 & 2 selections
-  const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>(
-    panchayats[0]?.id || ''
+  const isSuperAdmin = userRole === 'Super Admin';
+
+  // Super Admin drills down: Cluster → Panchayat → Village
+  // Cluster Admin starts at Panchayat
+  const [selectedClusterId, setSelectedClusterId] = useState<string>(
+    isSuperAdmin ? (clusters[0]?.id || 'all') : 'my-cluster'
   );
+  const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('');
   const [selectedVillageId, setSelectedVillageId] = useState<string>('all');
 
-  // Synchronize selectedPanchayatId if panchayats array loads or updates
+  // Available panchayats filtered by cluster (Super Admin) or shown all (Cluster Admin)
+  const availablePanchayats = useMemo(() => {
+    if (!isSuperAdmin) return panchayats;
+    if (selectedClusterId === 'all') return panchayats;
+    return panchayats.filter((p) => {
+      const cid = (p as any).clusterId || p.cluster;
+      return !cid || cid === selectedClusterId;
+    });
+  }, [panchayats, selectedClusterId, isSuperAdmin]);
+
+  // Initialise panchayat when available list changes
   useEffect(() => {
-    if (panchayats.length > 0) {
-      const exists = panchayats.some((p) => p.id === selectedPanchayatId);
-      if (!exists) {
-        setSelectedPanchayatId(panchayats[0].id);
-      }
+    if (availablePanchayats.length > 0 && !availablePanchayats.some((p) => p.id === selectedPanchayatId)) {
+      setSelectedPanchayatId(availablePanchayats[0].id);
     }
-  }, [panchayats, selectedPanchayatId]);
+  }, [availablePanchayats, selectedPanchayatId]);
+
   const [selectedDay, setSelectedDay] = useState<number>(1);
-  const [sessionDate, setSessionDate] = useState<string>('2023-10-24');
-  const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Spoken English & Life Skills');
-  const [taskTopic, setTaskTopic] = useState<string>('Worksheet & Conversational Drill');
-  const [activeTab, setActiveTab] = useState<'mark' | 'history'>('mark');
+  const [sessionDate, setSessionDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Session');
+  const [taskTopic, setTaskTopic] = useState<string>('Worksheet & Activity');
+  const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecord>>({});
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
-  const [activeDraftSessionId, setActiveDraftSessionId] = useState<string | null>(draftId || null);
 
-  // Get current panchayat & its villages
-  const currentPanchayat = useMemo(() => {
-    return panchayats.find((p) => p.id === selectedPanchayatId) || panchayats[0];
-  }, [panchayats, selectedPanchayatId]);
+  const currentPanchayat = useMemo(
+    () => availablePanchayats.find((p) => p.id === selectedPanchayatId) || availablePanchayats[0],
+    [availablePanchayats, selectedPanchayatId]
+  );
+  const availableVillages = currentPanchayat?.villages || [];
 
-  const availableVillages = useMemo(() => {
-    return currentPanchayat?.villages || [];
-  }, [currentPanchayat]);
-
-  // When panchayat changes, auto-adjust village
-  const handlePanchayatChange = (panchayatId: string) => {
-    setSelectedPanchayatId(panchayatId);
-    const panch = panchayats.find((p) => p.id === panchayatId);
-    if (panch && panch.villages && panch.villages.length > 0) {
-      setSelectedVillageId(panch.villages[0].id);
-    } else {
-      setSelectedVillageId('all');
-    }
-  };
-
-  // Filter students based on Step 1 (Panchayat) and Step 2 (Village)
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
       const matchPanchayat = s.panchayatId === selectedPanchayatId;
@@ -79,32 +76,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   }, [students, selectedPanchayatId, selectedVillageId]);
 
-  // Student Attendance & Task records map state
-  const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecord>>({});
-
-  // Initialize records when students list or draft changes
+  // Re-seed records when the student set changes
   useEffect(() => {
-    if (draftId) {
-      const draft = attendanceSessions.find((s) => s.id === draftId);
-      if (draft) {
-        if (draft.panchayatId) setSelectedPanchayatId(draft.panchayatId);
-        if (draft.villageId) setSelectedVillageId(draft.villageId);
-        if (draft.dayNumber) setSelectedDay(draft.dayNumber);
-        if (draft.date) setSessionDate(draft.date);
-        if (draft.sessionName) setSessionTitle(draft.sessionName);
-        if (draft.taskTopic) setTaskTopic(draft.taskTopic);
-
-        const newMap: Record<string, AttendanceRecord> = {};
-        draft.records.forEach((rec) => {
-          newMap[rec.studentId] = rec;
-        });
-        setRecordsMap(newMap);
-        setActiveDraftSessionId(draft.id);
-        return;
-      }
-    }
-
-    // Default initialization for current filtered students
     setRecordsMap((prev) => {
       const updated: Record<string, AttendanceRecord> = { ...prev };
       filteredStudents.forEach((st) => {
@@ -124,21 +97,14 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       });
       return updated;
     });
-  }, [selectedPanchayatId, selectedVillageId, draftId, filteredStudents, taskTopic, attendanceSessions]);
+  }, [filteredStudents, taskTopic]);
 
-  // Toggle single student attendance status (Present / Absent / Late)
-  const handleToggleAttendance = (studentId: string, status: 'Present' | 'Absent' | 'Late') => {
+  const handleToggleAttendance = (studentId: string, status: 'Present' | 'Absent') => {
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
-        studentId,
-        studentName: students.find((s) => s.id === studentId)?.name || 'Student',
-        code: students.find((s) => s.id === studentId)?.code || '',
-        standard: students.find((s) => s.id === studentId)?.standard || '',
-        villageName: students.find((s) => s.id === studentId)?.villageName || '',
-        status: 'Present',
-        taskStatus: 'Completed',
+        studentId, studentName: '', code: '', standard: '', villageName: '',
+        status: 'Present', taskStatus: 'Completed',
       };
-
       return {
         ...prev,
         [studentId]: {
@@ -150,122 +116,66 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   };
 
-  // Toggle single student task status (Completed / Not Completed)
   const handleToggleTask = (studentId: string, taskStatus: 'Completed' | 'Not Completed') => {
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
-        studentId,
-        studentName: students.find((s) => s.id === studentId)?.name || 'Student',
-        code: students.find((s) => s.id === studentId)?.code || '',
-        standard: students.find((s) => s.id === studentId)?.standard || '',
-        villageName: students.find((s) => s.id === studentId)?.villageName || '',
-        status: 'Present',
-        taskStatus: 'Completed',
+        studentId, studentName: '', code: '', standard: '', villageName: '',
+        status: 'Present', taskStatus: 'Completed',
       };
-
-      return {
-        ...prev,
-        [studentId]: {
-          ...current,
-          taskStatus,
-        },
-      };
+      return { ...prev, [studentId]: { ...current, taskStatus } };
     });
   };
 
-  // Batch actions
-  const markAllAttendance = (status: 'Present' | 'Absent') => {
+  const markAll = (kind: 'attendance' | 'task', value: 'Present' | 'Absent' | 'Completed' | 'Not Completed') => {
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
         const existing = updated[st.id] || {
-          studentId: st.id,
-          studentName: st.name,
-          code: st.code,
-          standard: st.standard,
-          villageName: st.villageName,
-          status: 'Present',
-          taskStatus: 'Completed',
+          studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
+          villageName: st.villageName, status: 'Present', taskStatus: 'Completed',
         };
-        updated[st.id] = {
-          ...existing,
-          status,
-          taskStatus: status === 'Absent' ? 'Not Completed' : existing.taskStatus || 'Completed',
-        };
+        if (kind === 'attendance') {
+          updated[st.id] = {
+            ...existing,
+            status: value as any,
+            taskStatus: value === 'Absent' ? 'Not Completed' : existing.taskStatus || 'Completed',
+          };
+        } else {
+          updated[st.id] = { ...existing, taskStatus: value as any };
+        }
       });
       return updated;
     });
   };
 
-  const markAllTasks = (taskStatus: 'Completed' | 'Not Completed') => {
-    setRecordsMap((prev) => {
-      const updated = { ...prev };
-      filteredStudents.forEach((st) => {
-        const existing = updated[st.id] || {
-          studentId: st.id,
-          studentName: st.name,
-          code: st.code,
-          standard: st.standard,
-          villageName: st.villageName,
-          status: 'Present',
-          taskStatus: 'Completed',
-        };
-        updated[st.id] = {
-          ...existing,
-          taskStatus,
-        };
-      });
-      return updated;
-    });
-  };
-
-  // Metric computations
-  const currentRecordsList: AttendanceRecord[] = useMemo(() => {
-    return filteredStudents.map((st) => {
-      const record = recordsMap[st.id];
-      if (record) return record;
-      return {
-        studentId: st.id,
-        studentName: st.name,
-        code: st.code,
-        standard: st.standard,
-        villageName: st.villageName,
-        status: 'Present' as const,
-        taskStatus: 'Completed' as const,
-        taskTitle: taskTopic,
-        remarks: '',
-      };
-    });
-  }, [filteredStudents, recordsMap, taskTopic]);
-
-  const presentCount = useMemo(
-    () => currentRecordsList.filter((r) => r.status === 'Present' || r.status === 'Late').length,
-    [currentRecordsList]
-  );
-  const absentCount = useMemo(
-    () => currentRecordsList.filter((r) => r.status === 'Absent').length,
-    [currentRecordsList]
-  );
-  const tasksCompletedCount = useMemo(
-    () => currentRecordsList.filter((r) => r.taskStatus === 'Completed').length,
-    [currentRecordsList]
+  const currentRecordsList: AttendanceRecord[] = useMemo(
+    () => filteredStudents.map((st) =>
+      recordsMap[st.id] || {
+        studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
+        villageName: st.villageName, status: 'Present' as const, taskStatus: 'Completed' as const,
+        taskTitle: taskTopic, remarks: '',
+      }
+    ),
+    [filteredStudents, recordsMap, taskTopic]
   );
 
-  const selectedVillageName = useMemo(() => {
-    if (selectedVillageId === 'all') return 'All Villages';
-    return availableVillages.find((v) => v.id === selectedVillageId)?.name || 'Village';
-  }, [selectedVillageId, availableVillages]);
+  const presentCount = currentRecordsList.filter((r) => r.status === 'Present' || r.status === 'Late').length;
+  const absentCount  = currentRecordsList.filter((r) => r.status === 'Absent').length;
+  const tasksDone    = currentRecordsList.filter((r) => r.taskStatus === 'Completed').length;
 
-  // Save / Submit handler
-  const handleSaveAttendanceSession = (isFinalSubmit: boolean) => {
+  const selectedVillageName =
+    selectedVillageId === 'all'
+      ? 'All Villages'
+      : availableVillages.find((v) => v.id === selectedVillageId)?.name || 'Village';
+
+  const handleSave = (isFinal: boolean) => {
     if (filteredStudents.length === 0) {
-      alert('No students found for this Panchayat and Village. Please add students first.');
+      setSaveSuccessMsg('No students in this selection. Add students first.');
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
       return;
     }
-
-    const sessionIdToSave = activeDraftSessionId || `att-${Date.now()}`;
     const newSession: AttendanceSession = {
-      id: sessionIdToSave,
+      id: `att-${Date.now()}`,
       sessionId: `ses-day${selectedDay}`,
       sessionName: sessionTitle || `Day ${selectedDay} Session`,
       panchayatId: selectedPanchayatId,
@@ -279,556 +189,336 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       totalCount: filteredStudents.length,
       presentCount,
       absentCount,
-      tasksCompletedCount,
-      status: isFinalSubmit ? 'Submitted' : 'Draft',
-      lastSaved: isFinalSubmit ? 'Submitted just now' : 'Saved just now',
+      tasksCompletedCount: tasksDone,
+      status: isFinal ? 'Submitted' : 'Draft',
+      lastSaved: isFinal ? 'Submitted just now' : 'Saved just now',
       records: currentRecordsList,
     };
-
     onSaveAttendance(newSession);
-    setActiveDraftSessionId(sessionIdToSave);
-    setSaveSuccessMsg(
-      isFinalSubmit
-        ? `Day ${selectedDay} Attendance & Task records submitted successfully for ${currentPanchayat?.name || 'Panchayat'} (${selectedVillageName})!`
-        : `Day ${selectedDay} Attendance Draft saved successfully!`
-    );
-    setTimeout(() => setSaveSuccessMsg(''), 4500);
+    setSaveSuccessMsg(isFinal ? `Submitted Day ${selectedDay} attendance.` : `Saved Day ${selectedDay} draft.`);
+    setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
+  // ─── Super Admin: cluster landing ────────────────────────────────────────
+  if (isSuperAdmin && clusters.length > 0 && selectedClusterId === '__select__') {
+    return (
+      <div className="w-full space-y-6">
+        <div>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Attendance</h1>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Choose a cluster to view its attendance records.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {clusters.map((cluster) => {
+            const clusterPanchayats = panchayats.filter((p) => {
+              const cid = (p as any).clusterId || p.cluster;
+              return !cid || cid === cluster.id;
+            });
+            const totalStudents = clusterPanchayats.reduce((acc, p) => acc + (p.activeStudents || 0), 0);
+            return (
+              <button
+                key={cluster.id}
+                type="button"
+                onClick={() => {
+                  setSelectedClusterId(cluster.id);
+                  setSelectedPanchayatId('');
+                }}
+                className="group rounded-xl border border-gray-200 bg-white p-5 text-left transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-[0_4px_24px_-12px_rgba(0,0,0,0.08)] dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <h3 className="text-base font-semibold text-gray-900 dark:text-white truncate group-hover:text-brand-600">
+                      {cluster.collegeName || cluster.name}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                      {cluster.district}, Tamil Nadu
+                    </p>
+                  </div>
+                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" />
+                </div>
+                <div className="mt-4 flex items-center gap-4 border-t border-gray-100 pt-3 text-xs dark:border-gray-800">
+                  <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                    <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                    <span>{clusterPanchayats.length} panchayats</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
+                    <Users className="h-3.5 w-3.5 text-gray-400" />
+                    <span>{totalStudents} students</span>
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Main attendance marking view ────────────────────────────────────────
   return (
     <div className="w-full space-y-6">
-      {/* 1. Cardless Page Header */}
+      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
+            {isSuperAdmin && clusters.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedClusterId('__select__')}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5"
+                aria-label="Back to clusters"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+            )}
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Attendance &amp; Task Entry
+              Attendance
             </h1>
-            <Badge color="primary" size="sm">
-              Day {selectedDay}
-            </Badge>
           </div>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Step 1: Select Panchayat &rarr; Step 2: Select Village &rarr; Step 3: Mark Present/Absent &amp; Tasks.
+            {currentPanchayat?.name || 'Panchayat'} · {selectedVillageName}
           </p>
-        </div>
-
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <button
-            type="button"
-            onClick={() => setActiveTab('mark')}
-            className={`rounded-xl px-4 py-2.5 text-xs font-semibold transition shadow-theme-xs ${
-              activeTab === 'mark'
-                ? 'bg-brand-500 text-white'
-                : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5'
-            }`}
-          >
-            Mark Attendance &amp; Tasks
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('history')}
-            className={`rounded-xl px-4 py-2.5 text-xs font-semibold transition shadow-theme-xs ${
-              activeTab === 'history'
-                ? 'bg-brand-500 text-white'
-                : 'border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5'
-            }`}
-          >
-            History ({attendanceSessions.length})
-          </button>
         </div>
       </div>
 
       {saveSuccessMsg && (
-        <div className="rounded-xl border border-success-200 bg-success-50 p-4 text-xs font-medium text-success-600 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 flex items-center justify-between">
-          <span>{saveSuccessMsg}</span>
-          <button
-            type="button"
-            onClick={() => setSaveSuccessMsg('')}
-            className="text-success-600 hover:text-success-800 dark:text-success-400"
-          >
-            <span className="material-symbols-outlined text-[16px]">close</span>
-          </button>
+        <div className="rounded-lg border border-success-200 bg-success-50 px-4 py-2.5 text-xs text-success-700 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-300">
+          {saveSuccessMsg}
         </div>
       )}
 
-      {activeTab === 'mark' ? (
-        <div className="space-y-6">
-          {/* STEP SELECTORS BAR - Cardless Flat Styling */}
-          <div className="space-y-4 pb-2 border-b border-gray-100 dark:border-gray-800">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {/* STEP 1: PANCHAYAT SELECTION */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-brand-500" />
-                  1. Panchayat
-                </label>
-                <Select
-                  value={selectedPanchayatId}
-                  onValueChange={(val) => handlePanchayatChange(val)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select Panchayat" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {panchayats.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name} Panchayat ({p.activeStudents} students)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* STEP 2: VILLAGE SELECTION */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-brand-500" />
-                  2. Village / Center
-                </label>
-                <Select
-                  value={selectedVillageId}
-                  onValueChange={(val) => setSelectedVillageId(val)}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select Village" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Villages ({currentPanchayat?.name || 'Cluster'})</SelectItem>
-                    {availableVillages.map((v) => (
-                      <SelectItem key={v.id} value={v.id}>
-                        {v.name} ({v.studentCount} students)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* STEP 3: SESSION DATE & DAY */}
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
-                  <Calendar className="w-3.5 h-3.5 text-brand-500" />
-                  3. Date &amp; Day
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="date"
-                    value={sessionDate}
-                    onChange={(e) => setSessionDate(e.target.value)}
-                    disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                    className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white disabled:opacity-50"
-                  />
-                  <div className="w-28">
-                    <Select
-                      value={String(selectedDay)}
-                      onValueChange={(val) => setSelectedDay(parseInt(val) || 1)}
-                      disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                    >
-                      <SelectTrigger className="w-full text-brand-500 font-bold disabled:opacity-50">
-                        <SelectValue placeholder="Day" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
-                          <SelectItem key={d} value={String(d)}>
-                            Day {d}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
+      {/* Empty state: no students in selection */}
+      {filteredStudents.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center dark:border-gray-800 dark:bg-white/[0.02]">
+          <Users className="mx-auto h-10 w-10 text-gray-300 dark:text-gray-600" />
+          <h3 className="mt-3 text-sm font-semibold text-gray-800 dark:text-white">No students in this panchayat yet</h3>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            Add students to {currentPanchayat?.name || 'this panchayat'} before marking attendance.
+          </p>
+          <button
+            type="button"
+            onClick={() => onNavigate('students', currentPanchayat?.id, undefined)}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 py-2 text-xs font-medium text-white hover:bg-brand-600 transition"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add students
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Slim step bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Panchayat</label>
+              <Select
+                value={selectedPanchayatId}
+                onValueChange={(val) => {
+                  setSelectedPanchayatId(val);
+                  const panch = availablePanchayats.find((p) => p.id === val);
+                  setSelectedVillageId(panch?.villages?.[0]?.id || 'all');
+                }}
+              >
+                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                  <SelectValue placeholder="Select panchayat" />
+                </SelectTrigger>
+                <SelectContent>
+                  {availablePanchayats.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
-            {/* Edit Lock Messages */}
-            {(() => {
-              const activeSession = attendanceSessions.find(s => s.id === activeDraftSessionId);
-              if (activeSession && ['Submitted', 'Approved', 'Completed'].includes(activeSession.status)) {
-                return (
-                  <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex items-center gap-2 text-sm text-gray-700">
-                    <CheckCircle2 className="w-5 h-5 text-success-500" />
-                    <span>This attendance has been {activeSession.status.toLowerCase()} and cannot be edited.</span>
-                  </div>
-                );
-              }
-              if (activeSession && activeSession.status === 'Correction Requested') {
-                return (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center gap-2 text-sm text-amber-800">
-                    <span className="material-symbols-outlined text-[20px] text-amber-600">warning</span>
-                    <span>Correction Requested: {activeSession.correctionReason || 'Please review and resubmit.'}</span>
-                  </div>
-                );
-              }
-              return null;
-            })()}
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Village</label>
+              <Select value={selectedVillageId} onValueChange={setSelectedVillageId}>
+                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                  <SelectValue placeholder="All villages" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Villages</SelectItem>
+                  {availableVillages.map((v) => (
+                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-            {/* Task / Activity Topic setup */}
-            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex-1 flex items-center gap-2">
-                <span className="text-xs font-semibold text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                  Today&apos;s Topic:
-                </span>
-                <input
-                  type="text"
-                  placeholder="e.g., Phonics Worksheet & Speaking Practice"
-                  value={taskTopic}
-                  onChange={(e) => setTaskTopic(e.target.value)}
-                  className="flex-1 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-800 shadow-theme-xs focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-                />
-              </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Date</label>
+              <input
+                type="date"
+                value={sessionDate}
+                onChange={(e) => setSessionDate(e.target.value)}
+                className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+              />
+            </div>
 
-              {/* Day Quick Selectors */}
-              <div className="flex items-center gap-1 overflow-x-auto">
-                {[1, 2, 3, 4, 5, 6].map((day) => (
-                  <button
-                    key={day}
-                    type="button"
-                    onClick={() => setSelectedDay(day)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      selectedDay === day
-                        ? 'bg-brand-500 text-white shadow-theme-xs'
-                        : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Day</label>
+              <Select value={String(selectedDay)} onValueChange={(v) => setSelectedDay(Number(v) || 1)}>
+                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                  <SelectValue placeholder="Day" />
+                </SelectTrigger>
+                <SelectContent>
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                    <SelectItem key={d} value={String(d)}>Day {d}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Topic + quick batch */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <input
+              type="text"
+              placeholder="Today's topic"
+              value={taskTopic}
+              onChange={(e) => setTaskTopic(e.target.value)}
+              className="flex-1 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-xs text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            />
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button type="button" onClick={() => markAll('attendance', 'Present')} className="rounded-md border border-success-200 bg-success-50 px-2.5 py-1 text-xs font-medium text-success-700 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-300">
+                <Check className="inline h-3 w-3" /> All present
+              </button>
+              <button type="button" onClick={() => markAll('attendance', 'Absent')} className="rounded-md border border-error-200 bg-error-50 px-2.5 py-1 text-xs font-medium text-error-700 hover:bg-error-100 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-300">
+                <X className="inline h-3 w-3" /> All absent
+              </button>
+              <button type="button" onClick={() => markAll('task', 'Completed')} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                Tasks done
+              </button>
+              <button type="button" onClick={() => markAll('task', 'Not Completed')} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                Tasks pending
+              </button>
+            </div>
+          </div>
+
+          {/* Single-row stats */}
+          <div className="grid grid-cols-4 divide-x divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-800 dark:border-gray-800 dark:bg-white/[0.02]">
+            <div className="px-4 py-3 text-center">
+              <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{filteredStudents.length}</div>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Enrolled</div>
+            </div>
+            <div className="px-4 py-3 text-center">
+              <div className="text-base font-semibold tabular-nums text-success-600 dark:text-success-400">{presentCount}</div>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Present</div>
+            </div>
+            <div className="px-4 py-3 text-center">
+              <div className="text-base font-semibold tabular-nums text-error-600 dark:text-error-400">{absentCount}</div>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Absent</div>
+            </div>
+            <div className="px-4 py-3 text-center">
+              <div className="text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">{tasksDone}</div>
+              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Tasks done</div>
+            </div>
+          </div>
+
+          {/* Student list */}
+          <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]">
+            <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
+              Student Roster · Day {selectedDay}
+            </div>
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {filteredStudents.map((st) => {
+                const record = recordsMap[st.id] || {
+                  studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
+                  villageName: st.villageName, status: 'Present' as const, taskStatus: 'Completed' as const,
+                };
+                const isPresent = record.status === 'Present';
+                const isAbsent  = record.status === 'Absent';
+                const isTaskDone = record.taskStatus === 'Completed';
+                return (
+                  <div
+                    key={st.id}
+                    className={`flex items-center justify-between gap-3 px-4 py-2.5 transition-colors ${
+                      isAbsent ? 'bg-error-50/30 dark:bg-error-950/10' : 'hover:bg-gray-50/60 dark:hover:bg-white/[0.02]'
                     }`}
                   >
-                    Day {day}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 2. Compact Metric Cards (counts & status only) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Enrolled</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{filteredStudents.length}</div>
-              <p className="mt-1 text-xs text-gray-400 truncate">
-                {currentPanchayat?.name || 'Panchayat'} &middot; {selectedVillageName}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-success-500">Present</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{presentCount}</div>
-              <p className="mt-1 text-xs font-medium text-success-500">
-                {filteredStudents.length > 0
-                  ? `${Math.round((presentCount / filteredStudents.length) * 100)}% Attendance`
-                  : '0%'}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-error-500">Absent</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{absentCount}</div>
-              <p className="mt-1 text-xs font-medium text-error-500">
-                {filteredStudents.length > 0
-                  ? `${Math.round((absentCount / filteredStudents.length) * 100)}% Absent`
-                  : '0%'}
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-warning-500">Tasks Completed</div>
-              <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{tasksCompletedCount}</div>
-              <p className="mt-1 text-xs font-medium text-warning-500">
-                {filteredStudents.length > 0
-                  ? `${Math.round((tasksCompletedCount / filteredStudents.length) * 100)}% Tasks Done`
-                  : '0%'}
-              </p>
-            </div>
-          </div>
-
-          {/* 3. Cardless Batch Action Toolbar with Lucide Icons */}
-          <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Attendance:</span>
-              <button
-                type="button"
-                onClick={() => markAllAttendance('Present')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-600 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>All Present</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => markAllAttendance('Absent')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-error-200 bg-error-50 px-3 py-1.5 text-xs font-semibold text-error-600 hover:bg-error-100 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <X className="w-3.5 h-3.5" />
-                <span>All Absent</span>
-              </button>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">Tasks:</span>
-              <button
-                type="button"
-                onClick={() => markAllTasks('Completed')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-success-200 bg-success-50 px-3 py-1.5 text-xs font-semibold text-success-600 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>All Tasks Done</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => markAllTasks('Not Completed')}
-                disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <span>Reset Tasks</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 4. Student Attendance Roster (Cardless list) */}
-          <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-            <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-              <span>
-                Student Roster ({filteredStudents.length} Enrolled)
-              </span>
-              <span className="text-[11px] lowercase font-normal">Attendance &amp; Task status</span>
-            </div>
-
-            {filteredStudents.length === 0 ? (
-              <div className="p-12 text-center text-gray-400 text-xs">
-                No students found in this selection.
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                {filteredStudents.map((st) => {
-                  const record = recordsMap[st.id] || {
-                    studentId: st.id,
-                    studentName: st.name,
-                    code: st.code,
-                    standard: st.standard,
-                    villageName: st.villageName,
-                    status: 'Present',
-                    taskStatus: 'Completed',
-                    taskTitle: taskTopic,
-                    remarks: '',
-                  };
-
-                  const isPresent = record.status === 'Present';
-                  const isAbsent = record.status === 'Absent';
-                  const isTaskCompleted = record.taskStatus === 'Completed';
-
-                  return (
-                    <div
-                      key={st.id}
-                      className={`p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-colors ${
-                        isAbsent ? 'bg-error-50/20 dark:bg-error-950/10' : 'hover:bg-gray-50/80 dark:hover:bg-white/[0.02]'
-                      }`}
-                    >
-                      {/* Student Info */}
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-full bg-brand-50 text-brand-500 flex items-center justify-center font-bold text-xs shrink-0 dark:bg-brand-500/10 dark:text-brand-400"
-                        >
-                          {st.avatarLetter || st.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h4 className="text-xs font-bold text-gray-900 dark:text-white">{st.name}</h4>
-                            <span className="font-mono text-[10px] text-gray-400">
-                              {st.code}
-                            </span>
-                          </div>
-                          <p className="text-[11px] text-gray-400 mt-0.5">
-                            Std {st.standard} &middot; {st.villageName} &middot; Parent: {st.parentName || '—'}
-                          </p>
-                        </div>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
+                        {st.avatarLetter || st.name.charAt(0)}
                       </div>
-
-                      {/* Attendance Toggle Buttons & Task Status */}
-                      <div className="flex flex-wrap items-center gap-3 self-start sm:self-center">
+                      <div className="min-w-0">
                         <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAttendance(st.id, 'Present')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isPresent
-                                ? 'bg-success-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Present
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleAttendance(st.id, 'Absent')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isAbsent
-                                ? 'bg-error-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Absent
-                          </button>
+                          <span className="truncate text-xs font-semibold text-gray-900 dark:text-white">{st.name}</span>
+                          <span className="font-mono text-[10px] text-gray-400">{st.code}</span>
                         </div>
-
-                        <div className="border-l border-gray-200 pl-3 dark:border-gray-800 flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTask(st.id, 'Completed')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              isTaskCompleted
-                                ? 'bg-brand-500 text-white shadow-theme-xs'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Task Done
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleToggleTask(st.id, 'Not Completed')}
-                            disabled={['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '')}
-                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed ${
-                              !isTaskCompleted
-                                ? 'bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-white'
-                                : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                            }`}
-                          >
-                            Pending
-                          </button>
+                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
+                          Std {st.standard} · {st.villageName}
                         </div>
                       </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* ACTION BUTTONS (SAVE DRAFT & SUBMIT) */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-            <div className="text-xs text-gray-500 dark:text-gray-400">
-              <span className="font-semibold text-gray-900 dark:text-white">Day {selectedDay}:</span>{' '}
-              {presentCount} Present &middot; {absentCount} Absent &middot; {tasksCompletedCount} Tasks Done
-            </div>
-
-            {!['Submitted', 'Approved', 'Completed'].includes(attendanceSessions.find(s => s.id === activeDraftSessionId)?.status || '') && (
-              <div className="flex items-center gap-2.5 w-full sm:w-auto justify-end">
-                <button
-                  type="button"
-                  onClick={() => handleSaveAttendanceSession(false)}
-                  className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-                >
-                  Save as Draft
-                </button>
-                <ActionButton
-                  onClick={() => handleSaveAttendanceSession(true)}
-                  size="sm"
-                  variant="primary"
-                >
-                  Submit Attendance &amp; Tasks
-                </ActionButton>
-              </div>
-            )}
-          </div>
-        </div>
-      ) : (
-        /* SESSION HISTORY TAB */
-        <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="px-5 py-3.5 border-b border-gray-100 dark:border-gray-800 flex justify-between items-center">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-white">
-              Past Recorded Attendance &amp; Task Sessions
-            </h3>
-            <span className="text-xs font-medium text-gray-400">
-              {attendanceSessions.length} Sessions Logged
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="tqi-table-compact w-full text-left border-collapse">
-              <thead className="border-b border-gray-100 bg-gray-50/50 text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:border-gray-800 dark:bg-white/[0.02] dark:text-gray-400">
-                <tr>
-                  <th className="px-5 py-3.5">Session &amp; Day</th>
-                  <th className="px-5 py-3.5">Panchayat &amp; Village</th>
-                  <th className="px-5 py-3.5">Date</th>
-                  <th className="px-5 py-3.5">Attendance</th>
-                  <th className="px-5 py-3.5">Tasks Done</th>
-                  <th className="px-5 py-3.5">Status</th>
-                  <th className="px-5 py-3.5 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
-                {attendanceSessions.map((session) => (
-                  <tr key={session.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
-                    <td className="px-5 py-3.5 font-bold text-gray-900 dark:text-white">
-                      {session.day || `Day ${session.dayNumber}`}
-                      <span className="block text-[11px] font-normal text-gray-400">
-                        {session.sessionName}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-700 dark:text-gray-300">
-                      <span className="font-semibold text-gray-900 dark:text-white">{session.panchayatName}</span>
-                      <span className="block text-[11px] text-gray-400">
-                        {session.villageName}
-                      </span>
-                    </td>
-                    <td className="px-5 py-3.5 text-gray-500 dark:text-gray-400 font-mono">{session.date}</td>
-                    <td className="px-5 py-3.5">
-                      <span className="font-bold text-success-500">{session.presentCount || 0}</span> /{' '}
-                      <span className="text-gray-500">{session.totalCount || session.records.length}</span>
-                    </td>
-                    <td className="px-5 py-3.5 font-bold text-warning-500">
-                      {session.tasksCompletedCount ??
-                        session.records.filter((r) => r.taskStatus === 'Completed').length}{' '}
-                      / {session.records.length}
-                    </td>
-                    <td className="px-5 py-3.5">
-                      <Badge
-                        color={
-                          session.status === 'Submitted'
-                            ? 'success'
-                            : session.status === 'Correction Requested'
-                            ? 'error'
-                            : 'primary'
-                        }
-                        size="sm"
-                      >
-                        {session.status}
-                      </Badge>
-                    </td>
-                    <td className="px-5 py-3.5 text-right">
+                    <div className="flex items-center gap-1.5 shrink-0">
                       <button
                         type="button"
-                        onClick={() => {
-                          if (session.panchayatId) setSelectedPanchayatId(session.panchayatId);
-                          if (session.villageId) setSelectedVillageId(session.villageId);
-                          if (session.dayNumber) setSelectedDay(session.dayNumber);
-                          if (session.date) setSessionDate(session.date);
-                          if (session.sessionName) setSessionTitle(session.sessionName);
-                          if (session.taskTopic) setTaskTopic(session.taskTopic);
-
-                          const map: Record<string, AttendanceRecord> = {};
-                          session.records.forEach((r) => {
-                            map[r.studentId] = r;
-                          });
-                          setRecordsMap(map);
-                          setActiveDraftSessionId(session.id);
-                          setActiveTab('mark');
-                        }}
-                        className="text-xs font-bold text-brand-500 hover:text-brand-600 transition"
+                        onClick={() => handleToggleAttendance(st.id, 'Present')}
+                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
+                          isPresent
+                            ? 'bg-success-500 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
                       >
-                        {session.status === 'Draft' || session.status === 'Correction Requested'
-                          ? 'Continue Entry →'
-                          : 'View / Edit →'}
+                        Present
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAttendance(st.id, 'Absent')}
+                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
+                          isAbsent
+                            ? 'bg-error-500 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
+                      >
+                        Absent
+                      </button>
+                      <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-gray-700" />
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTask(st.id, 'Completed')}
+                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
+                          isTaskDone
+                            ? 'bg-brand-500 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
+                      >
+                        Done
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleTask(st.id, 'Not Completed')}
+                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
+                          !isTaskDone
+                            ? 'bg-gray-700 text-white'
+                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
+                        }`}
+                      >
+                        Pending
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+
+          {/* Action footer */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => handleSave(false)}
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition"
+            >
+              Save draft
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSave(true)}
+              className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-medium text-white hover:bg-brand-600 transition"
+            >
+              Submit attendance
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

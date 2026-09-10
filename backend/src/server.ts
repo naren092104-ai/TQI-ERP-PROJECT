@@ -10,6 +10,7 @@ import cors from 'cors';
 import { sendLoginOtp, sendOnboardingCredentialsEmail } from './authMailer.js';
 import * as archiverModule from 'archiver';
 import { pool, getDatabaseStatus, initializeDatabase } from './db/connection.js';
+import { initDatabaseSchema } from './db/init.js';
 
 dotenv.config();
 dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') });
@@ -30,21 +31,24 @@ app.use(cors({
 }));
 
 
+// DB now stores Title-case roles and statuses directly. These helpers are
+// pass-throughs preserved so callers don't have to change, but they are
+// identity functions.
 const normalizeRole = (role: string | null | undefined): 'Super Admin' | 'Cluster Admin' =>
-  role === 'SUPER_ADMIN' ? 'Super Admin' : 'Cluster Admin';
+  (role === 'Super Admin' || role === 'Cluster Admin') ? role : 'Cluster Admin';
 
-const toDbRole = (role: string): 'SUPER_ADMIN' | 'CLUSTER_ADMIN' =>
-  role === 'Super Admin' ? 'SUPER_ADMIN' : 'CLUSTER_ADMIN';
+const toDbRole = (role: string): 'Super Admin' | 'Cluster Admin' =>
+  (role === 'Super Admin' || role === 'Cluster Admin') ? role : 'Cluster Admin';
 
 const serializeUser = (row: any) => ({
   id: row.id,
   name: row.name,
   email: row.email,
-  role: normalizeRole(row.role),
+  role: row.role,
   clusterId: row.cluster_id || 'all',
   clusterName: row.cluster_id ? `${row.cluster_id} Cluster` : 'All Clusters',
   phone: row.phone || '',
-  status: row.status === 'ACTIVE' ? 'Active' : 'Inactive',
+  status: row.status,
   mustChangePassword: Boolean(row.must_change_password),
 });
 
@@ -168,6 +172,7 @@ const runSqlFiles = async () => {
       .map((statement) => statement.trim())
       .filter(Boolean);
 
+    let hadFatalError = false;
     for (const statement of statements) {
       if (!statement) continue;
       try {
@@ -175,8 +180,15 @@ const runSqlFiles = async () => {
       } catch (error: any) {
         if (!['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY', 'ER_KEY_COLUMN_DOES_NOT_EXITS', 'ER_DUP_ENTRY'].includes(error?.code)) {
           console.warn(`[DB MIGRATION WARNING] in ${file}:`, error.message);
+          hadFatalError = true;
         }
       }
+    }
+    // Only record the migration as applied if every statement succeeded.
+    // Otherwise leave the row out so a corrected file gets retried next boot.
+    if (hadFatalError) {
+      console.error(`[DB MIGRATION FAILED] ${file} — leaving unrecorded, will retry next start.`);
+      continue;
     }
     await pool.query('INSERT IGNORE INTO schema_migrations (version) VALUES (?)', [file]);
     console.log(`[DB] Applied migration: ${file}`);
@@ -194,6 +206,18 @@ const ensureAcademicSetupTable = async () => {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `);
+  // Self-heal: some earlier deployments marked 212_academic_setup_session_date.sql
+  // as applied even though the column was never created (the file used
+  // PostgreSQL-only `IF NOT EXISTS` syntax). Adding the column here is idempotent
+  // — ER_DUP_FIELDNAME (1060) is harmless — so a fresh start always leaves the
+  // table in the expected shape regardless of migration history.
+  await pool.query(
+    `ALTER TABLE academic_setup ADD COLUMN session_date DATE NULL AFTER session_name`
+  ).catch((error: any) => {
+    if (error?.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('[DB] ensureAcademicSetupTable: failed to add session_date:', error.message);
+    }
+  });
 };
 
 const buildWhereClause = (user: any, extra = '') => {
@@ -214,7 +238,7 @@ const mapCluster = (row: any) => ({
   adminName: row.admin_name || '',
   adminEmail: row.admin_email || '',
   adminPhone: row.admin_phone || row.spoc_mobile || '',
-  status: row.status === 'ACTIVE' ? 'Active' : 'Inactive',
+  status: row.status,
   completedSessions: 0,
   totalSessions: 0,
   collegeName: row.college_name || '',
@@ -424,14 +448,17 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE email = ? OR name = ? OR id = ? LIMIT 1', [email, email, email]);
+    // Security: only match by email. The legacy name/id fallback was a hole
+    // (a Super Admin alias row with email='admin' made name-based login a
+    // bypass).
+    const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
 
     if (!rows.length) {
       res.status(401).json({ success: false, error: 'Invalid credentials.' });
       return;
     }
 
-    if (rows[0].status !== 'ACTIVE') {
+    if (rows[0].status !== 'Active') {
       res.status(403).json({ success: false, error: 'This user account is inactive.' });
       return;
     }
@@ -583,8 +610,13 @@ app.put('/api/modules/:id/academic-setup', requireAuth, async (req: Authenticate
 app.get('/api/academic-setup', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
     await ensureAcademicSetupTable();
-    const [rows] = await pool.query<any[]>('SELECT day_number, academic_year, session_name FROM academic_setup ORDER BY day_number ASC');
-    res.json({ success: true, setup: rows });
+    const [rows] = await pool.query<any[]>('SELECT day_number, academic_year, session_name, session_date FROM academic_setup ORDER BY day_number ASC');
+    res.json({ success: true, setup: rows.map((row: any) => ({
+      day_number: row.day_number,
+      academic_year: row.academic_year,
+      session_name: row.session_name,
+      session_date: row.session_date ? new Date(row.session_date).toISOString().slice(0, 10) : null,
+    })) });
   } catch (error) {
     console.error('Failed to load academic setup:', error);
     res.status(503).json({ success: false, error: 'Unable to load academic setup.' });
@@ -599,7 +631,9 @@ app.put('/api/academic-setup', requireAuth, async (req: AuthenticatedRequest, re
 
   const academicYear = String(req.body.academicYear || '').trim();
   const days = Array.isArray(req.body.days) ? req.body.days : [];
-  if (!/^\d{4}-\d{4}$/.test(academicYear) || days.length !== 8 || days.some((day: any) => !Number.isInteger(Number(day.dayNumber)) || Number(day.dayNumber) < 1 || Number(day.dayNumber) > 8)) {
+  if (!/^\d{4}-\d{4}$/.test(academicYear) ||
+      days.length < 1 || days.length > 8 ||
+      days.some((day: any) => !Number.isInteger(Number(day.dayNumber)) || Number(day.dayNumber) < 1 || Number(day.dayNumber) > 8)) {
     res.status(400).json({ success: false, error: 'Academic year or session days are invalid.' });
     return;
   }
@@ -607,10 +641,34 @@ app.put('/api/academic-setup', requireAuth, async (req: AuthenticatedRequest, re
   try {
     await ensureAcademicSetupTable();
     await pool.query('START TRANSACTION');
+    // First, clear any previously stored day numbers that are no longer in the
+    // submitted set (e.g. the Super Admin removed a day from the UI).
+    const submittedDayNumbers = days.map((day: any) => Number(day.dayNumber));
+    await pool.query(
+      'DELETE FROM academic_setup WHERE day_number NOT IN (?)',
+      [submittedDayNumbers],
+    );
+
     for (const day of days) {
+      // Accept dates in YYYY-MM-DD (HTML <input type="date">) or DD-MM-YY.
+      const rawDate = day.sessionDate ? String(day.sessionDate).trim() : '';
+      let isoDate: string | null = null;
+      if (rawDate) {
+        const ddmmyy = rawDate.match(/^(\d{2})-(\d{2})-(\d{2})$/);
+        const ymd    = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (ddmmyy) {
+          isoDate = `20${ddmmyy[3]}-${ddmmyy[2]}-${ddmmyy[1]}`;
+        } else if (ymd) {
+          isoDate = `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
+        } else {
+          await pool.query('ROLLBACK');
+          res.status(400).json({ success: false, error: `Day ${day.dayNumber}: session date must be in DD-MM-YY format.` });
+          return;
+        }
+      }
       await pool.query(
-        'INSERT INTO academic_setup (day_number, academic_year, session_name) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE academic_year = VALUES(academic_year), session_name = VALUES(session_name)',
-        [Number(day.dayNumber), academicYear, String(day.sessionName || '').trim() || null],
+        'INSERT INTO academic_setup (day_number, academic_year, session_name, session_date) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE academic_year = VALUES(academic_year), session_name = VALUES(session_name), session_date = VALUES(session_date)',
+        [Number(day.dayNumber), academicYear, String(day.sessionName || '').trim() || null, isoDate],
       );
     }
     await pool.query('COMMIT');
@@ -834,7 +892,7 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
       recordTitle: row.record_id || 'Approval request',
       submittedBy: row.requested_by || '',
       submittedAt: row.created_at,
-      status: row.status === 'PENDING' ? 'Pending' : row.status,
+      status: row.status,
       clusterId: row.cluster_id || 'all',
       clusterName: row.cluster_id || 'All Clusters',
       details: '',
@@ -876,7 +934,7 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
     const recordId = approval.record_id || approval.id;
     await pool.query(
       'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [randomUUID(), req.user.id, req.user.name, 'SUPER_ADMIN', approval.cluster_id || null, actionName, approval.module || 'Submission', recordId, remarks || `Status changed to ${status}`],
+      [randomUUID(), req.user.id, req.user.name, 'Super Admin', approval.cluster_id || null, actionName, approval.module || 'Submission', recordId, remarks || `Status changed to ${status}`],
     );
     await pool.query(
       'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
@@ -932,13 +990,21 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
   try {
     await pool.query('START TRANSACTION');
+    // Chicken-and-egg between clusters and users: each FK-references the other.
+    //   clusters.admin_id   -> users.id   (fk_clusters_admin)
+    //   users.cluster_id    -> clusters.id (fk_users_cluster)
+    // Insert cluster first with admin_id = NULL, then user, then link the two.
     await pool.query(
-      `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, ?, 'ACTIVE')`,
-      [clusterId, name, district, code, collegeName, spocName, spocMobile, adminId],
+      `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
+      [clusterId, name, district, code, collegeName, spocName, spocMobile],
     );
     await pool.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'CLUSTER_ADMIN', ?, ?, TRUE, 'ACTIVE')`,
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'Cluster Admin', ?, ?, TRUE, 'Active')`,
       [adminId, adminName, adminEmail, passwordHash, clusterId, spocMobile],
+    );
+    await pool.query(
+      `UPDATE clusters SET admin_id = ? WHERE id = ?`,
+      [adminId, clusterId],
     );
 
     // Audit log
@@ -964,7 +1030,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       recipient: adminEmail,
       name: adminName,
       temporaryPassword,
-      role: 'CLUSTER_ADMIN',
+      role: 'Cluster Admin',
       clusterName: name,
       projectRoot: PROJECT_ROOT,
     }).catch((err) => console.error('[ONBOARDING EMAIL ERROR]:', err));
@@ -972,13 +1038,26 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     res.status(201).json({
       success: true,
       temporaryPassword,
-      cluster: mapCluster({ id: clusterId, name, district, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: spocMobile, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: spocMobile, status: 'ACTIVE' }),
-      user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'CLUSTER_ADMIN', cluster_id: clusterId, phone: spocMobile, status: 'ACTIVE', must_change_password: true }),
+      cluster: mapCluster({ id: clusterId, name, district, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: spocMobile, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: spocMobile, status: 'Active' }),
+      user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'Cluster Admin', cluster_id: clusterId, phone: spocMobile, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
     await pool.query('ROLLBACK').catch(() => undefined);
-    const duplicate = error?.code === 'ER_DUP_ENTRY';
-    res.status(duplicate ? 409 : 503).json({ success: false, error: duplicate ? 'A cluster with this ID or an admin with this email already exists in the system.' : 'Unable to create cluster.' });
+    console.error('[CREATE_CLUSTER ERROR]', error?.code, error?.message);
+    const code = error?.code;
+    let status = 503;
+    let message = 'Unable to create cluster.';
+    if (code === 'ER_DUP_ENTRY') {
+      status = 409;
+      message = 'A cluster with this ID or an admin with this email already exists in the system.';
+    } else if (code === 'ER_NO_REFERENCED_ROW' || code === 'ER_NO_REFERENCED_ROW_2') {
+      status = 400;
+      message = 'Referenced cluster or admin is invalid. Please refresh and try again.';
+    } else if (code === 'ER_BAD_NULL_ERROR') {
+      status = 400;
+      message = 'A required field is missing. Please check the form and try again.';
+    }
+    res.status(status).json({ success: false, error: message });
   }
 });
 
@@ -1027,7 +1106,7 @@ app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: 
 
     await pool.query(
       'INSERT INTO panchayats (id, name, cluster_id, status) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), status = VALUES(status)',
-      [panchayatId, name, clusterId, 'ACTIVE']
+      [panchayatId, name, clusterId, 'Active']
     );
 
     res.json({ success: true, panchayat: { id: panchayatId, name, clusterId, cluster: clusterId, villagesCount: 0, activeStudents: 0, volunteersCount: 0, status: 'On Track', villages: [] } });
@@ -1082,7 +1161,7 @@ app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Re
 
     await pool.query(
       `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
-      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'active')]
+      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'Active')]
     );
 
     res.json({ success: true, student: { id, code: String(req.body.code || id), name, gender: req.body.gender || 'female', dob: req.body.dob || '2014-01-01', standard: req.body.standard || '6th Standard', clusterId, panchayatId, panchayatName: req.body.panchayatName || panchayatId, villageId, villageName: req.body.villageName || villageId, parentName: req.body.parentName || 'Parent', phone: req.body.phone || '', status: req.body.status || 'active' } });
@@ -1134,6 +1213,8 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
   try {
     await ensureAcademicSetupTable();
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
+    // v2 sessions table dropped day_number; the per-day session is identified
+    // by id = 'academic-session-<cluster_id>-<day_number>' (set by PUT /api/sessions/:id).
     let sql = `
       SELECT
         CONCAT('academic-session-', c.id, '-', a.day_number) AS id,
@@ -1153,8 +1234,7 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
       FROM academic_setup a
       CROSS JOIN clusters c
       LEFT JOIN sessions s
-        ON s.cluster_id = c.id
-       AND s.day_number = a.day_number
+        ON s.id = CONCAT('academic-session-', c.id, '-', a.day_number)
       WHERE a.session_name IS NOT NULL AND TRIM(a.session_name) <> ''`;
     const params: any[] = [];
 
@@ -1230,17 +1310,17 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
 
   try {
     const id = `academic-session-${req.user.clusterId}-${dayNumber}`;
+    // v2 sessions: only snake_case columns; title/academic_year/day_number/
+    // session_name_snapshot/status were dropped. The session name lives in
+    // academic_setup.session_name (joined on the read path).
     await pool.query(
-      `INSERT INTO sessions (id, title, clusterId, academic_year, day_number, session_name_snapshot, panchayatId, villageId, volunteerId, date, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE title = VALUES(title), academic_year = VALUES(academic_year), day_number = VALUES(day_number), session_name_snapshot = VALUES(session_name_snapshot), panchayatId = VALUES(panchayatId), villageId = VALUES(villageId), volunteerId = VALUES(volunteerId), date = VALUES(date), status = VALUES(status)`,
+      `INSERT INTO sessions (id, name, cluster_id, panchayat_id, village_id, volunteer_id, date, session_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), date = VALUES(date), session_status = VALUES(session_status)`,
       [
         id,
         sessionName,
         req.user.clusterId,
-        academicYear,
-        dayNumber,
-        sessionName,
         req.body.panchayatId ? String(req.body.panchayatId) : null,
         req.body.villageId ? String(req.body.villageId) : null,
         req.body.volunteerId ? String(req.body.volunteerId) : null,
@@ -1314,7 +1394,7 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
     const totalCount = Number(req.body.totalCount || 0);
     const presentCount = Number(req.body.presentCount || 0);
     const requestedStatus = String(req.body.status || 'Draft');
-    const status = requestedStatus === 'Submitted' || requestedStatus === 'SUBMITTED' ? 'SUBMITTED' : 'DRAFT';
+    const status = requestedStatus === 'Submitted' || requestedStatus === 'SUBMITTED' ? 'Submitted' : 'Draft';
 
     await pool.query('START TRANSACTION');
 
@@ -1343,18 +1423,21 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       }
     }
 
-    if (status === 'SUBMITTED') {
+    if (status === 'Submitted') {
+      // v2 approvals: only snake_case columns; type/reference/requestedBy/
+      // sessionId/clusterId were dropped. module is set to 'Attendance' for
+      // this audit trail.
       await pool.query(
-        `INSERT INTO approvals (id, type, reference, requestedBy, date, status, remarks, sessionId, clusterId)
-         SELECT ?, ?, ?, ?, CURDATE(), ?, ?, ?, ?
-         WHERE NOT EXISTS (SELECT 1 FROM approvals WHERE sessionId = ? AND status IN ('Open', 'Pending'))`,
-        [randomUUID(), 'Attendance', id, req.user.name, 'Open', '', id, clusterId, id],
+        `INSERT INTO approvals (id, module, status, requested_by, session_id, cluster_id, date)
+         SELECT ?, ?, ?, ?, ?, ?, CURDATE()
+         WHERE NOT EXISTS (SELECT 1 FROM approvals WHERE session_id = ? AND status IN ('Open', 'Pending'))`,
+        [randomUUID(), 'Attendance', 'Pending', req.user.id, id, clusterId, id],
       );
     }
-    
+
     await pool.query('COMMIT');
 
-    res.json({ success: true, attendanceSession: { id, sessionId: req.body.sessionId || id, clusterId, panchayatId: req.body.panchayatId || '', villageId: req.body.villageId || '', dayNumber: Number(req.body.dayNumber || 1), status: status === 'SUBMITTED' ? 'Submitted' : 'Draft', presentCount, totalCount } });
+    res.json({ success: true, attendanceSession: { id, sessionId: req.body.sessionId || id, clusterId, panchayatId: req.body.panchayatId || '', villageId: req.body.villageId || '', dayNumber: Number(req.body.dayNumber || 1), status: status === 'Submitted' ? 'Submitted' : 'Draft', presentCount, totalCount } });
   } catch (error) {
     await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to save attendance:', error);
@@ -1515,7 +1598,7 @@ app.get('/api/audit-logs', requireAuth, async (req: AuthenticatedRequest, res: R
 app.get('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const params: any[] = [];
-    let sql = "SELECT * FROM users WHERE status = 'ACTIVE'";
+    let sql = "SELECT * FROM users WHERE status = 'Active'";
     if (req.user.role === 'Cluster Admin') {
       sql += ' AND cluster_id = ?';
       params.push(req.user.clusterId);
@@ -1538,8 +1621,8 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
   const name = String(req.body.name || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   const phone = String(req.body.phone || '').trim();
-  const role = req.body.role === 'Super Admin' ? 'SUPER_ADMIN' : 'CLUSTER_ADMIN';
-  const clusterId = role === 'CLUSTER_ADMIN' ? (String(req.body.clusterId || '').trim() || null) : null;
+  const role = req.body.role === 'Super Admin' ? 'Super Admin' : 'Cluster Admin';
+  const clusterId = role === 'Cluster Admin' ? (String(req.body.clusterId || '').trim() || null) : null;
   const temporaryPassword = String(req.body.temporaryPassword || `TQI@Admin${randomInt(1000, 9999)}`).trim();
 
   if (!name || !email) {
@@ -1547,7 +1630,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     return;
   }
 
-  if (role === 'CLUSTER_ADMIN' && !clusterId) {
+  if (role === 'Cluster Admin' && !clusterId) {
     res.status(400).json({ success: false, error: 'Please select a cluster for the Cluster Admin role.' });
     return;
   }
@@ -1558,11 +1641,11 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
   try {
     await pool.query('START TRANSACTION');
     await pool.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'ACTIVE')`,
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'Active')`,
       [userId, name, email, passwordHash, role, clusterId, phone],
     );
 
-    if (clusterId && role === 'CLUSTER_ADMIN') {
+    if (clusterId && role === 'Cluster Admin') {
       await pool.query('UPDATE clusters SET admin_id = ? WHERE id = ?', [userId, clusterId]);
     }
 
@@ -1578,7 +1661,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
         'CREATE_USER',
         'USERS',
         userId,
-        `Created ${role === 'SUPER_ADMIN' ? 'Super Admin' : 'Cluster Admin'} user ${name} (${email})`,
+        `Created ${role === 'Super Admin' ? 'Super Admin' : 'Cluster Admin'} user ${name} (${email})`,
       ],
     ).catch(() => undefined);
 
@@ -1605,7 +1688,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     res.status(201).json({
       success: true,
       temporaryPassword,
-      user: serializeUser(createdRows[0] || { id: userId, name, email, role, cluster_id: clusterId, phone, status: 'ACTIVE', must_change_password: true }),
+      user: serializeUser(createdRows[0] || { id: userId, name, email, role, cluster_id: clusterId, phone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
     await pool.query('ROLLBACK').catch(() => undefined);
@@ -1622,8 +1705,8 @@ app.put('/api/users/:id', requireAuth, async (req: AuthenticatedRequest, res: Re
   const name = String(req.body.name || '').trim();
   const email = String(req.body.email || '').trim().toLowerCase();
   const phone = String(req.body.phone || '').trim();
-  const role = req.body.role === 'Super Admin' ? 'SUPER_ADMIN' : 'CLUSTER_ADMIN';
-  const clusterId = role === 'CLUSTER_ADMIN' ? String(req.body.clusterId || '').trim() || null : null;
+  const role = req.body.role === 'Super Admin' ? 'Super Admin' : 'Cluster Admin';
+  const clusterId = role === 'Cluster Admin' ? String(req.body.clusterId || '').trim() || null : null;
   if (!name || !email) { res.status(400).json({ success: false, error: 'Name and email are required.' }); return; }
   try {
     await pool.query('UPDATE users SET name = ?, email = ?, phone = ?, role = ?, cluster_id = ? WHERE id = ?', [name, email, phone, role, clusterId, req.params.id]);
@@ -1642,7 +1725,7 @@ app.delete('/api/users/:id', requireAuth, async (req: AuthenticatedRequest, res:
   if (req.params.id === req.user.id) { res.status(400).json({ success: false, error: 'You cannot delete your own account.' }); return; }
   try {
     await pool.query('UPDATE clusters SET admin_id = NULL WHERE admin_id = ?', [req.params.id]);
-    const [result] = await pool.query<any>("UPDATE users SET status = 'INACTIVE' WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("UPDATE users SET status = 'Inactive' WHERE id = ?", [req.params.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'User not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -1676,7 +1759,7 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
       [name, college_name, spoc_name, spoc_mobile, district, state, req.params.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
-    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'UPDATE_CLUSTER', 'CLUSTER', req.params.id, JSON.stringify(req.body)]);
+    await pool.query('INSERT INTO audit_logs (id, user_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'UPDATE_CLUSTER', 'CLUSTERS', req.params.id, JSON.stringify(req.body)]);
     res.json({ success: true, data: { id: req.params.id } });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Failed to update cluster.' });
@@ -1687,10 +1770,10 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
 app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete clusters.' }); return; }
   try {
-    const [result] = await pool.query<any>("UPDATE clusters SET status = 'INACTIVE' WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("UPDATE clusters SET status = 'Inactive' WHERE id = ?", [req.params.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
-    await pool.query("UPDATE users SET status = 'INACTIVE' WHERE cluster_id = ? AND role = 'Cluster Admin'", [req.params.id]);
-    await pool.query('INSERT INTO audit_logs (id, user_id, action, entity_type, entity_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTER', req.params.id, '{}']);
+    await pool.query("UPDATE users SET status = 'Inactive' WHERE cluster_id = ? AND role = 'Cluster Admin'", [req.params.id]);
+    await pool.query('INSERT INTO audit_logs (id, user_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTERS', req.params.id, '{}']);
     res.json({ success: true });
   } catch (error) {
     res.status(503).json({ success: false, error: 'Failed to delete cluster.' });
@@ -1789,7 +1872,7 @@ app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res:
 // 8. DELETE /api/students/:id
 app.delete('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("UPDATE students SET status = 'inactive' WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("UPDATE students SET status = 'Inactive' WHERE id = ?", [req.params.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -1809,7 +1892,7 @@ app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, re
     for (const student of students) {
       await pool.query(
         'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId || null, student.villageId || null, student.parentName, student.phone, 'active']
+        [crypto.randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId || null, student.villageId || null, student.parentName, student.phone, 'Active']
       );
       count++;
     }
@@ -1870,7 +1953,11 @@ app.post('/api/volunteers/bulk', requireAuth, async (req: AuthenticatedRequest, 
 // 13. DELETE /api/sessions/:id
 app.delete('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    await pool.query("DELETE FROM session_attendance WHERE session_id = ?", [req.params.id]);
+    // v2: the legacy 'session_attendance' table never existed. The real
+    // attendance tables (attendance_sessions / student_attendance /
+    // volunteer_attendance) cascade-delete automatically via the FKs declared
+    // in 206_attendance.sql. We just need to delete the session row; the
+    // children follow.
     const [result] = await pool.query<any>("DELETE FROM sessions WHERE id = ?", [req.params.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Session not found.' }); return; }
     res.json({ success: true });
@@ -1899,7 +1986,7 @@ app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequ
 
     await pool.query(
       'INSERT INTO date_change_requests (id, session_id, cluster_id, original_date, requested_date, reason, status, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, sessionId, clusterId, originalDate, requestedDate, reason, 'PENDING', req.user.id]
+      [id, sessionId, clusterId, originalDate, requestedDate, reason, 'Pending', req.user.id]
     );
 
     await pool.query(
@@ -1912,7 +1999,7 @@ app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequ
       [randomUUID(), req.user.id, req.user.name, req.user.role, clusterId, 'CREATE_DATE_CHANGE_REQUEST', 'DATE_CHANGES', id, `Requested date change for session ${sessionId}`]
     );
 
-    res.json({ success: true, request: { id, sessionId, clusterId, originalDate, requestedDate, reason, status: 'PENDING' } });
+    res.json({ success: true, request: { id, sessionId, clusterId, originalDate, requestedDate, reason, status: 'Pending' } });
   } catch (error) {
     console.error('Failed to submit date change request:', error);
     res.status(500).json({ success: false, error: 'Unable to submit request.' });
@@ -1946,7 +2033,7 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
   
   const { action } = req.params;
   const { remarks } = req.body;
-  const status = action === 'approve' ? 'APPROVED' : action === 'reject' ? 'REJECTED' : null;
+  const status = action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : null;
 
   if (!status) {
     res.status(400).json({ success: false, error: 'Invalid action.' });
@@ -1968,7 +2055,7 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
       [status, req.user.id, remarks, req.params.id]
     );
 
-    if (status === 'APPROVED') {
+    if (status === 'Approved') {
       await pool.query('UPDATE sessions SET date = ? WHERE id = ?', [request.requested_date, request.session_id]);
     }
 
@@ -2046,7 +2133,7 @@ app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedReque
     const cId = clusterId || req.user.clusterId;
     const recordId = `sub-${sessionId}`;
 
-    const [attRows] = await pool.query<any[]>('SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != "DRAFT"', [sessionId, dayNumber]);
+    const [attRows] = await pool.query<any[]>("SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != 'Draft'", [sessionId, dayNumber]);
     const attendanceComplete = attRows.length > 0;
 
     const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ?', [sessionId]);
@@ -2080,10 +2167,11 @@ app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedReque
       `INSERT INTO session_submissions (id, session_id, cluster_id, day_number, attendance_complete, lesson_plan_complete, photos_complete, report_complete, finance_complete, status, submitted_at, submitted_by)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
        ON DUPLICATE KEY UPDATE attendance_complete=VALUES(attendance_complete), lesson_plan_complete=VALUES(lesson_plan_complete), photos_complete=VALUES(photos_complete), report_complete=VALUES(report_complete), finance_complete=VALUES(finance_complete), status=VALUES(status), submitted_at=VALUES(submitted_at), submitted_by=VALUES(submitted_by)`,
-      [recordId, sessionId, cId, dayNumber, attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, 'SUBMITTED', req.user.id]
+      [recordId, sessionId, cId, dayNumber, attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, 'Submitted', req.user.id]
     );
 
-    await pool.query('UPDATE sessions SET status = "Submitted" WHERE id = ?', [sessionId]);
+    // v2 sessions: the column is session_status, not status.
+    await pool.query("UPDATE sessions SET session_status = 'Submitted' WHERE id = ?", [sessionId]);
 
     await pool.query(
       'INSERT INTO notifications (id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, 0, NOW())',
@@ -2096,7 +2184,7 @@ app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedReque
     );
 
     await pool.query('COMMIT');
-    res.json({ success: true, data: { id: recordId, status: 'SUBMITTED' } });
+    res.json({ success: true, data: { id: recordId, status: 'Submitted' } });
   } catch (error) {
     await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to submit session:', error);
@@ -2128,7 +2216,7 @@ app.put('/api/session-submissions/:id/review', requireAuth, async (req: Authenti
   }
   
   const { action, remarks } = req.body;
-  const status = action === 'approve' ? 'APPROVED' : action === 'resubmission' ? 'RESUBMISSION_REQUIRED' : null;
+  const status = action === 'approve' ? 'Approved' : action === 'resubmission' ? 'Resubmission Required' : null;
 
   if (!status) {
     res.status(400).json({ success: false, error: 'Invalid action.' });
@@ -2145,9 +2233,10 @@ app.put('/api/session-submissions/:id/review', requireAuth, async (req: Authenti
 
     await pool.query('START TRANSACTION');
 
-    if (status === 'APPROVED') {
+    if (status === 'Approved') {
       await pool.query('UPDATE session_submissions SET status = ?, reviewed_at = NOW(), review_remarks = ? WHERE id = ?', [status, remarks, req.params.id]);
-      await pool.query('UPDATE sessions SET status = "Completed" WHERE id = ?', [submission.session_id]);
+      // v2 sessions: column is session_status, not status.
+      await pool.query("UPDATE sessions SET session_status = 'Completed' WHERE id = ?", [submission.session_id]);
     } else {
       await pool.query('UPDATE session_submissions SET status = ?, resubmission_reason = ? WHERE id = ?', [status, remarks, req.params.id]);
     }
@@ -2180,7 +2269,7 @@ app.put('/api/session-submissions/:id/resubmit', requireAuth, async (req: Authen
     }
     const submission = rows[0];
 
-    const [attRows] = await pool.query<any[]>('SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != "DRAFT"', [submission.session_id, submission.day_number]);
+    const [attRows] = await pool.query<any[]>("SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != 'Draft'", [submission.session_id, submission.day_number]);
     const attendanceComplete = attRows.length > 0;
     const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ?', [submission.session_id]);
     const lessonPlanComplete = lpRows.length > 0;
@@ -2201,7 +2290,7 @@ app.put('/api/session-submissions/:id/resubmit', requireAuth, async (req: Authen
     await pool.query('START TRANSACTION');
 
     await pool.query(
-      'UPDATE session_submissions SET status = "RESUBMITTED", resubmitted_at = NOW(), attendance_complete=?, lesson_plan_complete=?, photos_complete=?, report_complete=?, finance_complete=? WHERE id = ?',
+      "UPDATE session_submissions SET status = 'Resubmitted', resubmitted_at = NOW(), attendance_complete=?, lesson_plan_complete=?, photos_complete=?, report_complete=?, finance_complete=? WHERE id = ?",
       [attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, req.params.id]
     );
 
@@ -2216,7 +2305,7 @@ app.put('/api/session-submissions/:id/resubmit', requireAuth, async (req: Authen
     );
 
     await pool.query('COMMIT');
-    res.json({ success: true, status: 'RESUBMITTED' });
+    res.json({ success: true, status: 'Resubmitted' });
   } catch (error) {
     await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to resubmit session:', error);
@@ -2299,8 +2388,8 @@ app.post('/api/modules/:id/resources', requireAuth, moduleUploadMiddleware.singl
     const fileUrl = `/api/modules/${req.params.id}/resources/${resourceId}/download`;
 
     await pool.query(
-      'INSERT INTO module_resources (id, module_id, file_path, file_url, original_filename, mime_type, file_size) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [resourceId, req.params.id, filePath, fileUrl, req.file.originalname, req.file.mimetype, req.file.size]
+      'INSERT INTO module_resources (id, module_id, file_path, file_url, original_filename) VALUES (?, ?, ?, ?, ?)',
+      [resourceId, req.params.id, filePath, fileUrl, req.file.originalname]
     );
 
     res.json({ success: true, resource: { id: resourceId, url: fileUrl } });
@@ -2410,6 +2499,9 @@ const startServer = async () => {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
     await initializeDatabase();
     await runSqlFiles();
+    // Post-migration verifier + Super Admin bootstrap.
+    // MUST run after runSqlFiles so schema_migrations and users exist.
+    await initDatabaseSchema();
 
     const dbStatus = await getDatabaseStatus();
     if (dbStatus === 'disconnected') {
@@ -2418,7 +2510,10 @@ const startServer = async () => {
       console.log('[DB] MySQL connection active.');
     }
 
-    app.listen(PORT, '0.0.0.0', () => {
+    app.listen(PORT, '0.0.0.0', async () => {
+      // Self-heal the academic_setup table at boot so a previous failed migration
+      // (or stale schema_migrations row) never breaks the /api/academic-setup endpoints.
+      await ensureAcademicSetupTable().catch(() => undefined);
       console.log(`\n==================================================`);
       console.log(`🚀 TQI Backend API running on http://localhost:${PORT}`);
       console.log(`   Health Check: http://localhost:${PORT}/api/health`);

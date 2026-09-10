@@ -13,13 +13,6 @@ import {
 import { TabType, Panchayat } from '../types';
 import Badge from './ui/badge';
 import { Table, TableHeader, TableBody, TableRow, TableCell } from './ui/table';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
 import { ActionButton } from './ui/action-button';
 
 interface PanchayatsViewProps {
@@ -46,8 +39,6 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
 
   const [form, setForm] = useState({
     name: '',
-    block: 'Harur Block',
-    status: 'On Track' as 'On Track' | 'Correction Required' | 'Action Needed',
     villages: '',
   });
 
@@ -72,11 +63,11 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
     if (!form.name.trim()) return;
     onAddPanchayat({
       name: form.name.trim(),
-      cluster: `Dharmapuri (${form.block})`,
-      status: form.status,
+      cluster: 'Dharmapuri',
+      status: 'On Track',
       initialVillages: form.villages.split(',').map((v) => v.trim()).filter(Boolean),
     });
-    setForm({ name: '', block: 'Harur Block', status: 'On Track', villages: '' });
+    setForm({ name: '', villages: '' });
     setShowAdd(false);
   };
 
@@ -297,38 +288,6 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-block">
-                  Block
-                </label>
-                <input
-                  id="pan-block"
-                  type="text"
-                  value={form.block}
-                  onChange={(e) => setForm({ ...form, block: e.target.value })}
-                  className="w-full rounded-lg border border-gray-300 bg-transparent px-3.5 py-2.5 text-xs text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1.5" htmlFor="pan-status">
-                  Operational Status
-                </label>
-                <Select
-                  value={form.status}
-                  onValueChange={(val: any) => setForm({ ...form, status: val })}
-                >
-                  <SelectTrigger className="h-10 text-xs">
-                    <SelectValue placeholder="Select Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="On Track">On Track</SelectItem>
-                    <SelectItem value="Correction Required">Correction Required</SelectItem>
-                    <SelectItem value="Action Needed">Action Needed</SelectItem>
-                  </SelectContent>
-                </Select>
               </div>
 
               <div>

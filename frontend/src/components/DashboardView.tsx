@@ -35,6 +35,7 @@ interface DashboardViewProps {
   sessions?: Session[];
   students?: Student[];
   volunteers?: Volunteer[];
+  authToken?: string;
 }
 
 const todayLabel = () => {
@@ -74,6 +75,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   financeEntries = [],
   sessions = [],
   volunteers = [],
+  authToken,
 }) => {
   const [panchayatSearch, setPanchayatSearch] = useState('');
   const [setupDays, setSetupDays] = useState<{ dayNumber: number; sessionName: string }[]>([]);
@@ -94,7 +96,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   );
 
   useEffect(() => {
-    fetch(apiUrl('/api/academic-setup'))
+    fetch(apiUrl('/api/academic-setup'), {
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data?.success && Array.isArray(data.setup)) {
@@ -107,7 +111,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       })
       .catch(() => {});
-  }, []);
+  }, [authToken]);
 
   const defaultSuggestedNames: Record<number, { name: string; month: string; topic: string }> = {
     1: { name: 'Spoken English & Goal Setting', month: 'Feb', topic: 'Communication' },
