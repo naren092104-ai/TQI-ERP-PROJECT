@@ -1304,6 +1304,12 @@ export default function App() {
                   onRequestCorrection={handleRequestCorrection}
                   onReject={handleRejectSubmission}
                   onNavigate={handleNavigate}
+                  dateChangeRequests={displayDateChangeRequests}
+                  sessions={displaySessions}
+                  currentUserId={currentUser.id || ''}
+                  currentUserClusterId={currentUserClusterId}
+                  onSubmitDateChange={handleSubmitDateChangeRequest}
+                  onReviewDateChange={handleReviewDateChangeRequest}
                 />
               )}
 

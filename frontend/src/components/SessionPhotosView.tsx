@@ -4,11 +4,16 @@ import {
   DayPhotoSummary,
   Panchayat,
   ZipProgressState,
-  ZipGenerationStage,
   TabType,
   Cluster,
+  PhotoDeleteRequest,
+  ClusterPhotoSummary,
 } from '../types';
 import { apiUrl } from '../utils/api';
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { EmptyState } from './ui/EmptyState';
 import {
   Select,
   SelectContent,
@@ -16,54 +21,89 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Search, X } from './ui/icons';
+import {
+  Calendar,
+  Search,
+  Plus,
+  Trash2,
+  X,
+  Download,
+  Upload,
+  CheckCircle2,
+  AlertCircle,
+  MapPin,
+  Building2,
+  Clock,
+  Sparkle,
+  Image as ImageIcon,
+  Lock,
+  LockOpen,
+  ArrowLeft,
+} from './ui/icons';
 
 interface SessionPhotosViewProps {
   panchayats: Panchayat[];
   clusters?: Cluster[];
   authToken?: string;
+  selectedAcademicYearId?: string;
   userRole?: 'Cluster Admin' | 'Super Admin';
   currentCluster?: string;
   onNavigate?: (tab: TabType, targetId?: string) => void;
   onRoleChange?: (role: 'Cluster Admin' | 'Super Admin') => void;
 }
 
-
 export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   panchayats = [],
   clusters = [],
   authToken,
-  userRole = 'Cluster Admin',
+  selectedAcademicYearId,
+  userRole = 'Super Admin',
   currentCluster = 'Dharmapuri',
   onNavigate,
-  onRoleChange,
 }) => {
-  // State
-  const [activeRole, setActiveRole] = useState<'Cluster Admin' | 'Super Admin'>(userRole);
   const [selectedCluster, setSelectedCluster] = useState<string>(
-    userRole === 'Cluster Admin' ? 'Dharmapuri' : 'all'
+    userRole === 'Cluster Admin' ? currentCluster : 'all'
   );
   const [selectedDayTab, setSelectedDayTab] = useState<number | 'all'>('all');
-  const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [selectedPanchayat, setSelectedPanchayat] = useState<string>('all');
   const [selectedVillage, setSelectedVillage] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Photos Collection (Fetched from Backend API)
+  // Dedicated Day Page (both Cluster Admin and Super Admin)
+  const [activeDayNumber, setActiveDayNumber] = useState<number | null>(null);
+
+  // Super Admin view mode ('submissions' | 'gallery' | 'delete-requests')
+  const [adminViewTab, setAdminViewTab] = useState<'submissions' | 'gallery' | 'delete-requests'>('submissions');
+
+  // Photos Collection
   const [photos, setPhotos] = useState<SessionPhotoItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // Modals & Active Selections
-  const [selectedPhoto, setSelectedPhoto] = useState<SessionPhotoItem | null>(null);
+  // Dynamic Days from Super Admin Academic Setup
+  const [programDays, setProgramDays] = useState<Array<{ id: string; day_number: number; day_name: string }>>([]);
+  const [academicSetupMap, setAcademicSetupMap] = useState<Record<number, string>>({});
+  const [dayStatuses, setDayStatuses] = useState<Record<number, { status: string; count: number }>>({});
+  const [clusterSummaries, setClusterSummaries] = useState<ClusterPhotoSummary[]>([]);
+  const [deleteRequests, setDeleteRequests] = useState<PhotoDeleteRequest[]>([]);
+  const [isProcessingAction, setIsProcessingAction] = useState<boolean>(false);
+
+  // Selection & Modals
+  const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([]);
+  const [previewPhoto, setPreviewPhoto] = useState<SessionPhotoItem | null>(null);
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [uploadDayTarget, setUploadDayTarget] = useState<number>(1);
-  const [viewDayModal, setViewDayModal] = useState<number | null>(null);
   const [photoToDelete, setPhotoToDelete] = useState<SessionPhotoItem | null>(null);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+
+  // Workflow Modals
+  const [submitDayConfirm, setSubmitDayConfirm] = useState<number | null>(null);
+  const [deleteRequestTarget, setDeleteRequestTarget] = useState<SessionPhotoItem | null>(null);
+  const [deleteRequestReason, setDeleteRequestReason] = useState<string>('');
+  const [changeRequestDay, setChangeRequestDay] = useState<number | null>(null);
+  const [changeRequestReason, setChangeRequestReason] = useState<string>('');
 
   // ZIP Generation & Download State
   const [downloadingZipKey, setDownloadingZipKey] = useState<string | null>(null);
-  const [completedZipKey, setCompletedZipKey] = useState<string | null>(null);
   const [zipProgress, setZipProgress] = useState<ZipProgressState>({
     stage: 'idle',
     message: '',
@@ -74,44 +114,30 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadTitle, setUploadTitle] = useState<string>('Interactive Learning Workshop');
   const [uploadDay, setUploadDay] = useState<number>(1);
-  const [uploadPanchayat, setUploadPanchayat] = useState<string>(panchayats[0]?.id || 'vedakkattamaduvu');
-  const [uploadVillage, setUploadVillage] = useState<string>('Ammapettai');
+  const [uploadPanchayat, setUploadPanchayat] = useState<string>(panchayats[0]?.id || '');
+  const [uploadVillage, setUploadVillage] = useState<string>(panchayats[0]?.villages[0]?.name || '');
   const [uploadDate, setUploadDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [uploadUploader, setUploadUploader] = useState<string>('Rahul K.');
+  const [uploadUploader, setUploadUploader] = useState<string>('Cluster Mentor');
   const [uploadCaption, setUploadCaption] = useState<string>('');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const showClusterLanding = activeRole === 'Super Admin' && selectedCluster === 'all';
-  const photoClusters = useMemo(() => {
-    const known = clusters.map((cluster) => ({ id: cluster.id, name: cluster.name }));
-    const knownIds = new Set(known.map((cluster) => cluster.id.toLowerCase()));
-    photos.forEach((photo) => {
-      if (!knownIds.has(photo.clusterId.toLowerCase())) {
-        known.push({ id: photo.clusterId, name: photo.clusterName || photo.clusterId });
-        knownIds.add(photo.clusterId.toLowerCase());
-      }
-    });
-    return known;
-  }, [clusters, photos]);
 
-  // Sync role changes
-  useEffect(() => {
-    setActiveRole(userRole);
-    if (userRole === 'Cluster Admin') {
-      setSelectedCluster('Dharmapuri');
-    } else {
-      setSelectedCluster('all');
-    }
-  }, [userRole]);
+  // Resolved Cluster Name
+  const resolvedClusterName = useMemo(() => {
+    const cId = userRole === 'Cluster Admin' ? currentCluster : selectedCluster;
+    const match = clusters.find((c) => c.id.toLowerCase() === cId.toLowerCase() || c.name.toLowerCase() === cId.toLowerCase());
+    return match ? match.name : cId === 'all' ? 'All Clusters' : cId;
+  }, [clusters, currentCluster, selectedCluster, userRole]);
 
   // Fetch photos from server
   const fetchPhotos = async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const clusterParam = activeRole === 'Cluster Admin' ? 'dharmapuri' : selectedCluster.toLowerCase();
-      const res = await fetch(apiUrl(`/api/session-photos?cluster=${clusterParam}&role=${encodeURIComponent(activeRole)}`), {
+      const clusterParam = userRole === 'Cluster Admin' ? currentCluster.toLowerCase() : selectedCluster.toLowerCase();
+      const yearParam = selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : '';
+      const res = await fetch(apiUrl(`/api/session-photos?cluster=${clusterParam}&role=${encodeURIComponent(userRole)}${yearParam}`), {
         cache: 'no-store',
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
@@ -119,7 +145,6 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         throw new Error(`Server returned ${res.status}`);
       }
       const data = await res.json();
-
       if (data.success && Array.isArray(data.photos)) {
         setPhotos(data.photos);
       } else {
@@ -127,15 +152,180 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       }
     } catch (err: any) {
       console.error('Failed to load photos:', err);
-      setLoadError('Failed to connect to backend server for photos. Retrying...');
+      setLoadError('Failed to connect to backend server for photos.');
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Fetch dynamic program days & academic setup
+  const fetchDynamicDays = async () => {
+    try {
+      const yearParam = selectedAcademicYearId ? `?academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : '';
+      const [daysRes, setupRes] = await Promise.all([
+        fetch(apiUrl(`/api/program-days${yearParam}`), {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        }),
+        fetch(apiUrl('/api/academic-setup'), {
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        }),
+      ]);
+
+      if (daysRes.ok) {
+        const daysData = await daysRes.json();
+        if (daysData.success && Array.isArray(daysData.programDays)) {
+          setProgramDays(daysData.programDays);
+        }
+      }
+
+      if (setupRes.ok) {
+        const setupData = await setupRes.json();
+        if (setupData.success && Array.isArray(setupData.setup)) {
+          const map: Record<number, string> = {};
+          setupData.setup.forEach((s: any) => {
+            if (s.day_number) map[s.day_number] = s.session_name || '';
+          });
+          setAcademicSetupMap(map);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch dynamic program days:', err);
+    }
+  };
+
+  // Fetch day submission statuses & counts
+  const fetchDayStatuses = async () => {
+    try {
+      const clusterParam = userRole === 'Cluster Admin' ? currentCluster : selectedCluster;
+      const yearParam = selectedAcademicYearId ? `&academicYearId=${encodeURIComponent(selectedAcademicYearId)}` : '';
+      const res = await fetch(apiUrl(`/api/session-photos/day-statuses?clusterId=${encodeURIComponent(clusterParam)}${yearParam}`), {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          if (Array.isArray(data.clusterSummaries)) {
+            setClusterSummaries(data.clusterSummaries);
+          }
+          const statusMap: Record<number, { status: string; count: number }> = {};
+          if (Array.isArray(data.statuses)) {
+            data.statuses.forEach((s: any) => {
+              statusMap[s.day_number] = {
+                status: s.status || 'DRAFT',
+                count: data.counts?.[s.day_number] || 0,
+              };
+            });
+          }
+          // Merge counts
+          if (data.counts) {
+            Object.keys(data.counts).forEach((d) => {
+              const num = Number(d);
+              if (!statusMap[num]) {
+                statusMap[num] = { status: 'DRAFT', count: data.counts[num] };
+              } else {
+                statusMap[num].count = data.counts[num];
+              }
+            });
+          }
+          setDayStatuses(statusMap);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch day statuses:', err);
+    }
+  };
+
+  // Fetch Photo Delete Requests (for Super Admin review & Cluster Admin badges)
+  const fetchDeleteRequests = async () => {
+    try {
+      const clusterParam = userRole === 'Cluster Admin' ? `?clusterId=${encodeURIComponent(currentCluster)}` : '';
+      const res = await fetch(apiUrl(`/api/session-photos/delete-requests${clusterParam}`), {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.requests)) {
+          setDeleteRequests(data.requests);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch delete requests:', err);
+    }
+  };
+
   useEffect(() => {
     fetchPhotos();
-  }, [activeRole, selectedCluster, authToken]);
+    fetchDynamicDays();
+    fetchDayStatuses();
+    fetchDeleteRequests();
+  }, [userRole, selectedCluster, authToken, selectedAcademicYearId, currentCluster]);
+
+  // Dynamic configured days list
+  const configuredDays = useMemo(() => {
+    const filterCluster = userRole === 'Cluster Admin' ? currentCluster : selectedCluster;
+    const isAll = filterCluster === 'all';
+
+    if (programDays.length > 0) {
+      return programDays.map((pd) => {
+        const statusInfo = dayStatuses[pd.day_number];
+        const dayPhotos = photos.filter((p) => {
+          const matchCluster =
+            isAll ||
+            (p.clusterId || '').toLowerCase() === filterCluster.toLowerCase() ||
+            (p.clusterName || '').toLowerCase() === filterCluster.toLowerCase();
+          return matchCluster && p.dayNumber === pd.day_number;
+        });
+        const actualCount = dayPhotos.length;
+        return {
+          dayNumber: pd.day_number,
+          dayName: pd.day_name || `Day ${pd.day_number}`,
+          sessionName: academicSetupMap[pd.day_number] || pd.day_name || `Session Day ${pd.day_number}`,
+          photosCount: actualCount,
+          status: (statusInfo?.status || 'DRAFT').toUpperCase(),
+          isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(
+            (statusInfo?.status || 'DRAFT').toUpperCase()
+          ),
+        };
+      });
+    }
+
+    // Default fallback if program days not yet loaded
+    return [1, 2, 3, 4, 5, 6, 7, 8].map((d) => {
+      const statusInfo = dayStatuses[d];
+      const dayPhotos = photos.filter((p) => {
+        const matchCluster =
+          isAll ||
+          (p.clusterId || '').toLowerCase() === filterCluster.toLowerCase() ||
+          (p.clusterName || '').toLowerCase() === filterCluster.toLowerCase();
+        return matchCluster && p.dayNumber === d;
+      });
+      return {
+        dayNumber: d,
+        dayName: `Day ${d}`,
+        sessionName: academicSetupMap[d] || `Session Day ${d}`,
+        photosCount: dayPhotos.length,
+        status: (statusInfo?.status || 'DRAFT').toUpperCase(),
+        isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(
+          (statusInfo?.status || 'DRAFT').toUpperCase()
+        ),
+      };
+    });
+  }, [programDays, academicSetupMap, dayStatuses, photos, userRole, currentCluster, selectedCluster]);
+
+  // Current active day config (when inside dedicated Day view)
+  const activeDayConfig = useMemo(() => {
+    if (activeDayNumber === null) return null;
+    return (
+      configuredDays.find((d) => d.dayNumber === activeDayNumber) || {
+        dayNumber: activeDayNumber,
+        dayName: `Day ${activeDayNumber}`,
+        sessionName: academicSetupMap[activeDayNumber] || `Session Day ${activeDayNumber}`,
+        photosCount: photos.filter((p) => p.dayNumber === activeDayNumber).length,
+        status: 'DRAFT',
+        isLocked: false,
+      }
+    );
+  }, [activeDayNumber, configuredDays, photos, academicSetupMap]);
 
   // Dynamic villages for filter
   const currentFilterVillages = useMemo(() => {
@@ -154,174 +344,93 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     return found?.villages || [];
   }, [selectedPanchayat, panchayats]);
 
-  // Update upload village when upload panchayat changes
-  useEffect(() => {
-    const selectedP = panchayats.find((p) => p.id === uploadPanchayat || p.name === uploadPanchayat);
-    if (selectedP && selectedP.villages && selectedP.villages.length > 0) {
-      setUploadVillage(selectedP.villages[0].name);
-    }
-  }, [uploadPanchayat, panchayats]);
+  // Dynamic villages for upload modal
+  const uploadVillages = useMemo(() => {
+    if (!uploadPanchayat) return [];
+    const p = panchayats.find((item) => item.id === uploadPanchayat || item.name === uploadPanchayat);
+    return p?.villages || [];
+  }, [panchayats, uploadPanchayat]);
 
-  // Days 1 through 8 Summary
-  const daySummaries: DayPhotoSummary[] = useMemo(() => {
-    const targetClusterPhotos = photos.filter(
-      (p) =>
-        activeRole === 'Cluster Admin' ||
-        selectedCluster === 'all' ||
-        p.clusterId.toLowerCase() === selectedCluster.toLowerCase()
-    );
-
-    const summaries: DayPhotoSummary[] = [];
-
-    for (let day = 1; day <= 8; day++) {
-      const dayPhotos = targetClusterPhotos.filter((p) => p.dayNumber === day);
-      const uniquePanchayats = new Set(dayPhotos.map((p) => p.panchayatId)).size;
-      const targetCount = 50;
-
-      summaries.push({
-        dayNumber: day,
-        dayLabel: `Day ${day}`,
-        date: `2026-08-${15 + day}`,
-        photosCount: dayPhotos.length,
-        targetCount,
-        panchayatCoverage: uniquePanchayats,
-        featuredPhotos: dayPhotos.slice(0, 4),
-      });
-    }
-
-    return summaries;
-  }, [photos, selectedCluster, activeRole]);
-
-  // Filtered Photos for Gallery View
+  // Filtered Photos for Gallery or Dedicated Day
   const filteredPhotos = useMemo(() => {
     return photos.filter((p) => {
-      // Cluster filter
       const matchCluster =
-        activeRole === 'Cluster Admin'
-          ? p.clusterId.toLowerCase() === 'dharmapuri'
-          : selectedCluster === 'all' || p.clusterId.toLowerCase() === selectedCluster.toLowerCase();
+        userRole === 'Cluster Admin'
+          ? (p.clusterId || '').toLowerCase() === currentCluster.toLowerCase()
+          : selectedCluster === 'all'
+          ? true
+          : (p.clusterId || '').toLowerCase() === selectedCluster.toLowerCase() ||
+            (p.clusterName || '').toLowerCase() === selectedCluster.toLowerCase();
 
-      // Day Tab filter
-      const matchDay = selectedDayTab === 'all' || p.dayNumber === selectedDayTab;
+      const targetDay = activeDayNumber !== null ? activeDayNumber : selectedDayTab;
+      const matchDay = targetDay === 'all' || p.dayNumber === targetDay;
 
-      // Panchayat filter
       const matchPanchayat =
         selectedPanchayat === 'all' ||
-        p.panchayatId.toLowerCase() === selectedPanchayat.toLowerCase() ||
-        p.panchayatName.toLowerCase() === selectedPanchayat.toLowerCase();
+        (p.panchayatId || '').toLowerCase() === selectedPanchayat.toLowerCase() ||
+        (p.panchayatName || '').toLowerCase() === selectedPanchayat.toLowerCase();
 
-      // Village filter
       const matchVillage =
         selectedVillage === 'all' ||
         (p.villageName || '').toLowerCase() === selectedVillage.toLowerCase();
 
-      // Search Query
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
-        p.sessionTitle.toLowerCase().includes(q) ||
-        p.panchayatName.toLowerCase().includes(q) ||
-        p.villageName.toLowerCase().includes(q) ||
-        p.uploadedBy.toLowerCase().includes(q) ||
-        p.originalFilename.toLowerCase().includes(q);
+        (p.sessionTitle || '').toLowerCase().includes(q) ||
+        (p.panchayatName || '').toLowerCase().includes(q) ||
+        (p.villageName || '').toLowerCase().includes(q) ||
+        (p.uploadedBy || '').toLowerCase().includes(q) ||
+        (p.caption || '').toLowerCase().includes(q) ||
+        (p.originalFilename || '').toLowerCase().includes(q);
 
       return matchCluster && matchDay && matchPanchayat && matchVillage && matchSearch;
     });
-  }, [photos, selectedCluster, activeRole, selectedDayTab, selectedPanchayat, selectedVillage, searchQuery]);
+  }, [photos, selectedCluster, userRole, selectedDayTab, activeDayNumber, selectedPanchayat, selectedVillage, searchQuery, currentCluster]);
 
-  // ==========================================
-  // ZIP DOWNLOAD HANDLER WITH REAL PROGRESS
-  // ==========================================
-  const handleDownloadZip = async (
-    type: 'day' | 'cluster-all-days' | 'all-clusters' | 'filtered',
-    dayNumber?: number
-  ) => {
-    // Unique key to track button state and prevent double-clicks
-    const key =
-      type === 'day'
-        ? `day-${dayNumber}`
-        : type === 'cluster-all-days'
-        ? `cluster-${selectedCluster}`
-        : type === 'all-clusters'
-        ? 'all-clusters'
-        : 'filtered';
+  // Count of pending delete requests for Super Admin badge
+  const pendingDeleteCount = useMemo(() => {
+    return deleteRequests.filter((r) => r.status === 'PENDING').length;
+  }, [deleteRequests]);
 
-    if (downloadingZipKey) {
-      console.warn('Another ZIP download is already in progress.');
-      return;
-    }
-
+  // ZIP Download Handler
+  const handleDownloadZip = async (type: 'day' | 'cluster-all-days' | 'all-clusters' | 'filtered', dayNumber?: number) => {
+    const key = type === 'day' ? `day-${dayNumber}` : type === 'filtered' ? 'filtered' : 'all';
+    if (downloadingZipKey) return;
     setDownloadingZipKey(key);
-    setCompletedZipKey(null);
 
-    // Stepped Progress Simulation
-    setZipProgress({
-      stage: 'preparing',
-      message: 'Preparing ZIP request...',
-      progressPercent: 15,
-    });
+    setZipProgress({ stage: 'preparing', message: 'Preparing archive request...', progressPercent: 20 });
 
     try {
-      await new Promise((r) => setTimeout(r, 250));
+      await new Promise((r) => setTimeout(r, 200));
+      setZipProgress({ stage: 'collecting', message: 'Gathering photographic records...', progressPercent: 50 });
 
-      setZipProgress({
-        stage: 'collecting',
-        message: 'Collecting original session photos from storage...',
-        progressPercent: 40,
-      });
+      await new Promise((r) => setTimeout(r, 200));
+      setZipProgress({ stage: 'creating', message: 'Compressing into high-resolution ZIP...', progressPercent: 80 });
 
-      await new Promise((r) => setTimeout(r, 300));
-
-      setZipProgress({
-        stage: 'creating',
-        message: 'Generating compressed ZIP archive on backend...',
-        progressPercent: 70,
-      });
-
-      // Construct URL parameters
       const params = new URLSearchParams();
       params.append('type', type);
-      params.append(
-        'cluster',
-        activeRole === 'Cluster Admin' ? 'dharmapuri' : selectedCluster
-      );
-      params.append('userRole', activeRole);
+      params.append('cluster', userRole === 'Cluster Admin' ? currentCluster : selectedCluster);
+      params.append('userRole', userRole);
 
       if (type === 'day' && dayNumber) {
         params.append('dayNumber', String(dayNumber));
       } else if (type === 'filtered') {
-        if (selectedDayTab !== 'all') params.append('dayNumber', String(selectedDayTab));
+        const d = activeDayNumber !== null ? activeDayNumber : selectedDayTab;
+        if (d !== 'all') params.append('dayNumber', String(d));
         if (selectedPanchayat !== 'all') params.append('panchayatId', selectedPanchayat);
         if (selectedVillage !== 'all') params.append('village', selectedVillage);
       }
 
       const zipUrl = apiUrl(`/api/session-photos/download-zip?${params.toString()}`);
-
-      setZipProgress({
-        stage: 'downloading',
-        message: 'Streaming ZIP package to your device...',
-        progressPercent: 90,
+      const response = await fetch(zipUrl, {
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
-
-      // Perform Fetch to trigger download
-      const response = await fetch(zipUrl);
       if (!response.ok) {
-        const errorJson = await response.json().catch(() => ({}));
-        throw new Error(
-          errorJson.error || 'Unable to create the ZIP file. Please try again.'
-        );
+        throw new Error('Unable to create ZIP archive.');
       }
 
-      // Extract filename from header
-      let downloadFilename = 'TQI_Session_Photos.zip';
-      const disposition = response.headers.get('Content-Disposition');
-      if (disposition && disposition.includes('filename=')) {
-        const match = disposition.match(/filename="?([^"]+)"?/);
-        if (match && match[1]) {
-          downloadFilename = match[1];
-        }
-      }
-
+      let downloadFilename = `TQI_Session_Photos_${selectedCluster}_${Date.now()}.zip`;
       const blob = await response.blob();
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -332,71 +441,280 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       document.body.removeChild(link);
       window.URL.revokeObjectURL(blobUrl);
 
-      // Success State
-      setZipProgress({
-        stage: 'completed',
-        message: 'ZIP downloaded successfully.',
-        progressPercent: 100,
-        zipFilename: downloadFilename,
-      });
-      setCompletedZipKey(key);
-
-      // Auto clear progress banner after 4 seconds
-      setTimeout(() => {
-        setZipProgress({
-          stage: 'idle',
-          message: '',
-          progressPercent: 0,
-        });
-      }, 4000);
+      setZipProgress({ stage: 'completed', message: 'ZIP archive downloaded successfully.', progressPercent: 100 });
+      setTimeout(() => setZipProgress({ stage: 'idle', message: '', progressPercent: 0 }), 4000);
     } catch (err: any) {
       console.error('ZIP download failed:', err);
-      setZipProgress({
-        stage: 'error',
-        message: err.message || 'Unable to create the ZIP file. Please try again.',
-        progressPercent: 0,
-        errorMessage: err.message || 'Unable to create the ZIP file. Please try again.',
-      });
+      setZipProgress({ stage: 'error', message: err.message || 'Failed to download ZIP.', progressPercent: 0 });
+      setTimeout(() => setZipProgress({ stage: 'idle', message: '', progressPercent: 0 }), 4000);
     } finally {
       setDownloadingZipKey(null);
     }
   };
 
-  // ==========================================
-  // SINGLE PHOTO ACTIONS
-  // ==========================================
   const handleDownloadSinglePhoto = (photo: SessionPhotoItem) => {
-    const downloadUrl = apiUrl(`/api/session-photos/${photo.id}/download`);
+    const downloadUrl = photo.fileUrl || apiUrl(`/api/session-photos/${photo.id}/download`);
     const link = document.createElement('a');
     link.href = downloadUrl;
+    link.target = '_blank';
     link.download = photo.originalFilename || `Photo_${photo.id}.jpg`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
+  const handleDownloadSelectedPhotos = () => {
+    const selectedPhotos = filteredPhotos.filter((photo) => selectedPhotoIds.includes(photo.id));
+    selectedPhotos.forEach((photo, index) => {
+      window.setTimeout(() => handleDownloadSinglePhoto(photo), index * 150);
+    });
+  };
+
+  // Direct Delete Photo (Draft only)
   const handleDeletePhoto = async (photo: SessionPhotoItem) => {
     try {
       const res = await fetch(apiUrl(`/api/session-photos/${photo.id}`), {
         method: 'DELETE',
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
-      if (!res.ok) {
-        throw new Error('Failed to delete photo.');
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to delete photo.');
       }
       setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+      setSelectedPhotoIds((prev) => prev.filter((id) => id !== photo.id));
       setPhotoToDelete(null);
-      if (selectedPhoto && selectedPhoto.id === photo.id) {
-        setSelectedPhoto(null);
-      }
-    } catch (err) {
-      alert('Failed to delete photo. Please try again.');
+      if (previewPhoto?.id === photo.id) setPreviewPhoto(null);
+      await fetchDayStatuses();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete photo. Please try again.');
     }
   };
 
-  // ==========================================
-  // PHOTO UPLOAD HANDLER
-  // ==========================================
+  // Bulk Delete (Draft only)
+  const handleBulkDelete = async () => {
+    try {
+      for (const id of selectedPhotoIds) {
+        const res = await fetch(apiUrl(`/api/session-photos/${id}`), {
+          method: 'DELETE',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || 'Failed to delete selected photo.');
+        }
+      }
+      setPhotos((prev) => prev.filter((p) => !selectedPhotoIds.includes(p.id)));
+      setSelectedPhotoIds([]);
+      setShowBulkDeleteConfirm(false);
+      await fetchDayStatuses();
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete selected photos.');
+    }
+  };
+
+  // Submit Day Photos Workflow (Cluster Admin)
+  const handleConfirmSubmitDay = async (dayNumber: number) => {
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl('/api/session-photos/submit'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          dayNumber,
+          academicYearId: selectedAcademicYearId,
+          clusterId: currentCluster,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit photos.');
+      }
+      setSubmitDayConfirm(null);
+      await Promise.all([fetchPhotos(), fetchDayStatuses()]);
+    } catch (err: any) {
+      alert(err.message || 'Unable to submit photos. Please try again.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Super Admin: Approve Day Submission
+  const handleApproveDaySubmission = async (clusterIdToApprove: string, dayNum: number) => {
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl('/api/session-photos/submissions/approve'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          clusterId: clusterIdToApprove,
+          dayNumber: dayNum,
+          academicYearId: selectedAcademicYearId,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to approve day submission.');
+      }
+      alert(`Day ${dayNum} photos collection approved successfully!`);
+      await Promise.all([fetchPhotos(), fetchDayStatuses()]);
+    } catch (err: any) {
+      alert(err.message || 'Failed to approve day submission.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Request Photo Delete Workflow
+  const handleConfirmDeleteRequest = async () => {
+    if (!deleteRequestTarget) return;
+    if (!deleteRequestReason.trim()) {
+      alert('Reason for photo deletion is mandatory.');
+      return;
+    }
+
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl('/api/session-photos/request-delete'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          photoId: deleteRequestTarget.id,
+          reason: deleteRequestReason.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit delete request.');
+      }
+
+      setPhotos((prev) =>
+        prev.map((p) =>
+          p.id === deleteRequestTarget.id
+            ? { ...p, deleteRequestStatus: 'PENDING', deleteRequestReason: deleteRequestReason.trim() }
+            : p
+        )
+      );
+
+      setDeleteRequestTarget(null);
+      setDeleteRequestReason('');
+      await fetchDeleteRequests();
+    } catch (err: any) {
+      alert(err.message || 'Failed to submit deletion request.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Request Photo Change / Edit Workflow
+  const handleConfirmChangeRequest = async () => {
+    if (!changeRequestDay) return;
+    if (!changeRequestReason.trim()) {
+      alert('Reason for requesting photo change is mandatory.');
+      return;
+    }
+
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl('/api/session-photos/request-change'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({
+          dayNumber: changeRequestDay,
+          academicYearId: selectedAcademicYearId,
+          reason: changeRequestReason.trim(),
+          clusterId: currentCluster,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to submit change request.');
+      }
+
+      setChangeRequestDay(null);
+      setChangeRequestReason('');
+      await fetchDayStatuses();
+      alert('Photo change request submitted for Super Admin review.');
+    } catch (err: any) {
+      alert(err.message || 'Failed to submit change request.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Super Admin: Approve Photo Delete
+  const handleApproveDeleteRequest = async (request: PhotoDeleteRequest) => {
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl(`/api/session-photos/delete-requests/${request.id}/approve`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to approve delete request.');
+      }
+
+      setPhotos((prev) => prev.filter((p) => p.id !== request.photoId));
+      setDeleteRequests((prev) =>
+        prev.map((r) => (r.id === request.id ? { ...r, status: 'APPROVED' } : r))
+      );
+      await Promise.all([fetchPhotos(), fetchDayStatuses(), fetchDeleteRequests()]);
+    } catch (err: any) {
+      alert(err.message || 'Failed to approve photo deletion.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Super Admin: Reject Photo Delete
+  const handleRejectDeleteRequest = async (request: PhotoDeleteRequest) => {
+    const reason = window.prompt('Optional rejection remarks for Cluster Admin:', '');
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl(`/api/session-photos/delete-requests/${request.id}/reject`), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({ remarks: reason || '' }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to reject delete request.');
+      }
+
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === request.photoId ? { ...p, deleteRequestStatus: 'REJECTED' } : p))
+      );
+      setDeleteRequests((prev) =>
+        prev.map((r) => (r.id === request.id ? { ...r, status: 'REJECTED' } : r))
+      );
+      await Promise.all([fetchPhotos(), fetchDeleteRequests()]);
+    } catch (err: any) {
+      alert(err.message || 'Failed to reject delete request.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
+  // Upload Form Submit
   const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (uploadFiles.length === 0) {
@@ -404,22 +722,30 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       return;
     }
 
+    const currentDay = activeDayNumber !== null ? activeDayNumber : uploadDay;
+    const existingCount = photos.filter((p) => p.dayNumber === currentDay).length;
+    if (existingCount + uploadFiles.length > 50) {
+      setUploadError(`Maximum 50 photos per Day/Session allowed. Currently ${existingCount}/50. Cannot upload ${uploadFiles.length} more.`);
+      return;
+    }
+
     setIsUploading(true);
     setUploadError(null);
 
     const formData = new FormData();
-    formData.append('clusterId', selectedCluster.toLowerCase());
-    formData.append('clusterName', selectedCluster);
+    formData.append('clusterId', (userRole === 'Cluster Admin' ? currentCluster : selectedCluster).toLowerCase());
+    formData.append('clusterName', resolvedClusterName);
     formData.append('sessionTitle', uploadTitle);
-    formData.append('dayNumber', String(uploadDay));
+    formData.append('dayNumber', String(currentDay));
     formData.append('date', uploadDate);
+    formData.append('academicYearId', selectedAcademicYearId || '');
     formData.append('panchayatId', uploadPanchayat);
 
     const foundP = panchayats.find((p) => p.id === uploadPanchayat || p.name === uploadPanchayat);
     formData.append('panchayatName', foundP ? foundP.name : uploadPanchayat);
     formData.append('villageName', uploadVillage);
     formData.append('uploadedBy', uploadUploader);
-    formData.append('uploadedRole', activeRole);
+    formData.append('uploadedRole', userRole);
     formData.append('caption', uploadCaption);
 
     uploadFiles.forEach((file) => {
@@ -438,15 +764,16 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         throw new Error(data.error || 'Upload failed.');
       }
 
-
-      // Add new photos to local state
       if (data.photos && Array.isArray(data.photos)) {
         setPhotos((prev) => [...data.photos, ...prev]);
+      } else {
+        await fetchPhotos();
       }
 
       setShowUploadModal(false);
       setUploadFiles([]);
       setUploadCaption('');
+      await fetchDayStatuses();
     } catch (err: any) {
       console.error('Upload failed:', err);
       setUploadError(err.message || 'Failed to upload photographs.');
@@ -455,1000 +782,1475 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     }
   };
 
-  // Quick Open Upload for specific day
-  const handleOpenUploadForDay = (day: number) => {
-    setUploadDay(day);
-    setShowUploadModal(true);
+  const handleToggleSelectAll = () => {
+    if (selectedPhotoIds.length === filteredPhotos.length) {
+      setSelectedPhotoIds([]);
+    } else {
+      setSelectedPhotoIds(filteredPhotos.map((p) => p.id));
+    }
   };
 
-  if (activeRole === 'Super Admin' && selectedCluster !== 'all' && selectedDayTab !== 'all') {
-    const selectedDayPhotos = photos.filter(
-      (photo) => photo.clusterId.toLowerCase() === selectedCluster.toLowerCase() && photo.dayNumber === selectedDayTab,
+  const handleToggleSelectPhoto = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedPhotoIds((prev) =>
+      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
     );
+  };
 
-    return (
-      <div className="space-y-6 max-w-7xl mx-auto pb-16 font-sans">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-5">
-          <div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mb-2">
-              <button type="button" onClick={() => setSelectedCluster('all')} className="hover:text-[#0B3D91]">Session Photos</button>
-              <span>/</span><span>{selectedCluster}</span><span>/</span><span className="font-semibold text-[#0B3D91]">Day {selectedDayTab}</span>
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900">{selectedCluster} - Day {selectedDayTab} Photos</h1>
-            <p className="text-sm text-slate-500 mt-1">Review the real photo records submitted for this day.</p>
-          </div>
-          <button type="button" onClick={() => { setSelectedDayTab('all'); setExpandedDay(null); }} className="px-3 py-2 rounded-md bg-slate-100 hover:bg-slate-200 text-xs font-bold text-slate-700">Back to Days</button>
-        </div>
+  const previewIndex = useMemo(() => {
+    if (!previewPhoto) return -1;
+    return filteredPhotos.findIndex((photo) => photo.id === previewPhoto.id);
+  }, [previewPhoto, filteredPhotos]);
 
-        <div className="flex items-center justify-between text-sm text-slate-600">
-          <span>{selectedDayPhotos.length} photo records</span>
-          <button type="button" disabled={!selectedDayPhotos.length} onClick={() => handleDownloadZip('day', selectedDayTab)} className="px-3 py-2 rounded-md bg-[#0B3D91] text-white text-xs font-bold disabled:bg-slate-200 disabled:text-slate-400">Download Day {selectedDayTab} ZIP</button>
-        </div>
+  const goToPreviewPhoto = (direction: 'prev' | 'next') => {
+    if (!filteredPhotos.length || previewIndex < 0) return;
 
-        {selectedDayPhotos.length === 0 ? (
-          <div className="py-20 text-center bg-white border border-slate-200 rounded-md text-sm text-slate-500">No photos are available for Day {selectedDayTab}.</div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {selectedDayPhotos.map((photo) => (
-              <article key={photo.id} className="bg-white border border-slate-200 rounded-md p-4 shadow-xs">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0"><h2 className="text-sm font-bold text-slate-900 truncate">{photo.originalFilename}</h2><p className="text-xs text-slate-500 mt-1">{photo.caption || photo.sessionTitle}</p></div>
-                  <span className="text-[10px] font-bold px-2 py-1 rounded bg-blue-50 text-[#0B3D91]">Day {photo.dayNumber}</span>
-                </div>
-                <div className="mt-4 pt-3 border-t border-slate-100 text-xs text-slate-500">Uploaded by {photo.uploadedBy || 'Cluster Admin'}</div>
-                <div className="flex gap-2 mt-3"><a href={photo.fileUrl} target="_blank" rel="noreferrer" className="flex-1 text-center px-3 py-2 rounded-md bg-[#0B3D91] text-white text-xs font-bold">View Photos</a><a href={photo.fileUrl} target="_blank" rel="noreferrer" download className="px-3 py-2 rounded-md bg-slate-100 text-slate-700 text-xs font-bold">Download</a></div>
-              </article>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+    const nextIndex = direction === 'next'
+      ? previewIndex + 1
+      : previewIndex - 1;
+
+    if (nextIndex < 0 || nextIndex >= filteredPhotos.length) return;
+
+    setPreviewPhoto(filteredPhotos[nextIndex]);
+  };
+
+  useEffect(() => {
+    if (!previewPhoto) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        goToPreviewPhoto('next');
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        goToPreviewPhoto('prev');
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setPreviewPhoto(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewPhoto, previewIndex, filteredPhotos]);
 
   return (
-    <div className="w-full space-y-6 pb-16 font-sans">
-      {/* ==========================================
-          1. CARDLESS PAGE HEADER (MAIN HEADING ONLY)
-          ========================================== */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-6">
+      {/* 1. Page Header */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Session Photographs &amp; ZIP Archives
+          <div className="flex items-center gap-2">
+            {activeDayNumber !== null && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setActiveDayNumber(null)}
+                className="gap-1 px-2 text-xs font-semibold text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                <span>Back to {userRole === 'Super Admin' ? 'Cluster Overview' : 'Days'}</span>
+              </Button>
+            )}
+            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
+              {activeDayNumber !== null
+                ? `DAY ${activeDayNumber} — ${activeDayConfig?.dayName || 'Session Photos'}`
+                : 'Session Photographs Archive'}
             </h1>
-            <span className="rounded-full bg-brand-50 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 border border-brand-200 dark:bg-brand-950/40 dark:text-brand-400 dark:border-brand-800">
-              {selectedCluster}
-            </span>
+            <Badge variant="default" size="sm">
+              {filteredPhotos.length} Photos
+            </Badge>
           </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {activeDayNumber !== null
+              ? `Curated visual evidence for ${activeDayConfig?.sessionName || activeDayConfig?.dayName}. Maximum 50 photos per session.`
+              : 'Curated visual evidence and activity documentation across Super Admin configured program cycle days.'}
+          </p>
         </div>
 
-        {/* Header Action Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto">
-          {/* Super Admin: Download All Clusters ZIP */}
-          {activeRole === 'Super Admin' && (
-            <button
-              id="download-all-clusters-zip-btn"
-              disabled={downloadingZipKey !== null}
-              onClick={() => handleDownloadZip('all-clusters')}
-              className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
-                downloadingZipKey === 'all-clusters'
-                  ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                  : 'bg-success-600 hover:bg-success-700 text-white active:scale-[0.98]'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[18px]">
-                {downloadingZipKey === 'all-clusters' ? 'sync' : 'folder_zip'}
-              </span>
-              {downloadingZipKey === 'all-clusters'
-                ? 'Creating ZIP...'
-                : completedZipKey === 'all-clusters'
-                ? 'Download All Clusters Again'
-                : 'Download All Clusters (ZIP)'}
-            </button>
+        {/* Action Buttons Top Bar */}
+        <div className="flex flex-wrap items-center gap-2">
+          {userRole === 'Super Admin' && (
+            <div className="flex rounded-md border border-border bg-muted/40 p-0.5 text-xs font-semibold">
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminViewTab('submissions');
+                  setActiveDayNumber(null);
+                }}
+                className={`rounded px-2.5 py-1 transition ${
+                  adminViewTab === 'submissions'
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Day Submissions
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminViewTab('gallery');
+                  setActiveDayNumber(null);
+                }}
+                className={`rounded px-2.5 py-1 transition ${
+                  adminViewTab === 'gallery'
+                    ? 'bg-card text-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                All Gallery
+              </button>
+            </div>
           )}
 
-          {/* Cluster Level: Download All 8 Days ZIP */}
-          <button
-            id="download-all-8-days-zip-btn"
-            disabled={downloadingZipKey !== null}
-            onClick={() => handleDownloadZip('cluster-all-days')}
-            className={`inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-xs font-semibold shadow-theme-xs transition cursor-pointer ${
-              downloadingZipKey === `cluster-${selectedCluster}`
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
-            }`}
-          >
-            <span className="material-symbols-outlined text-[18px]">
-              {downloadingZipKey === `cluster-${selectedCluster}` ? 'sync' : 'cloud_download'}
-            </span>
-            {downloadingZipKey === `cluster-${selectedCluster}`
-              ? 'Creating ZIP...'
-              : completedZipKey === `cluster-${selectedCluster}`
-              ? `Download ${selectedCluster} Again`
-              : `Download All 8 Days (${selectedCluster})`}
-          </button>
-
-          {/* Upload Photos Button */}
-          {activeRole !== 'Super Admin' && (
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center gap-2 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-gray-900 px-3.5 py-2 text-xs font-semibold shadow-theme-xs hover:opacity-90 transition active:scale-[0.98] cursor-pointer"
+          {selectedPhotoIds.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadSelectedPhotos}
+              className="gap-1.5 text-xs font-semibold"
             >
-              <span className="material-symbols-outlined text-[18px]">add_photo_alternate</span>
-              Upload Photos
-            </button>
+              <Download className="h-3.5 w-3.5" />
+              <span>Download ({selectedPhotoIds.length})</span>
+            </Button>
+          )}
+
+          {selectedPhotoIds.length > 0 && (userRole === 'Super Admin' || !activeDayConfig?.isLocked) && (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setShowBulkDeleteConfirm(true)}
+                className="gap-1.5 text-xs font-semibold"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete ({selectedPhotoIds.length})</span>
+              </Button>
+            </>
+          )}
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => handleDownloadZip('filtered')}
+            disabled={downloadingZipKey !== null || filteredPhotos.length === 0}
+            className="gap-1.5 text-xs font-semibold"
+          >
+            <Download className="h-3.5 w-3.5" />
+            <span>{downloadingZipKey === 'filtered' ? 'Preparing ZIP...' : 'Download ZIP'}</span>
+          </Button>
+
+          {(userRole === 'Super Admin' || (userRole === 'Cluster Admin' && activeDayNumber !== null && !activeDayConfig?.isLocked)) && (
+            <Button
+              size="sm"
+              onClick={() => {
+                if (activeDayNumber) setUploadDay(activeDayNumber);
+                setShowUploadModal(true);
+              }}
+              disabled={(activeDayConfig?.photosCount || 0) >= 50 && userRole === 'Cluster Admin'}
+              className="gap-1.5 text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              title={(activeDayConfig?.photosCount || 0) >= 50 ? '50-photo limit reached' : 'Upload photos'}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>+ Upload Photos</span>
+            </Button>
+          )}
+
+          {userRole === 'Cluster Admin' && activeDayNumber !== null && !activeDayConfig?.isLocked && (
+            <Button
+              size="sm"
+              variant="default"
+              disabled={isProcessingAction || (activeDayConfig?.photosCount || 0) === 0}
+              onClick={() => setSubmitDayConfirm(activeDayNumber)}
+              className="gap-1.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              <span>Submit Photos</span>
+            </Button>
+          )}
+
+          {userRole === 'Cluster Admin' && activeDayNumber !== null && activeDayConfig?.isLocked && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setChangeRequestDay(activeDayNumber);
+                setChangeRequestReason('');
+              }}
+              className="gap-1.5 text-xs font-semibold text-amber-700 border-amber-300 hover:bg-amber-50"
+            >
+              <Sparkle className="h-3.5 w-3.5 text-amber-600" />
+              <span>Request Photo Change</span>
+            </Button>
           )}
         </div>
       </div>
 
-      {/* ==========================================
-          PROGRESS & FEEDBACK BANNER
-          ========================================== */}
-      {!showClusterLanding && zipProgress.stage !== 'idle' && (
-        <div
-          className={`rounded-2xl p-4 border transition-all ${
-            zipProgress.stage === 'error'
-              ? 'bg-rose-50 border-rose-200 text-rose-900'
-              : zipProgress.stage === 'completed'
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-              : 'bg-blue-50/90 border-blue-200 text-blue-950'
-          }`}
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span
-                className={`material-symbols-outlined text-[24px] ${
-                  zipProgress.stage === 'error'
-                    ? 'text-rose-600'
-                    : zipProgress.stage === 'completed'
-                    ? 'text-emerald-600'
-                    : 'text-brand-500 animate-spin'
-                }`}
-              >
-                {zipProgress.stage === 'error'
-                  ? 'error'
-                  : zipProgress.stage === 'completed'
-                  ? 'check_circle'
-                  : 'progress_activity'}
-              </span>
+      {/* ZIP Download Progress Alert */}
+      {zipProgress.stage !== 'idle' && (
+        <div className="rounded-lg border border-border bg-card p-4 shadow-sm animate-in fade-in-0">
+          <div className="flex items-center justify-between text-xs font-semibold text-foreground mb-1.5">
+            <span className="flex items-center gap-2">
+              <Download className="h-4 w-4 text-primary animate-bounce" />
+              <span>{zipProgress.message}</span>
+            </span>
+            <span className="font-mono text-muted-foreground">{zipProgress.progressPercent}%</span>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full bg-primary transition-all duration-300"
+              style={{ width: `${zipProgress.progressPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* VIEW MODE 1: SUPER ADMIN REVIEW DELETE REQUESTS TAB */}
+      {userRole === 'Super Admin' && adminViewTab === 'delete-requests' ? (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border border-border bg-card p-3 shadow-xs">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-amber-600" />
               <div>
-                <div className="font-bold text-sm">{zipProgress.message}</div>
-                {zipProgress.zipFilename && (
-                  <div className="text-xs text-gray-600 mt-0.5">
-                    Saved as <span className="font-mono font-semibold">{zipProgress.zipFilename}</span>
-                  </div>
-                )}
-                {zipProgress.errorMessage && (
-                  <div className="text-xs text-rose-700 mt-0.5 font-medium">
-                    {zipProgress.errorMessage}
-                  </div>
-                )}
+                <h3 className="text-sm font-bold text-foreground">Pending Photo Deletion Requests</h3>
+                <p className="text-xs text-muted-foreground">
+                  Review submitted requests from Cluster Admins. Approving removes both the database record and the actual stored file.
+                </p>
               </div>
             </div>
-
-            {zipProgress.stage === 'completed' && (
-              <span className="text-xs font-bold text-emerald-700 bg-emerald-100/80 px-2.5 py-1 rounded-md">
-                Complete
-              </span>
-            )}
+            <Badge variant="outline" className="font-mono text-xs">
+              {deleteRequests.filter((r) => r.status === 'PENDING').length} Pending Review
+            </Badge>
           </div>
 
-          {/* Progress Bar */}
-          {zipProgress.stage !== 'error' && zipProgress.stage !== 'completed' && (
-            <div className="w-full bg-blue-100/80 h-1.5 rounded-full overflow-hidden mt-3">
-              <div
-                className="bg-brand-500 h-full transition-all duration-300 rounded-full"
-                style={{ width: `${zipProgress.progressPercent}%` }}
+          {deleteRequests.length === 0 ? (
+            <div className="rounded-lg border border-border bg-card p-12 text-center shadow-xs">
+              <EmptyState
+                icon={CheckCircle2}
+                title="No photo deletion requests"
+                description="There are currently no deletion requests submitted by Cluster Admins requiring review."
               />
             </div>
-          )}
-        </div>
-      )}
-
-      {/* ==========================================
-          SUPER ADMIN CLUSTER SELECTOR (IF SUPER ADMIN)
-          ========================================== */}
-      {activeRole === 'Super Admin' && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-gray-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-              Super Admin Multi-Cluster View
-            </span>
-            <div className="text-sm font-semibold text-gray-900 dark:text-white">
-              Select Cluster to Inspect or Download:
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            {['Dharmapuri', 'Salem', 'Krishnagiri'].map((cName) => (
-              <button
-                key={cName}
-                onClick={() => setSelectedCluster(cName)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
-                  selectedCluster.toLowerCase() === cName.toLowerCase()
-                    ? 'bg-brand-500 text-white shadow-theme-xs'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200'
-                }`}
-              >
-                {cName} Cluster
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {showClusterLanding && (
-        <section className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">Session Photos - Clusters</h2>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {photoClusters.map((cluster) => {
-              const clusterPhotos = photos.filter((photo) => photo.clusterId.toLowerCase() === cluster.id.toLowerCase());
-              const days = new Set(clusterPhotos.map((photo) => photo.dayNumber)).size;
-              return (
-                <button
-                  key={cluster.id}
-                  type="button"
-                  onClick={() => { setSelectedCluster(cluster.id); setSelectedDayTab('all'); }}
-                  className="text-left rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs hover:border-brand-500 hover:shadow-theme-sm transition-all dark:border-gray-800 dark:bg-white/[0.03]"
+          ) : (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {deleteRequests.map((req) => (
+                <div
+                  key={req.id}
+                  className="flex flex-col justify-between overflow-hidden rounded-lg border border-border bg-card shadow-xs transition hover:shadow-md"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-brand-50 dark:bg-brand-950/40 text-brand-500 flex items-center justify-center"><span className="material-symbols-outlined">hub</span></div>
-                    <span className="text-xs font-bold text-brand-500">View cluster</span>
-                  </div>
-                  <h3 className="mt-5 text-base font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
-                  <div className="grid grid-cols-3 gap-2 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-xs">
-                    <span><strong className="block text-gray-900 dark:text-white">{days}/8</strong><em className="not-italic text-gray-500">Days</em></span>
-                    <span><strong className="block text-gray-900 dark:text-white">{clusterPhotos.length}</strong><em className="not-italic text-gray-500">Photos</em></span>
-                    <span><strong className="block text-gray-900 dark:text-white">{new Set(clusterPhotos.map((photo) => photo.panchayatId).filter(Boolean)).size}</strong><em className="not-italic text-gray-500">Panchayats</em></span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-          {photoClusters.length === 0 && <div className="py-14 text-center bg-white border border-gray-200 rounded-2xl text-sm text-gray-500">No session photo clusters found in MySQL.</div>}
-        </section>
-      )}
-
-      {/* ==========================================
-          SECTION 1: DAY 1 TO DAY 8 ALBUMS
-          ========================================== */}
-      <div className={showClusterLanding ? 'hidden' : 'space-y-4'}>
-        <div className="flex items-center justify-between">
-          <h2 className="text-base font-bold text-gray-900 dark:text-white">
-            Daily Session Albums ({selectedCluster})
-          </h2>
-          <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">
-            Total Photos: <strong className="text-gray-900 dark:text-white">{photos.length}</strong>
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {daySummaries.map((daySummary) => {
-            const isDayDownloading = downloadingZipKey === `day-${daySummary.dayNumber}`;
-            const isDayCompleted = completedZipKey === `day-${daySummary.dayNumber}`;
-
-            return (
-              <div
-                key={daySummary.dayNumber}
-                className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs hover:border-brand-500/40 transition-all flex flex-col justify-between dark:border-gray-800 dark:bg-white/[0.03]"
-              >
-                <div>
-                  {/* Card Header with Proper Gap between Day Label and Date */}
-                  <div className="flex items-center justify-between mb-2.5">
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        onClick={() => { setExpandedDay(expandedDay === daySummary.dayNumber ? null : daySummary.dayNumber); setSelectedDayTab(daySummary.dayNumber); }}
-                        className="font-bold text-sm text-gray-900 dark:text-white text-left hover:text-brand-500 transition-colors"
+                  <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+                    <img
+                      src={req.fileUrl || '/logo.png'}
+                      alt={req.fileName}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        (e.target as HTMLElement).style.display = 'none';
+                      }}
+                    />
+                    <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
+                      <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
+                        Day {req.dayNumber}
+                      </Badge>
+                      <Badge
+                        variant="default"
+                        size="sm"
+                        className={`text-[10px] font-bold ${
+                          req.status === 'PENDING'
+                            ? 'bg-amber-600 text-white'
+                            : req.status === 'APPROVED'
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-red-600 text-white'
+                        }`}
                       >
-                        {daySummary.dayLabel}
-                      </button>
-                      <span className="text-[11px] text-gray-400 font-medium">
-                        {daySummary.date}
+                        {req.status === 'PENDING' ? 'Pending Review' : req.status}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="p-3.5 space-y-2 text-xs">
+                    <div className="flex items-center justify-between border-b border-border pb-1.5">
+                      <span className="font-semibold text-foreground truncate max-w-[180px]" title={req.fileName}>
+                        {req.fileName}
+                      </span>
+                      <span className="font-mono text-[10px] text-muted-foreground">
+                        {req.requestedDate ? new Date(req.requestedDate).toLocaleDateString() : '—'}
                       </span>
                     </div>
 
-                    <span
-                      className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
-                        daySummary.photosCount > 0
-                          ? 'bg-success-50 text-success-700 border border-success-200 dark:bg-success-950/40 dark:text-success-400'
-                          : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
+                    <div className="space-y-1 text-[11px] text-muted-foreground">
+                      <div>
+                        <strong className="text-foreground">Cluster:</strong> {req.clusterName}
+                      </div>
+                      <div>
+                        <strong className="text-foreground">Day / Session:</strong> Day {req.dayNumber} — {req.sessionName}
+                      </div>
+                      <div>
+                        <strong className="text-foreground">Requested By:</strong> {req.requestedBy}
+                      </div>
+                    </div>
+
+                    <div className="rounded border border-amber-200 bg-amber-50/70 p-2 text-amber-950">
+                      <strong className="block font-semibold text-[11px] text-amber-900">Reason for Deletion:</strong>
+                      <p className="mt-0.5 text-[11px] italic leading-relaxed">{req.reason}</p>
+                    </div>
+
+                    {req.status === 'PENDING' && (
+                      <div className="pt-2 flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isProcessingAction}
+                          onClick={() => handleRejectDeleteRequest(req)}
+                          className="text-xs text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          Reject
+                        </Button>
+                        <Button
+                          size="sm"
+                          disabled={isProcessingAction}
+                          onClick={() => handleApproveDeleteRequest(req)}
+                          className="text-xs bg-red-600 text-white hover:bg-red-700 font-semibold"
+                        >
+                          Approve Delete
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : activeDayNumber !== null ? (
+        /* VIEW MODE 2: DEDICATED DAY VIEW (FOR BOTH CLUSTER ADMIN AND SUPER ADMIN) */
+        <div className="space-y-4">
+          {activeDayConfig && (
+            <div className="rounded-lg border border-border bg-card p-4 shadow-xs">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-bold text-primary">
+                      DAY {activeDayConfig.dayNumber}
+                    </span>
+                    <h2 className="text-base font-bold text-foreground">
+                      {activeDayConfig.dayName}
+                    </h2>
+                    <Badge
+                      variant="default"
+                      size="sm"
+                      className={`text-xs font-semibold ${
+                        activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW'
+                          ? 'bg-amber-100 text-amber-900 border-amber-300'
+                          : activeDayConfig.status === 'APPROVED'
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : activeDayConfig.status === 'EDIT_APPROVED'
+                          ? 'bg-blue-100 text-blue-900 border-blue-300'
+                          : 'bg-muted text-muted-foreground'
                       }`}
                     >
-                      {daySummary.photosCount} Photos
-                    </span>
-                  </div>
-
-                  {/* Photo Thumbnails Preview */}
-                  <div className="grid grid-cols-4 gap-1.5 my-3">
-                    {daySummary.featuredPhotos.length > 0 ? (
-                      daySummary.featuredPhotos.map((p, pIdx) => (
-                        <div
-                          key={p.id || pIdx}
-                          onClick={() => setSelectedPhoto(p)}
-                          className="aspect-square rounded-lg overflow-hidden bg-gray-100 border border-gray-200 cursor-pointer hover:opacity-85 transition-opacity dark:border-gray-800"
-                        >
-                          <img
-                            src={p.fileUrl}
-                            alt={p.originalFilename}
-                            className="w-full h-full object-cover"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                      ))
-                    ) : (
-                      <div className="col-span-4 py-4 text-center text-xs text-gray-400 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-800">
-                        No photos yet for this day
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mb-3 flex items-center justify-between font-medium">
-                    <span>Coverage: {daySummary.panchayatCoverage} Panchayats</span>
-                    <span>Target: {daySummary.targetCount}</span>
-                  </div>
-                </div>
-
-                {/* Card Action Buttons */}
-                <div className="pt-2.5 border-t border-gray-100 dark:border-gray-800 flex flex-col gap-1.5">
-                  <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      onClick={() => {
-                        setExpandedDay(daySummary.dayNumber);
-                        setSelectedDayTab(daySummary.dayNumber);
-                        const element = document.getElementById('gallery-section');
-                        element?.scrollIntoView({ behavior: 'smooth' });
-                      }}
-                      className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">grid_view</span>
-                      View
-                    </button>
-
-                    {activeRole !== 'Super Admin' && (
-                      <button
-                        onClick={() => handleOpenUploadForDay(daySummary.dayNumber)}
-                        className="px-2.5 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1 transition cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-[14px]">upload</span>
-                        Upload
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Download ZIP Button */}
-                  <button
-                    id={`download-day-${daySummary.dayNumber}-zip-btn`}
-                    disabled={downloadingZipKey !== null || daySummary.photosCount === 0}
-                    onClick={() => handleDownloadZip('day', daySummary.dayNumber)}
-                    className={`w-full py-1.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
-                      daySummary.photosCount === 0
-                        ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                        : isDayDownloading
-                        ? 'bg-brand-100 text-brand-700 cursor-wait'
-                        : 'bg-brand-500 hover:bg-brand-600 text-white active:scale-[0.98]'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[16px]">
-                      {isDayDownloading ? 'sync' : 'folder_zip'}
-                    </span>
-                    {isDayDownloading
-                      ? 'Creating ZIP...'
-                      : isDayCompleted
-                      ? 'Download Again'
-                      : `Download Day ${daySummary.dayNumber} ZIP`}
-                  </button>
-
-                  {expandedDay === daySummary.dayNumber && (
-                    <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-bold uppercase tracking-wide text-gray-400">Day {daySummary.dayNumber} photo list</span>
-                        <button type="button" onClick={() => setExpandedDay(null)} className="text-[11px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">Close</button>
-                      </div>
-                      {daySummary.featuredPhotos.length === 0 ? (
-                        <div className="rounded-xl bg-gray-50 dark:bg-gray-900 border border-dashed border-gray-200 dark:border-gray-800 px-3 py-3 text-xs text-gray-500">No photos or folders are available for this day.</div>
+                      {activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW' ? (
+                        <span className="flex items-center gap-1">
+                          <Lock className="h-3 w-3" />
+                          <span>Submitted — Pending Review</span>
+                        </span>
+                      ) : activeDayConfig.status === 'APPROVED' ? (
+                        <span className="flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3" />
+                          <span>Approved</span>
+                        </span>
+                      ) : activeDayConfig.status === 'EDIT_APPROVED' ? (
+                        <span className="flex items-center gap-1">
+                          <CheckCircle2 className="h-3 w-3 text-blue-700" />
+                          <span>Edit Approved — Editable</span>
+                        </span>
                       ) : (
-                        daySummary.featuredPhotos.map((photo) => (
-                          <div key={photo.id} className="flex items-center justify-between gap-2 rounded-xl bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 px-2.5 py-2">
-                            <div className="min-w-0"><div className="text-xs font-semibold text-gray-800 dark:text-gray-200 truncate">{photo.originalFilename}</div><div className="text-[10px] text-gray-400 truncate">{photo.caption || photo.sessionTitle}</div></div>
-                            <a href={photo.fileUrl} target="_blank" rel="noreferrer" className="shrink-0 px-2 py-1 rounded-lg bg-brand-500 text-white text-[10px] font-semibold">View</a>
-                          </div>
-                        ))
+                        <span>DRAFT (Editable)</span>
                       )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ==========================================
-          SECTION 2: PHOTO GALLERY
-          ========================================== */}
-      <div id="gallery-section" className={`${showClusterLanding ? 'hidden ' : ''}space-y-4 pt-2`}>
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">Photo Gallery</h2>
-          </div>
-
-          {/* Filtered ZIP Download CTA */}
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-              Showing <strong className="text-gray-900 dark:text-white">{filteredPhotos.length}</strong> photos
-            </span>
-
-            <button
-              id="download-filtered-zip-btn"
-              disabled={downloadingZipKey !== null || filteredPhotos.length === 0}
-              onClick={() => handleDownloadZip('filtered')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-theme-xs transition-all cursor-pointer ${
-                filteredPhotos.length === 0
-                  ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 cursor-not-allowed'
-                  : downloadingZipKey === 'filtered'
-                  ? 'bg-gray-200 text-gray-600'
-                  : 'bg-success-600 hover:bg-success-700 text-white'
-              }`}
-            >
-              <span className="material-symbols-outlined text-[16px]">
-                {downloadingZipKey === 'filtered' ? 'sync' : 'download'}
-              </span>
-              {downloadingZipKey === 'filtered' ? 'Creating ZIP...' : 'Download Filtered ZIP'}
-            </button>
-          </div>
-        </div>
-
-        {/* Day Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1">
-          <button
-            onClick={() => setSelectedDayTab('all')}
-            className={`px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              selectedDayTab === 'all'
-                ? 'bg-slate-900 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            All Days ({photos.length})
-          </button>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((dNum) => {
-            const count = photos.filter((p) => p.dayNumber === dNum).length;
-            return (
-              <button
-                key={dNum}
-                onClick={() => setSelectedDayTab(dNum)}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  selectedDayTab === dNum
-                    ? 'bg-[#0B3D91] text-white'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Day {dNum} ({count})
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Filter Selectors Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-              Panchayat
-            </label>
-            <Select
-              value={selectedPanchayat || "all"}
-              onValueChange={(val) => {
-                setSelectedPanchayat(val);
-                setSelectedVillage('all');
-              }}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Panchayats" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Panchayats</SelectItem>
-                {panchayats.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-gray-500 uppercase mb-1">
-              Village Center
-            </label>
-            <Select
-              value={selectedVillage || "all"}
-              onValueChange={(val) => setSelectedVillage(val)}
-            >
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue placeholder="All Villages" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Villages</SelectItem>
-                {currentFilterVillages.map((v) => (
-                  <SelectItem key={v.id} value={v.name}>
-                    {v.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">
-              Search by Topic, Village or Volunteer
-            </label>
-            <div className="relative">
-              <Search className="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search session title, volunteer name, file..."
-                className="w-full rounded-xl border border-gray-200 bg-white pl-9 pr-8 py-2 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ==========================================
-          SECTION 3: PHOTO GALLERY GRID
-          (Every Photo has View, Download, Delete)
-          ========================================== */}
-      {isLoading ? (
-        <div className="py-20 text-center text-slate-500 bg-white rounded-md border border-slate-200">
-          <span className="material-symbols-outlined text-[32px] animate-spin text-[#0B3D91]">
-            progress_activity
-          </span>
-          <p className="text-xs font-semibold mt-2">Loading high-resolution session photos...</p>
-        </div>
-      ) : filteredPhotos.length === 0 ? (
-        <div className="py-16 text-center bg-white rounded-md border border-slate-200 p-6">
-          <span className="material-symbols-outlined text-[42px] text-slate-300 mb-2">
-            image_not_supported
-          </span>
-          <h3 className="font-bold text-slate-800 text-sm">No Photographs Match Your Filter</h3>
-          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-            Try adjusting your search criteria, selecting another Day or uploading new session photos.
-          </p>
-          <button
-            onClick={() => {
-              setSelectedDayTab('all');
-              setSelectedPanchayat('all');
-              setSelectedVillage('all');
-              setSearchQuery('');
-            }}
-            className="mt-3 px-3 py-1.5 text-xs font-bold text-[#0B3D91] bg-blue-50 rounded-md hover:bg-blue-100 transition-colors"
-          >
-            Reset Filters
-          </button>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          {filteredPhotos.map((photo) => (
-            <div
-              key={photo.id}
-              className="group bg-white rounded-md border border-slate-200 overflow-hidden shadow-xs hover:shadow-sm transition-all flex flex-col"
-            >
-              {/* Photo Display with Hover Overlay */}
-              <div className="relative aspect-[4/3] bg-slate-900 overflow-hidden cursor-pointer">
-                <img
-                  src={photo.fileUrl}
-                  alt={photo.sessionTitle}
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  referrerPolicy="no-referrer"
-                  onClick={() => setSelectedPhoto(photo)}
-                />
-
-                {/* Day Badge */}
-                <div className="absolute top-2 left-2 px-2 py-0.5 rounded bg-black/70  text-white text-[10px] font-bold">
-                  Day {photo.dayNumber}
-                </div>
-
-                {/* Original File Size */}
-                <div className="absolute top-2 right-2 px-2 py-0.5 rounded bg-black/70  text-white text-[10px] font-mono">
-                  {Math.round((photo.fileSize || 50000) / 1024)} KB
-                </div>
-
-                {/* Hover Quick Actions */}
-                <div className="absolute inset-0  from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-3 text-white">
-                  <p className="text-xs font-bold leading-tight line-clamp-1">{photo.sessionTitle}</p>
-                  <p className="text-[11px] text-slate-200 mt-0.5">
-                    {photo.panchayatName} â€¢ {photo.villageName}
-                  </p>
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedPhoto(photo);
-                      }}
-                      className="px-2 py-1 bg-white20 hover:bg-white30  rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">visibility</span>
-                      View
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDownloadSinglePhoto(photo);
-                      }}
-                      className="px-2 py-1 bg-[#0B3D91] hover:bg-[#082a66] rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">download</span>
-                      Download
-                    </button>
+                    </Badge>
                   </div>
-                </div>
-              </div>
-
-              {/* Photo Card Footer Details */}
-              <div className="p-3 flex-1 flex flex-col justify-between">
-                <div>
-                  <div className="font-bold text-xs text-slate-900 line-clamp-1">
-                    {photo.sessionTitle}
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    {photo.panchayatName} â€¢ {photo.villageName}
-                  </div>
-                  <div className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
-                    <span>By {photo.uploadedBy}</span>
-                    <span>{photo.date}</span>
-                  </div>
-                </div>
-
-                {/* 3 Explicit Action Buttons: [View] [Download] [Delete] */}
-                <div className="mt-3 pt-2.5 border-t border-slate-100 grid grid-cols-3 gap-1 text-[11px] font-semibold">
-                  <button
-                    onClick={() => setSelectedPhoto(photo)}
-                    className="py-1 px-1.5 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="View Full Resolution"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">visibility</span>
-                    View
-                  </button>
-
-                  <button
-                    onClick={() => handleDownloadSinglePhoto(photo)}
-                    className="py-1 px-1.5 text-[#0B3D91] bg-blue-50 hover:bg-blue-100 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="Download Original File"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">download</span>
-                    Download
-                  </button>
-
-                  <button
-                    onClick={() => setPhotoToDelete(photo)}
-                    className="py-1 px-1.5 text-rose-700 bg-rose-50 hover:bg-rose-100 rounded flex items-center justify-center gap-1 transition-colors cursor-pointer"
-                    title="Delete Photo"
-                  >
-                    <span className="material-symbols-outlined text-[14px]">delete</span>
-                    Delete
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* ==========================================
-          MODAL 1: HIGH RESOLUTION LIGHTBOX MODAL
-          ========================================== */}
-      {selectedPhoto && (
-        <div
-          className="fixed inset-0 bg-gray-950/90 backdrop-blur-sm z-[99999] flex items-center justify-center p-4"
-          onClick={() => setSelectedPhoto(null)}
-        >
-          <div
-            className="relative max-w-5xl w-full bg-slate-900 border border-slate-700 rounded-md overflow-hidden shadow-sm animate-[fadeIn_0.2s_ease-out] flex flex-col"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Modal Header */}
-            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex justify-between items-center text-white">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="px-2 py-0.5 bg-[#0B3D91] rounded text-[10px] font-bold">
-                    Day {selectedPhoto.dayNumber}
-                  </span>
-                  <h3 className="text-sm sm:text-base font-bold">{selectedPhoto.sessionTitle}</h3>
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {selectedPhoto.panchayatName} â€¢ {selectedPhoto.villageName} â€¢ {selectedPhoto.date}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDownloadSinglePhoto(selectedPhoto)}
-                  className="px-3 py-1.5 bg-[#0B3D91] hover:bg-[#082a66] text-white rounded-md text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-[16px]">download</span>
-                  Download Original
-                </button>
-                <button
-                  onClick={() => setSelectedPhoto(null)}
-                  className="p-1.5 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white"
-                >
-                  <span className="material-symbols-outlined text-[20px]">close</span>
-                </button>
-              </div>
-            </div>
-
-            {/* High-res Image Preview */}
-            <div className="max-h-[68vh] bg-black/90 flex items-center justify-center p-2">
-              <img
-                src={selectedPhoto.fileUrl}
-                alt={selectedPhoto.sessionTitle}
-                className="max-h-[65vh] w-auto max-w-full object-contain rounded"
-                referrerPolicy="no-referrer"
-              />
-            </div>
-
-            {/* Modal Footer Metadata */}
-            <div className="p-4 bg-slate-950 border-t border-slate-800 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-4">
-                <span>
-                  Uploaded by: <strong className="text-white">{selectedPhoto.uploadedBy}</strong>
-                </span>
-                <span>
-                  Filename: <strong className="text-white font-mono">{selectedPhoto.originalFilename}</strong>
-                </span>
-                <span>
-                  Size: <strong className="text-white font-mono">{Math.round((selectedPhoto.fileSize || 50000) / 1024)} KB</strong>
-                </span>
-              </div>
-
-              <button
-                onClick={() => {
-                  setPhotoToDelete(selectedPhoto);
-                }}
-                className="text-rose-400 hover:text-rose-300 font-semibold flex items-center gap-1 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-[16px]">delete</span>
-                Delete Photo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ==========================================
-          MODAL 2: UPLOAD MULTIPLE SESSION PHOTOS
-          ========================================== */}
-      {showUploadModal && (
-        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-md shadow-sm w-full max-w-xl overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-              <div>
-                <h2 className="text-base font-bold text-slate-900">Upload Session Photographs</h2>
-                <p className="text-xs text-slate-500">
-                  Upload original high-resolution camera images for session archiving.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowUploadModal(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
-
-            <form onSubmit={handleUploadSubmit} className="p-6 space-y-4 text-xs">
-              {uploadError && (
-                <div className="p-3 bg-rose-50 text-rose-800 border border-rose-200 rounded-md font-medium">
-                  {uploadError}
-                </div>
-              )}
-
-              {/* Target Day & Session Title */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Session Day *</label>
-                  <Select
-                    value={String(uploadDay)}
-                    onValueChange={(val) => setUploadDay(parseInt(val, 10))}
-                  >
-                    <SelectTrigger className="w-full h-10 text-xs font-semibold bg-slate-50 border-slate-200">
-                      <SelectValue placeholder="Select Day" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                        <SelectItem key={d} value={String(d)}>
-                          Day {d}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Session Title *</label>
-                  <input
-                    type="text"
-                    required
-                    value={uploadTitle}
-                    onChange={(e) => setUploadTitle(e.target.value)}
-                    placeholder="e.g. Spoken English Dialogue Workshop"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* Panchayat & Village */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Panchayat *</label>
-                  <Select
-                    value={uploadPanchayat}
-                    onValueChange={(val) => setUploadPanchayat(val)}
-                  >
-                    <SelectTrigger className="w-full h-10 text-xs bg-slate-50 border-slate-200">
-                      <SelectValue placeholder="Select Panchayat" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {panchayats.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Village Center *</label>
-                  <input
-                    type="text"
-                    required
-                    value={uploadVillage}
-                    onChange={(e) => setUploadVillage(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* Date & Uploader */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={uploadDate}
-                    onChange={(e) => setUploadDate(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 mb-1">Uploader Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={uploadUploader}
-                    onChange={(e) => setUploadUploader(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:border-[#0B3D91]"
-                  />
-                </div>
-              </div>
-
-              {/* File Dropzone */}
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Select Photographs *</label>
-                <input
-                  id="session-photo-file-input"
-                  type="file"
-                  ref={fileInputRef}
-                  multiple
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      setUploadFiles(Array.from(e.target.files));
-                    }
-                  }}
-                  className="hidden"
-                />
-
-                <label
-                  htmlFor="session-photo-file-input"
-                  className="border-2 border-dashed border-slate-300 hover:border-[#0B3D91] rounded-md p-6 text-center cursor-pointer bg-slate-50 hover:bg-blue-50/40 transition-colors"
-                >
-                  <span className="material-symbols-outlined text-[32px] text-slate-400 mb-1">
-                    cloud_upload
-                  </span>
-                  <div className="font-bold text-slate-800">Click to choose image files</div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Supports JPG, PNG, WEBP high-resolution photos.
-                  </p>
-                </label>
-
-                {uploadFiles.length > 0 && (
-                  <div className="mt-2.5 space-y-1">
-                    <span className="font-semibold text-slate-700">
-                      Selected {uploadFiles.length} file(s):
+                  <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
+                    <span>
+                      <strong className="text-foreground">Session:</strong> {activeDayConfig.sessionName}
                     </span>
-                    <div className="max-h-24 overflow-y-auto space-y-1 bg-slate-50 p-2 rounded-md border border-slate-200">
-                      {uploadFiles.map((f, i) => (
-                        <div key={i} className="flex items-center justify-between text-[11px] text-slate-600">
-                          <span className="truncate max-w-[300px] font-mono">{f.name}</span>
-                          <span className="text-slate-400">{Math.round(f.size / 1024)} KB</span>
-                        </div>
-                      ))}
-                    </div>
+                    <span>&middot;</span>
+                    <span>
+                      <strong className="text-foreground">Cluster:</strong> {resolvedClusterName}
+                    </span>
+                    <span>&middot;</span>
+                    <span>
+                      <strong className="text-foreground">Photos:</strong>{' '}
+                      <span className="font-mono font-bold text-foreground">{filteredPhotos.length} / 50</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Super Admin Action Controls */}
+                {userRole === 'Super Admin' && (activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW') && (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      disabled={isProcessingAction}
+                      onClick={() => handleApproveDaySubmission(selectedCluster, activeDayConfig.dayNumber)}
+                      className="gap-1.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Approve Day Collection</span>
+                    </Button>
                   </div>
                 )}
               </div>
+            </div>
+          )}
 
-              {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-200 flex justify-end gap-2.5">
+          {/* Filter Bar inside Day View */}
+          <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search photos by filename, caption, uploader..."
+                className="h-9 pl-8 text-xs"
+              />
+            </div>
+
+            <div className="w-44">
+              <Select
+                value={selectedPanchayat}
+                onValueChange={(val) => {
+                  setSelectedPanchayat(val);
+                  setSelectedVillage('all');
+                }}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Panchayats" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Panchayats</SelectItem>
+                  {panchayats.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-44">
+              <Select
+                value={selectedVillage}
+                onValueChange={(val) => setSelectedVillage(val)}
+                disabled={selectedPanchayat === 'all'}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Villages" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Villages</SelectItem>
+                  {currentFilterVillages.map((v) => (
+                    <SelectItem key={v.id || v.name} value={v.name}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filteredPhotos.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleSelectAll}
+                className="h-9 text-xs"
+              >
+                {selectedPhotoIds.length === filteredPhotos.length ? 'Deselect All' : 'Select All'}
+              </Button>
+            )}
+          </div>
+
+          {/* Photos Grid */}
+          {isLoading ? (
+            <div className="py-16 text-center text-xs text-muted-foreground">
+              <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent mb-2" />
+              <p>Loading session photographs...</p>
+            </div>
+          ) : filteredPhotos.length === 0 ? (
+            <div className="rounded-lg border border-border bg-card p-12 shadow-xs">
+              <EmptyState
+                icon={ImageIcon}
+                title="No photographs found for this Day"
+                description="No photos have been uploaded for this day and cluster yet."
+                actionLabel={userRole === 'Super Admin' || !activeDayConfig?.isLocked ? '+ Upload First Photo' : undefined}
+                onAction={() => {
+                  setUploadDay(activeDayNumber);
+                  setShowUploadModal(true);
+                }}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {filteredPhotos.map((photo) => {
+                const isSelected = selectedPhotoIds.includes(photo.id);
+                const isPhotoLocked = userRole === 'Cluster Admin' && activeDayConfig?.isLocked;
+                const isDeleteRequested = photo.deleteRequestStatus === 'PENDING';
+                const isDeleteRejected = photo.deleteRequestStatus === 'REJECTED';
+
+                return (
+                  <div
+                    key={photo.id}
+                    onClick={() => setPreviewPhoto(photo)}
+                    className={`group relative flex flex-col justify-between overflow-hidden rounded-lg border bg-card shadow-xs transition hover:shadow-md cursor-pointer ${
+                      isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+                    }`}
+                  >
+                    <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+                      <img
+                        src={photo.fileUrl || '/logo.png'}
+                        alt={photo.caption || photo.sessionTitle}
+                        loading="lazy"
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+
+                      <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
+                        <div className="flex items-center gap-1">
+                          <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
+                            Day {photo.dayNumber}
+                          </Badge>
+                          {isDeleteRequested && (
+                            <Badge variant="default" size="sm" className="bg-amber-600 text-white text-[10px]">
+                              Delete Requested
+                            </Badge>
+                          )}
+                          {isDeleteRejected && (
+                            <Badge variant="default" size="sm" className="bg-rose-600 text-white text-[10px]">
+                              Delete Rejected
+                            </Badge>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleSelectPhoto(photo.id, e)}
+                          className={`flex h-6 w-6 items-center justify-center rounded border transition ${
+                            isSelected
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-white/60 bg-black/40 text-transparent hover:border-white'
+                          }`}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : userRole === 'Cluster Admin' ? (
+        /* VIEW MODE 3: CLUSTER ADMIN DYNAMIC SUPER ADMIN CONFIGURED DAYS MAIN GRID */
+        <div className="space-y-4">
+          <div className="rounded-lg border border-border bg-card p-4 shadow-xs">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-foreground">
+                  Program Cycles &amp; Photo Collections — {resolvedClusterName}
+                </h2>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Select a Day to upload, review, and submit activity evidence. Each session has a maximum limit of 50 photos.
+                </p>
+              </div>
+              <Badge variant="outline" className="text-xs font-mono">
+                {configuredDays.length} Configured Days
+              </Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {configuredDays.map((day) => {
+              const count = day.photosCount;
+              const isLocked = day.isLocked;
+
+              return (
+                <div
+                  key={day.dayNumber}
+                  onClick={() => setActiveDayNumber(day.dayNumber)}
+                  className="group flex flex-col justify-between rounded-lg border border-border bg-card p-4 shadow-xs transition hover:border-primary hover:shadow-md cursor-pointer"
+                >
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-primary tracking-wide">
+                        DAY {day.dayNumber}
+                      </span>
+                      <Badge
+                        variant="default"
+                        size="sm"
+                        className={`text-[10px] font-semibold ${
+                          isLocked
+                            ? 'bg-amber-100 text-amber-900 border-amber-300'
+                            : 'bg-muted text-muted-foreground'
+                        }`}
+                      >
+                        {isLocked ? (
+                          <span className="flex items-center gap-1">
+                            <Lock className="h-3 w-3" />
+                            <span>Submitted</span>
+                          </span>
+                        ) : (
+                          <span>Draft</span>
+                        )}
+                      </Badge>
+                    </div>
+
+                    <h3 className="text-sm font-bold text-foreground line-clamp-1 group-hover:text-primary transition" title={day.dayName}>
+                      {day.dayName}
+                    </h3>
+                    <p className="text-xs text-muted-foreground line-clamp-2" title={day.sessionName}>
+                      {day.sessionName}
+                    </p>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-border space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-muted-foreground font-medium">Photos Uploaded</span>
+                      <span className="font-mono font-bold text-foreground">
+                        {count} / 50
+                      </span>
+                    </div>
+
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          count >= 50 ? 'bg-amber-500' : 'bg-primary'
+                        }`}
+                        style={{ width: `${Math.min(100, (count / 50) * 100)}%` }}
+                      />
+                    </div>
+
+                    <div className="pt-1 flex items-center justify-between text-[11px] text-primary font-semibold group-hover:underline">
+                      <span>Open Day {day.dayNumber} Photos &rarr;</span>
+                      {count > 0 && isLocked && (
+                        <span className="text-muted-foreground flex items-center gap-1 font-normal">
+                          <Lock className="h-3 w-3" /> Locked
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : adminViewTab === 'submissions' ? (
+        /* VIEW MODE 4: SUPER ADMIN CLUSTER-FIRST OVERVIEW, THEN CLUSTER DETAIL */
+        <div className="space-y-6">
+          {selectedCluster === 'all' ? (
+            <>
+              <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-border bg-card shadow-xs">
+                <span className="text-xs font-bold text-muted-foreground px-2">Filter Cluster:</span>
                 <button
                   type="button"
-                  onClick={() => setShowUploadModal(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-md font-semibold hover:bg-slate-50"
+                  onClick={() => setSelectedCluster('all')}
+                  className="px-3 py-1.5 rounded-md text-xs font-semibold transition bg-primary text-primary-foreground shadow-xs"
                 >
-                  Cancel
+                  All Clusters ({clusters.length})
                 </button>
+                {clusters.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setSelectedCluster(c.id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted"
+                  >
+                    <span>{c.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+                {clusters.map((c) => {
+                  const summary = clusterSummaries.find(
+                    (cs) => cs.clusterId.toLowerCase() === c.id.toLowerCase() || cs.clusterName.toLowerCase() === c.name.toLowerCase()
+                  );
+                  const totalPhotos = summary?.totalPhotos || photos.filter((p) => p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()).length;
+                  const submittedCount = summary?.submittedDaysCount || 0;
+
+                  return (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCluster(c.id);
+                        setActiveDayNumber(null);
+                      }}
+                      className="text-left rounded-xl border border-border bg-card p-5 shadow-xs transition hover:border-primary hover:shadow-md"
+                    >
+                      <div className="flex items-center justify-between gap-3 border-b border-border pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary font-bold text-xs">
+                            <Building2 className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <h2 className="text-sm font-bold text-foreground">{c.name}</h2>
+                            <p className="text-[11px] text-muted-foreground">{c.district || 'Tamil Nadu'}</p>
+                          </div>
+                        </div>
+                        <Badge variant="outline" className="text-[10px] font-mono">
+                          {totalPhotos} photos
+                        </Badge>
+                      </div>
+
+                      <div className="mt-4 space-y-3 text-xs text-muted-foreground">
+                        <div className="flex items-center justify-between">
+                          <span>Submitted Days</span>
+                          <span className="font-bold text-foreground">{submittedCount} / 8</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span>SPOC</span>
+                          <span className="font-medium text-foreground">{c.spocName || 'Cluster Admin'}</span>
+                        </div>
+                        <div className="pt-2 border-t border-border flex items-center justify-between text-primary font-semibold">
+                          <span>Open cluster days</span>
+                          <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-border bg-card shadow-xs">
                 <button
-                  type="submit"
-                  disabled={isUploading || uploadFiles.length === 0}
-                  className={`px-5 py-2 rounded-md font-bold text-white transition-all shadow-xs flex items-center gap-2 ${
-                    isUploading || uploadFiles.length === 0
-                      ? 'bg-slate-400 cursor-not-allowed'
-                      : 'bg-[#0B3D91] hover:bg-[#082a66]'
-                  }`}
+                  type="button"
+                  onClick={() => setSelectedCluster('all')}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-muted/50 px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground hover:bg-muted"
                 >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {isUploading ? 'sync' : 'upload'}
-                  </span>
-                  {isUploading ? 'Uploading Photos...' : `Upload ${uploadFiles.length} Photos`}
+                  <ArrowLeft className="h-3.5 w-3.5" />
+                  <span>Back to Clusters</span>
                 </button>
+                <span className="text-xs font-bold text-muted-foreground px-2">Viewing Cluster:</span>
+                <span className="rounded-md bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+                  {clusters.find((c) => c.id.toLowerCase() === selectedCluster.toLowerCase() || c.name.toLowerCase() === selectedCluster.toLowerCase())?.name || 'Cluster'}
+                </span>
+              </div>
+
+              {(() => {
+                const c = clusters.find((cluster) => cluster.id.toLowerCase() === selectedCluster.toLowerCase() || cluster.name.toLowerCase() === selectedCluster.toLowerCase());
+                if (!c) return null;
+
+                const summary = clusterSummaries.find(
+                  (cs) => cs.clusterId.toLowerCase() === c.id.toLowerCase() || cs.clusterName.toLowerCase() === c.name.toLowerCase()
+                );
+                const totalPhotos = summary?.totalPhotos || photos.filter((p) => p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()).length;
+                const submittedCount = summary?.submittedDaysCount || 0;
+
+                return (
+                  <div key={c.id} className="space-y-3 rounded-xl border border-border bg-card p-5 shadow-xs">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-border pb-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary font-bold text-xs">
+                          <Building2 className="h-4 w-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-sm font-bold text-foreground">
+                            {c.name} Cluster
+                          </h2>
+                          <p className="text-[11px] text-muted-foreground">
+                            District: {c.district || 'Tamil Nadu'} &middot; SPOC: {c.spocName || 'Cluster Admin'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs font-mono">
+                          {totalPhotos} Photos
+                        </Badge>
+                        <Badge
+                          variant="default"
+                          size="sm"
+                          className={`text-xs font-semibold ${
+                            submittedCount > 0 ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-muted text-muted-foreground'
+                          }`}
+                        >
+                          {submittedCount} / 8 Days Submitted
+                        </Badge>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 pt-1">
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map((dayNum) => {
+                        const daySummary = summary?.days?.find((d) => d.dayNumber === dayNum);
+                        const dayPhotos = photos.filter(
+                          (p) =>
+                            (p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()) &&
+                            p.dayNumber === dayNum
+                        );
+                        const photoCount = daySummary ? daySummary.photoCount : dayPhotos.length;
+                        const status = (daySummary?.status || 'DRAFT').toUpperCase();
+                        const isSubmitted = ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(status);
+                        const isApproved = status === 'APPROVED';
+                        const sessionName = academicSetupMap[dayNum] || `Session Day ${dayNum}`;
+
+                        return (
+                          <div
+                            key={dayNum}
+                            onClick={() => {
+                              setActiveDayNumber(dayNum);
+                            }}
+                            className="group flex flex-col justify-between rounded-lg border border-border bg-card p-4 shadow-xs transition hover:border-primary hover:shadow-md cursor-pointer"
+                          >
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-primary tracking-wide">
+                                  DAY {dayNum}
+                                </span>
+                                <Badge
+                                  variant="default"
+                                  size="sm"
+                                  className={`text-[10px] font-semibold ${
+                                    isApproved
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : isSubmitted
+                                      ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                      : 'bg-muted text-muted-foreground'
+                                  }`}
+                                >
+                                  {isApproved ? (
+                                    <span className="flex items-center gap-1">
+                                      <CheckCircle2 className="h-3 w-3 text-emerald-700" />
+                                      <span>Approved</span>
+                                    </span>
+                                  ) : isSubmitted ? (
+                                    <span className="flex items-center gap-1">
+                                      <Lock className="h-3 w-3 text-amber-700" />
+                                      <span>Submitted</span>
+                                    </span>
+                                  ) : (
+                                    <span>Draft</span>
+                                  )}
+                                </Badge>
+                              </div>
+
+                              <h3 className="text-xs font-bold text-foreground line-clamp-1 group-hover:text-primary transition">
+                                Day {dayNum}
+                              </h3>
+                              <p className="text-[11px] text-muted-foreground line-clamp-2" title={sessionName}>
+                                {sessionName}
+                              </p>
+                            </div>
+
+                            <div className="mt-4 pt-3 border-t border-border space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="text-muted-foreground font-medium">Photos Uploaded</span>
+                                <span className="font-mono font-bold text-foreground">
+                                  {photoCount} / 50
+                                </span>
+                              </div>
+
+                              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className={`h-full transition-all duration-300 ${
+                                    photoCount >= 50 ? 'bg-amber-500' : 'bg-primary'
+                                  }`}
+                                  style={{ width: `${Math.min(100, (photoCount / 50) * 100)}%` }}
+                                />
+                              </div>
+
+                              <div className="pt-1 flex items-center justify-between text-[11px] text-primary font-semibold group-hover:underline">
+                                <span>Open Day {dayNum} Photos &rarr;</span>
+                                {isSubmitted && (
+                                  <span className="text-amber-700 flex items-center gap-1 text-[10px] font-medium">
+                                    <Lock className="h-2.5 w-2.5" /> Review
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+            </>
+          )}
+        </div>
+      ) : (
+        /* VIEW MODE 5: RAW MULTI-CLUSTER GALLERY FOR SUPER ADMIN */
+        <div className="space-y-4">
+          {/* Filter Bar */}
+          <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
+            <div className="relative min-w-[200px] flex-1">
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by caption, topic, village, uploader..."
+                className="h-9 pl-8 text-xs"
+              />
+            </div>
+
+            <div className="w-44">
+              <Select
+                value={selectedCluster}
+                onValueChange={(val) => setSelectedCluster(val)}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Clusters" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clusters</SelectItem>
+                  {clusters.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-44">
+              <Select
+                value={selectedPanchayat}
+                onValueChange={(val) => {
+                  setSelectedPanchayat(val);
+                  setSelectedVillage('all');
+                }}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Panchayats" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Panchayats</SelectItem>
+                  {panchayats.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="w-44">
+              <Select
+                value={selectedVillage}
+                onValueChange={(val) => setSelectedVillage(val)}
+                disabled={selectedPanchayat === 'all'}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <SelectValue placeholder="All Villages" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Villages</SelectItem>
+                  {currentFilterVillages.map((v) => (
+                    <SelectItem key={v.id || v.name} value={v.name}>
+                      {v.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {filteredPhotos.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleSelectAll}
+                className="h-9 text-xs"
+              >
+                {selectedPhotoIds.length === filteredPhotos.length ? 'Deselect All' : 'Select All'}
+              </Button>
+            )}
+          </div>
+
+          {/* Photo Gallery Grid */}
+          {isLoading ? (
+            <div className="py-16 text-center text-xs text-muted-foreground">
+              <div className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent mb-2" />
+              <p>Loading session photographs...</p>
+            </div>
+          ) : filteredPhotos.length === 0 ? (
+            <div className="rounded-lg border border-border bg-card p-12 shadow-xs">
+              <EmptyState
+                icon={ImageIcon}
+                title="No photographs found"
+                description="No session photographs matched your filters."
+                actionLabel="+ Upload First Photo"
+                onAction={() => setShowUploadModal(true)}
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {filteredPhotos.map((photo) => {
+                const isSelected = selectedPhotoIds.includes(photo.id);
+                return (
+                  <div
+                    key={photo.id}
+                    onClick={() => setPreviewPhoto(photo)}
+                    className={`group relative flex flex-col justify-between overflow-hidden rounded-lg border bg-card shadow-xs transition hover:shadow-md cursor-pointer ${
+                      isSelected ? 'border-primary ring-2 ring-primary/20' : 'border-border'
+                    }`}
+                  >
+                    <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
+                      <img
+                        src={photo.fileUrl || '/logo.png'}
+                        alt={photo.caption || photo.sessionTitle}
+                        loading="lazy"
+                        className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+
+                      <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
+                        <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
+                          Day {photo.dayNumber}
+                        </Badge>
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleSelectPhoto(photo.id, e)}
+                          className={`flex h-6 w-6 items-center justify-center rounded border transition ${
+                            isSelected
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-white/60 bg-black/40 text-transparent hover:border-white'
+                          }`}
+                        >
+                          <CheckCircle2 className="h-4 w-4" />
+                        </button>
+                      </div>
+
+                    </div>
+
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 5. Lightbox Modal */}
+      {previewPhoto && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in-0">
+          <div className="relative w-full max-w-5xl overflow-hidden rounded-lg border border-border bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-border p-3.5">
+              <div>
+                <h3 className="text-sm font-bold text-foreground truncate max-w-lg">
+                  {previewPhoto.originalFilename || previewPhoto.caption || previewPhoto.sessionTitle}
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Day {previewPhoto.dayNumber} &middot; {previewPhoto.villageName || previewPhoto.panchayatName} &middot; {previewPhoto.clusterName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewPhoto(null)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="relative max-h-[80vh] min-h-[420px] w-full overflow-hidden bg-black/95 flex items-center justify-center">
+              {filteredPhotos.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => goToPreviewPhoto('prev')}
+                    disabled={previewIndex === 0}
+                    className="absolute left-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-30"
+                    aria-label="Previous photo"
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => goToPreviewPhoto('next')}
+                    disabled={previewIndex === filteredPhotos.length - 1}
+                    className="absolute right-3 top-1/2 z-10 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-black/50 text-white transition hover:bg-black/70 disabled:cursor-not-allowed disabled:opacity-30"
+                    aria-label="Next photo"
+                  >
+                    <ArrowLeft className="h-5 w-5 rotate-180" />
+                  </button>
+                </>
+              )}
+
+              <img
+                src={previewPhoto.fileUrl || '/logo.png'}
+                alt={previewPhoto.caption || previewPhoto.sessionTitle}
+                className="max-h-[80vh] max-w-full w-auto object-contain"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 border-t border-border bg-muted/20 text-xs">
+              <div className="text-muted-foreground">
+                Uploaded by <strong className="text-foreground">{previewPhoto.uploadedBy}</strong> on {previewPhoto.date}
+                {filteredPhotos.length > 1 && (
+                  <span className="ml-2 font-medium text-foreground">
+                    {previewIndex + 1} / {filteredPhotos.length}
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleDownloadSinglePhoto(previewPhoto)}
+                  className="gap-1.5"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>Download</span>
+                </Button>
+
+                {(userRole === 'Super Admin' || !activeDayConfig?.isLocked) && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => {
+                      const toDel = previewPhoto;
+                      setPreviewPhoto(null);
+                      setPhotoToDelete(toDel);
+                    }}
+                    className="gap-1.5"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Delete</span>
+                  </Button>
+                )}
+
+                {userRole === 'Cluster Admin' && activeDayConfig?.isLocked && previewPhoto.deleteRequestStatus !== 'PENDING' && (
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const toReq = previewPhoto;
+                      setPreviewPhoto(null);
+                      setDeleteRequestTarget(toReq);
+                      setDeleteRequestReason('');
+                    }}
+                    className="gap-1.5 bg-amber-600 text-white hover:bg-amber-700"
+                  >
+                    <span>Request Delete</span>
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 6. Upload Photos Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-lg rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h3 className="text-base font-bold text-foreground">Upload Session Photographs</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Attach activity evidence. Maximum 50 photos allowed per program day.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUploadSubmit} className="mt-4 space-y-4 text-xs">
+              <div className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Image Files (JPG, PNG, WebP) *
+                  </label>
+                  <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      accept="image/*"
+                      onChange={(e) => {
+                        const files = Array.from(e.target.files || []);
+                        setUploadFiles(files);
+                      }}
+                      className="hidden"
+                    />
+                    <Upload className="h-8 w-8 text-muted-foreground" />
+                    <p className="mt-2 text-xs font-medium text-foreground">
+                      {uploadFiles.length > 0 ? (
+                        <span className="font-semibold text-primary">{uploadFiles.length} file(s) selected</span>
+                      ) : (
+                        'Click to choose photographs from your device'
+                      )}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      Maximum 50 photos allowed per day. Up to 10MB each.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="mt-3"
+                    >
+                      Browse Files
+                    </Button>
+                  </div>
+                </div>
+
+                {uploadError && (
+                  <p className="text-xs font-semibold text-destructive">{uploadError}</p>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-border pt-4">
+                <Button type="button" variant="outline" onClick={() => setShowUploadModal(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={isUploading || uploadFiles.length === 0}>
+                  {isUploading ? 'Uploading...' : `Upload ${uploadFiles.length} Photographs`}
+                </Button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ==========================================
-          MODAL 3: DELETE PHOTO CONFIRMATION
-          ========================================== */}
-      {photoToDelete && (
-        <div className="fixed inset-0 bg-gray-900/75 backdrop-blur-sm z-[99999] flex items-center justify-center p-4">
-          <div className="bg-white rounded-md shadow-sm w-full max-w-sm p-5 text-center space-y-3">
-            <span className="material-symbols-outlined text-[38px] text-rose-600">
-              warning
-            </span>
-            <h3 className="font-bold text-base text-slate-900">Delete Photo?</h3>
-            <p className="text-xs text-slate-600">
-              Are you sure you want to permanently remove <strong className="text-slate-900">{photoToDelete.originalFilename}</strong>? This action cannot be undone.
-            </p>
-            <div className="pt-2 flex items-center justify-center gap-2">
-              <button
-                onClick={() => setPhotoToDelete(null)}
-                className="px-3.5 py-1.5 border border-slate-300 rounded-md text-xs font-semibold text-slate-700 hover:bg-slate-50"
+      {/* 7. Delete Confirmation Modal (Direct Delete) */}
+      {(photoToDelete || showBulkDeleteConfirm) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-sm rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <AlertCircle className="h-5 w-5" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-bold text-foreground">
+                  {showBulkDeleteConfirm ? 'Delete Selected Photos?' : 'Delete Photograph?'}
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {showBulkDeleteConfirm
+                    ? `Are you sure you want to delete ${selectedPhotoIds.length} selected photographs? This action cannot be undone.`
+                    : 'Are you sure you want to permanently remove this photograph from the session records?'}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPhotoToDelete(null);
+                  setShowBulkDeleteConfirm(false);
+                }}
               >
                 Cancel
-              </button>
-              <button
-                onClick={() => handleDeletePhoto(photoToDelete)}
-                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-md text-xs font-bold shadow-xs"
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  if (showBulkDeleteConfirm) {
+                    handleBulkDelete();
+                  } else if (photoToDelete) {
+                    handleDeletePhoto(photoToDelete);
+                  }
+                }}
               >
-                Confirm Delete
+                Yes, Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 8. SUBMIT PHOTOS CONFIRMATION MODAL */}
+      {submitDayConfirm !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-amber-600">
+                <Lock className="h-5 w-5" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="text-base font-bold text-foreground">
+                  Submit these photos for review?
+                </h3>
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  After submission, you cannot directly add or delete photos. Any correction or deletion will require Super Admin approval.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isProcessingAction}
+                onClick={() => setSubmitDayConfirm(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={isProcessingAction}
+                onClick={() => handleConfirmSubmitDay(submitDayConfirm)}
+                className="bg-primary text-primary-foreground font-semibold"
+              >
+                {isProcessingAction ? 'Submitting...' : 'Submit'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 9. REQUEST PHOTO DELETION MODAL */}
+      {deleteRequestTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2 text-amber-600 font-bold text-sm tracking-wide uppercase">
+                <AlertCircle className="h-4 w-4" />
+                <span>Request Photo Deletion</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDeleteRequestTarget(null)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
               </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-2.5">
+                <div className="h-14 w-18 overflow-hidden rounded border border-border bg-muted shrink-0">
+                  <img
+                    src={deleteRequestTarget.fileUrl || '/logo.png'}
+                    alt={deleteRequestTarget.originalFilename}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div className="space-y-0.5 overflow-hidden">
+                  <div className="font-semibold text-foreground truncate" title={deleteRequestTarget.originalFilename}>
+                    {deleteRequestTarget.originalFilename}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Day {deleteRequestTarget.dayNumber} &middot; {activeDayConfig?.sessionName || deleteRequestTarget.sessionTitle}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block font-semibold text-foreground">
+                  Reason for Deletion * <span className="font-normal text-muted-foreground">(Mandatory)</span>
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={deleteRequestReason}
+                  onChange={(e) => setDeleteRequestReason(e.target.value)}
+                  placeholder="Explain why this photograph must be permanently removed..."
+                  className="w-full rounded-md border border-border bg-background p-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+
+              <p className="text-[11px] text-muted-foreground italic">
+                Deleting a submitted photo requires Super Admin approval. The photo remains visible until approved.
+              </p>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isProcessingAction}
+                onClick={() => setDeleteRequestTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={isProcessingAction || !deleteRequestReason.trim()}
+                onClick={handleConfirmDeleteRequest}
+                className="bg-amber-600 text-white hover:bg-amber-700 font-semibold"
+              >
+                {isProcessingAction ? 'Submitting...' : 'Submit Request'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 10. REQUEST PHOTO CHANGE / EDIT MODAL */}
+      {changeRequestDay !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-lg border border-border bg-card p-6 shadow-xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between border-b border-border pb-3">
+              <div className="flex items-center gap-2 text-primary font-bold text-sm tracking-wide">
+                <Sparkle className="h-4 w-4" />
+                <span>Request Photo Correction / Additions</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setChangeRequestDay(null)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-xs">
+              <p className="text-muted-foreground leading-relaxed">
+                Explain what needs to be added, replaced, or corrected for <strong>Day {changeRequestDay}</strong>. Upon Super Admin approval, this specific day collection will be unlocked for editing.
+              </p>
+
+              <div>
+                <label className="mb-1 block font-semibold text-foreground">
+                  Reason / Required Changes *
+                </label>
+                <textarea
+                  required
+                  rows={3}
+                  value={changeRequestReason}
+                  onChange={(e) => setChangeRequestReason(e.target.value)}
+                  placeholder="e.g. Additional group activity photos taken by mentor need to be added..."
+                  className="w-full rounded-md border border-border bg-background p-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                />
+              </div>
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2 border-t border-border pt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={isProcessingAction}
+                onClick={() => setChangeRequestDay(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={isProcessingAction || !changeRequestReason.trim()}
+                onClick={handleConfirmChangeRequest}
+                className="bg-primary text-primary-foreground font-semibold"
+              >
+                {isProcessingAction ? 'Submitting...' : 'Submit Request'}
+              </Button>
             </div>
           </div>
         </div>
@@ -1456,5 +2258,3 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     </div>
   );
 };
-
-

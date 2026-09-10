@@ -1,8 +1,7 @@
-import fs from 'fs';
-import path from 'path';
 import nodemailer from 'nodemailer';
 import { renderOtpEmail } from './templates/otpEmailTemplate.js';
 import { renderOnboardingEmail } from './templates/onboardingEmailTemplate.js';
+import { renderWorkflowEmail, WorkflowEmailProps } from './templates/workflowEmailTemplate.js';
 
 export async function sendLoginOtp({
   recipient,
@@ -45,8 +44,6 @@ export async function sendLoginOtp({
   );
 
   const { html, text } = renderOtpEmail({ name, otp, expiryMinutes });
-  const logoPath = path.join(projectRoot, 'frontend', 'public', 'logo.png');
-
   const mailOptions: nodemailer.SendMailOptions = {
     from: `TQI Secure Access <${smtpFrom}>`,
     to: recipient,
@@ -58,10 +55,6 @@ export async function sendLoginOtp({
       'Auto-Submitted': 'auto-generated',
     },
   };
-
-  if (fs.existsSync(logoPath)) {
-    mailOptions.attachments = [{ filename: 'tqi-logo.png', path: logoPath, cid: 'tqi-logo@tqi.org', contentType: 'image/png' }];
-  }
 
   try {
     console.log(`[SMTP] Sending OTP email to ${recipient}...`);
@@ -98,11 +91,10 @@ export async function sendOnboardingCredentialsEmail({
   const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
 
   if (!smtpUser || !smtpPass) {
-    console.warn('[SMTP WARNING] SMTP credentials not set. Logging onboarding credentials to console:');
+    console.warn('[SMTP WARNING] SMTP credentials not set. Onboarding email was not sent.');
     console.log(`\n========================================================`);
-    console.log(`[ONBOARDING CREDENTIALS] User: ${name} (${recipient})`);
-    console.log(`[ONBOARDING CREDENTIALS] Role: ${role} | Scope: ${clusterName || 'Central'}`);
-    console.log(`[ONBOARDING CREDENTIALS] Temporary Password: ${temporaryPassword}`);
+    console.log(`[ONBOARDING EMAIL NOT SENT] User: ${name} (${recipient})`);
+    console.log(`[ONBOARDING EMAIL NOT SENT] Role: ${role} | Scope: ${clusterName || 'Central'}`);
     console.log(`========================================================\n`);
     return;
   }
@@ -130,8 +122,6 @@ export async function sendOnboardingCredentialsEmail({
     clusterName,
     loginUrl,
   });
-  const logoPath = path.join(projectRoot, 'frontend', 'public', 'logo.png');
-
   const mailOptions: nodemailer.SendMailOptions = {
     from: `TQI Administration <${smtpFrom}>`,
     to: recipient,
@@ -144,10 +134,6 @@ export async function sendOnboardingCredentialsEmail({
     },
   };
 
-  if (fs.existsSync(logoPath)) {
-    mailOptions.attachments = [{ filename: 'tqi-logo.png', path: logoPath, cid: 'tqi-logo@tqi.org', contentType: 'image/png' }];
-  }
-
   try {
     console.log(`[SMTP] Sending onboarding email to ${recipient}...`);
     const info = await transporter.sendMail(mailOptions);
@@ -155,9 +141,45 @@ export async function sendOnboardingCredentialsEmail({
   } catch (error: any) {
     console.error(`[SMTP ERROR] Failed to send onboarding email to ${recipient}:`, error.message);
     console.log(`\n========================================================`);
-    console.log(`[FALLBACK ONBOARDING CREDENTIALS] User: ${name} (${recipient})`);
-    console.log(`[FALLBACK ONBOARDING CREDENTIALS] Temporary Password: ${temporaryPassword}`);
+    console.log(`[FALLBACK ONBOARDING EMAIL] User: ${name} (${recipient})`);
     console.log(`========================================================\n`);
+  }
+}
+
+export async function sendWorkflowEmail({
+  recipient,
+  projectRoot,
+  ...template
+}: WorkflowEmailProps & { recipient: string; projectRoot: string }): Promise<boolean> {
+  const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const smtpPort = Number(process.env.SMTP_PORT || 587);
+  const smtpUser = (process.env.SMTP_USER || '').trim();
+  const smtpPass = (process.env.SMTP_PASS || '').replace(/\s+/g, '');
+  const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
+  const { html, text } = renderWorkflowEmail(template);
+  if (!smtpUser || !smtpPass) {
+    console.warn(`[SMTP WARNING] SMTP credentials not set. Workflow email for ${recipient} was not sent.`);
+    return false;
+  }
+  const isGmail = smtpHost.includes('gmail') || smtpUser.endsWith('@gmail.com');
+  const transporter = nodemailer.createTransport(isGmail
+    ? { service: 'gmail', auth: { user: smtpUser, pass: smtpPass } }
+    : { host: smtpHost, port: smtpPort, secure: smtpPort === 465, auth: { user: smtpUser, pass: smtpPass } });
+  const mailOptions: nodemailer.SendMailOptions = {
+    from: `TQI Workflow <${smtpFrom}>`,
+    to: recipient,
+    subject: template.title.startsWith('TQI') ? template.title : `TQI ERP: ${template.title}`,
+    text,
+    html,
+    headers: { 'X-Auto-Response-Suppress': 'All', 'Auto-Submitted': 'auto-generated' },
+  };
+  try {
+    await transporter.sendMail(mailOptions);
+    console.log(`[SMTP] Workflow email sent to ${recipient}: ${template.title}`);
+    return true;
+  } catch (error: any) {
+    console.error(`[SMTP ERROR] Workflow email failed for ${recipient}:`, error.message);
+    return false;
   }
 }
 

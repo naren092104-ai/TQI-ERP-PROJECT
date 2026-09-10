@@ -1,0 +1,3 @@
+ALTER TABLE volunteers
+  ADD COLUMN stream VARCHAR(100) NULL,
+  ADD COLUMN passing_out_year SMALLINT NULL;

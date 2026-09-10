@@ -11,11 +11,9 @@ import {
   EyeOff,
   KeyRound,
   ArrowRight,
-  ShieldCheck,
   AlertCircle,
   CheckCircle2,
   X,
-  Star,
   Hash,
 } from './ui/icons';
 
@@ -35,8 +33,6 @@ export interface AuthSession {
 interface LoginPageProps {
   onLoginSuccess: (session: AuthSession) => void;
 }
-
-const TRUST_PILLS = ['Connect', 'Explore', 'Share', 'Lead'];
 
 const MobileBrandStrip: React.FC = () => (
   <div className="tqi-login-mobile-strip" aria-hidden>
@@ -58,83 +54,15 @@ const CardBrandMark: React.FC = () => (
   </div>
 );
 
-const StagePanel: React.FC<{ kicker: string; eyebrow: React.ReactNode }> = ({ kicker, eyebrow }) => (
-  <aside className="tqi-login-stage">
-    <div className="tqi-stage-orb" aria-hidden />
-    <div className="tqi-dot-grid" aria-hidden />
-    <div className="tqi-stage-content">
-      <div style={{ position: 'relative', zIndex: 2 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
-          <TqiLogo size={42} />
-          <div className="flex flex-col" style={{ lineHeight: 1.1 }}>
-            <span style={{ fontSize: '1.05rem', fontWeight: 800, letterSpacing: '-0.02em', color: '#fff' }}>
-              Talent Quest for India
-            </span>
-            <span
-              style={{
-                fontSize: '0.6875rem',
-                fontWeight: 600,
-                opacity: 0.75,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
-                color: '#fff',
-              }}
-            >
-              Academic ERP
-            </span>
-          </div>
-        </div>
-      </div>
-
-      <div style={{ position: 'relative', zIndex: 2 }}>
-        <span className="tqi-login-kicker">
-          <ShieldCheck size={12} weight="light" /> {kicker}
-        </span>
-        <h1 className="tqi-login-headline" style={{ marginTop: '1.1rem' }}>
-          {eyebrow}
-        </h1>
-        <p className="tqi-login-sub">
-          Coordinate college volunteers, track 8-day cycles, log field expenses with OCR, and route
-          approvals from a single workspace built for Tamil Nadu.
-        </p>
-      </div>
-
-      <div className="tqi-testimonial">
-        <div className="tqi-testimonial-stars" aria-label="5 out of 5 stars">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Star key={i} size={14} weight="fill" />
-          ))}
-        </div>
-        <p className="tqi-testimonial-quote">
-          TQI transformed my perspective on community leadership and gave me the tools to drive real
-          change across our college cluster.
-        </p>
-        <div className="tqi-testimonial-author">
-          <span className="tqi-testimonial-avatar">PS</span>
-          <div>
-            <div className="tqi-testimonial-name">Priya Sharma</div>
-            <div className="tqi-testimonial-meta">Youth Volunteer · TQI Tamil Nadu</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="tqi-trust-row">
-        <p className="tqi-trust-row-eyebrow">Trusted by modern TQI teams</p>
-        <div className="tqi-trust-pills">
-          {TRUST_PILLS.map((p) => (
-            <span key={p} className="tqi-trust-pill">
-              {p}
-            </span>
-          ))}
-        </div>
-      </div>
-    </div>
-  </aside>
+const TqiLoadingMark: React.FC = () => (
+  <span className="tqi-branded-loader" role="status" aria-label="Loading">
+    <TqiLogo size={13} />
+  </span>
 );
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
-  const [identifier, setIdentifier] = useState('anand.s@tqi.org');
-  const [password, setPassword] = useState('TQI@Admin2026!');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
   const [otpRequested, setOtpRequested] = useState(false);
   const [activeMethod, setActiveMethod] = useState<'password' | 'otp'>('password');
@@ -149,19 +77,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotStatus, setForgotStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [forgotError, setForgotError] = useState<string | null>(null);
-
-  const quickRoles: { label: string; email: string; pass: string; role: UserRole }[] = [
-    { label: 'Super Admin', email: 'anand.s@tqi.org', pass: 'TQI@Admin2026!', role: 'Super Admin' },
-    { label: 'Cluster Admin', email: 'erode.admin@tqi.org', pass: 'Cluster@2026!', role: 'Cluster Admin' },
-    { label: 'Volunteer SPOC', email: 'saravanan.m@tqi.org', pass: 'Volunteer@2026!', role: 'Cluster Admin' },
-  ];
-
-  const applyQuickRole = (qr: typeof quickRoles[0]) => {
-    setIdentifier(qr.email);
-    setPassword(qr.pass);
-    setActiveMethod('password');
-    setErrorMessage(null);
-  };
+  const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('token') || '');
 
   const openForgot = () => {
     setForgotEmail(identifier);
@@ -258,39 +174,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       else onLoginSuccess(session);
       setIsLoading(false);
     } catch (err) {
-      // SECURITY: Never mint a session on a network/auth failure. The previous
-      // catch block fell back to a fake Super-Admin session, which let any
-      // unauthenticated visitor into the app whenever the backend was
-      // unreachable. We now only allow the offline demo path when BOTH the
-      // email AND password match a known quickRole exactly, and only for the
-      // password flow (never for OTP, which has no offline equivalent).
-      const passwordOnlyLogin = activeMethod === 'password';
-      if (!passwordOnlyLogin) {
-        setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
-        setIsLoading(false);
-        return;
-      }
-      const roleMatch = quickRoles.find(
-        (r) => r.email.toLowerCase() === cleanId.toLowerCase() && r.pass === cleanPass
-      );
-      if (!roleMatch) {
-        setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
-        setIsLoading(false);
-        return;
-      }
-      const session: AuthSession = {
-        token: 'demo-' + Date.now(),
-        id: 'demo-' + roleMatch.email,
-        name: roleMatch.label,
-        email: roleMatch.email,
-        role: roleMatch.role,
-        clusterId: 'demo',
-        clusterName: 'Demo cluster',
-        designation: roleMatch.label,
-        avatarText: roleMatch.label.split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase(),
-        mustChangePassword: false,
-      };
-      onLoginSuccess(session);
+      setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
       setIsLoading(false);
     }
   };
@@ -319,22 +203,29 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       setIsLoading(false);
     }
   };
+  const handleTokenReset = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMessage(null);
+    if (newPassword.length < 8 || newPassword !== confirmPassword) { setErrorMessage(newPassword.length < 8 ? 'New password must be at least 8 characters.' : 'Passwords do not match.'); return; }
+    setIsLoading(true);
+    try {
+      const response = await fetch(apiUrl('/api/auth/reset-password'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, newPassword }) });
+      const data = await response.json();
+      if (!response.ok || !data?.success) { setErrorMessage(data?.error || 'Unable to reset password.'); setIsLoading(false); return; }
+      window.history.replaceState({}, '', window.location.pathname);
+      setErrorMessage('Password reset successfully. You can now sign in.');
+      setNewPassword(''); setConfirmPassword(''); setIsLoading(false);
+    } catch { setErrorMessage('Unable to reach the server. Please try again.'); setIsLoading(false); }
+  };
+
+  if (resetToken) {
+    return <div className="tqi-login-shell"><section className="tqi-login-form-side"><div className="tqi-login-card"><CardBrandMark /><h1 className="tqi-login-h1">Create New Password</h1><p className="tqi-login-sub2">Use a new password for your TQI Cluster Admin account.</p>{errorMessage && <div className="tqi-alert tqi-alert-error" style={{ marginTop: '1rem' }}>{errorMessage}</div>}<form onSubmit={handleTokenReset} style={{ marginTop: '1.25rem' }}><label className="tqi-login-label" htmlFor="reset-new-pass">New password</label><input id="reset-new-pass" type="password" required minLength={8} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} className="tqi-login-input" placeholder="At least 8 characters" /><label className="tqi-login-label" htmlFor="reset-confirm-pass" style={{ marginTop: '0.85rem' }}>Confirm password</label><input id="reset-confirm-pass" type="password" required minLength={8} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} className="tqi-login-input" placeholder="Re-enter your password" /><button type="submit" disabled={isLoading} className="tqi-login-primary" style={{ marginTop: '1.25rem' }}>{isLoading ? 'Resetting...' : 'Reset Password'}</button></form></div></section></div>;
+  }
 
   // ============= Onboarding / change-password view =============
   if (pendingSession) {
     return (
       <div className="tqi-login-shell">
-        <StagePanel
-          kicker="First-time onboarding"
-          eyebrow={
-            <>
-              One last <span className="tqi-apricot-underline">step.</span>
-              <br />
-              Make it yours.
-            </>
-          }
-        />
-
         <section className="tqi-login-form-side">
           <MobileBrandStrip />
           <div className="tqi-login-card">
@@ -398,6 +289,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                 disabled={isLoading || newPassword.length < 8 || newPassword !== confirmPassword}
                 className="tqi-login-primary"
               >
+                {isLoading ? <TqiLoadingMark /> : null}
                 <span>{isLoading ? 'Saving…' : 'Save and enter ERP'}</span>
                 <ArrowRight size={16} weight="light" />
               </button>
@@ -411,16 +303,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   // ============= Default sign-in view =============
   return (
     <div className="tqi-login-shell">
-      <StagePanel
-        kicker="Rural education, unified"
-        eyebrow={
-          <>
-            Creating <span className="tqi-apricot-underline">socially responsible</span> leaders
-            across Tamil Nadu.
-          </>
-        }
-      />
-
       <section className="tqi-login-form-side">
         <MobileBrandStrip />
         <div className="tqi-login-card tqi-rise">
@@ -459,7 +341,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             </button>
           </div>
 
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSubmit} autoComplete="off">
             <div style={{ marginBottom: '0.85rem' }}>
               <label className="tqi-login-label" htmlFor="login-email">Work email</label>
               <div className="tqi-login-input-wrap">
@@ -468,7 +350,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   id="login-email"
                   type="email"
                   required
-                  autoComplete="username"
+                  autoComplete="off"
                   value={identifier}
                   onChange={(e) => { setIdentifier(e.target.value); setErrorMessage(null); }}
                   placeholder="name@college.org"
@@ -495,7 +377,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     id="login-password"
                     type={showPassword ? 'text' : 'password'}
                     required
-                    autoComplete="current-password"
+                    autoComplete="new-password"
                     value={password}
                     onChange={(e) => { setPassword(e.target.value); setErrorMessage(null); }}
                     placeholder="Enter your password"
@@ -558,7 +440,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             >
               {isLoading ? (
                 <>
-                  <span className="tqi-spinner" style={{ width: 14, height: 14 }} />
+                  <TqiLoadingMark />
                   <span>Signing you in…</span>
                 </>
               ) : (
@@ -569,23 +451,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               )}
             </button>
 
-            <div className="tqi-login-divider">Quick demo</div>
-            <div className="tqi-login-roles">
-              {quickRoles.map((qr) => {
-                const active = identifier === qr.email;
-                return (
-                  <button
-                    key={qr.label}
-                    type="button"
-                    onClick={() => applyQuickRole(qr)}
-                    className="tqi-login-role"
-                    data-active={active}
-                  >
-                    {qr.label}
-                  </button>
-                );
-              })}
-            </div>
             <p className="tqi-login-secondary-text">
               By signing in you agree to the <a href="#terms">Terms</a> and <a href="#privacy">Privacy Policy</a>.
             </p>
@@ -697,7 +562,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   >
                     {forgotStatus === 'sending' ? (
                       <>
-                        <span className="tqi-spinner" style={{ width: 14, height: 14 }} />
+                        <TqiLoadingMark />
                         <span>Sending…</span>
                       </>
                     ) : (

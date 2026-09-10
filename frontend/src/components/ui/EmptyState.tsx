@@ -5,8 +5,11 @@ interface EmptyStateProps {
   icon: React.ComponentType<any>;
   title: string;
   body?: string;
+  description?: string;
   primaryAction?: { label: string; onClick: () => void };
   secondaryAction?: { label: string; onClick: () => void };
+  actionLabel?: string;
+  onAction?: () => void;
   variant?: 'brand' | 'success' | 'warning' | 'neutral';
 }
 
@@ -21,58 +24,46 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   icon: Icon,
   title,
   body,
+  description,
   primaryAction,
   secondaryAction,
-  variant = 'brand',
-}) => (
-  <div className="tqi-empty">
-    <div
-      className="tqi-empty-illustration"
-      style={{
-        width: 88,
-        height: 88,
-        borderRadius: 24,
-        ...Object.fromEntries(
-          variantStyles[variant]
-            .split(';')
-            .map((s) => s.split(':'))
-            .filter((kv) => kv.length === 2)
-            .map(([k, v]) => [k.trim(), v.trim()])
-        ),
-      }}
-    >
-      <Icon className="h-9 w-9" />
-    </div>
-    <p className="tqi-empty-title">{title}</p>
-    {body && <p className="tqi-empty-body">{body}</p>}
-    {(primaryAction || secondaryAction) && (
-      <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
-        {secondaryAction && (
-          <button
-            type="button"
-            onClick={secondaryAction.onClick}
-            className="tqi-cta-secondary tqi-btn-outline"
-            style={{ height: 36, padding: '0 0.875rem' }}
-          >
-            <ArrowClockwise className="h-3.5 w-3.5" />
-            <span>{secondaryAction.label}</span>
-          </button>
-        )}
-        {primaryAction && (
-          <button
-            type="button"
-            onClick={primaryAction.onClick}
-            className="tqi-cta tqi-btn-primary"
-            style={{ height: 36, padding: '0 0.875rem' }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>{primaryAction.label}</span>
-            <span className="tqi-cta-icon">
-              <ArrowRight className="h-3 w-3" />
-            </span>
-          </button>
-        )}
+  actionLabel,
+  onAction,
+}) => {
+  const resolvedBody = body || description;
+  const resolvedPrimaryAction = primaryAction || (actionLabel && onAction ? { label: actionLabel, onClick: onAction } : undefined);
+
+  return (
+    <div className="flex flex-col items-center justify-center p-8 text-center rounded-lg border border-dashed border-border bg-card/50">
+      <div className="flex h-11 w-11 items-center justify-center rounded-md border border-border bg-muted/60 text-muted-foreground mb-3">
+        <Icon className="h-5 w-5" />
       </div>
-    )}
-  </div>
-);
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      {resolvedBody && <p className="mt-1 max-w-sm text-xs text-muted-foreground">{resolvedBody}</p>}
+      {(resolvedPrimaryAction || secondaryAction) && (
+        <div className="mt-4 flex items-center gap-2">
+          {secondaryAction && (
+            <button
+              type="button"
+              onClick={secondaryAction.onClick}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs hover:bg-surface-hover"
+            >
+              <ArrowClockwise className="h-3.5 w-3.5" />
+              <span>{secondaryAction.label}</span>
+            </button>
+          )}
+          {resolvedPrimaryAction && (
+            <button
+              type="button"
+              onClick={resolvedPrimaryAction.onClick}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs hover:bg-brand-dark"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>{resolvedPrimaryAction.label}</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};

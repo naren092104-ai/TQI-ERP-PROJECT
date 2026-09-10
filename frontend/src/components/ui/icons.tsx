@@ -194,6 +194,7 @@ import {
   ArrowCounterClockwise as PhosphorArrowCounterClockwise,
   CurrencyDollar as PhosphorCurrencyDollar,
   Car as PhosphorCar,
+  Play as PhosphorPlay,
 } from '@phosphor-icons/react';
 
 export type IconName =
@@ -845,4 +846,5 @@ export {
   PhosphorCalendarBlank as CalendarDays,
   PhosphorBuildings as Building2,
   PhosphorCurrencyInr as ReceiptIndianRupee,
+  PhosphorPlay as Play,
 };

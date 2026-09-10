@@ -7,7 +7,7 @@ import {
   UserCircle,
   Check,
   Command,
-  Sliders,
+  Menu,
   Sparkle,
   Gear,
   Question,
@@ -34,6 +34,9 @@ interface HeaderProps {
   onRoleChange?: (role: UserRole) => void;
   onToggleSidebar?: () => void;
   onOpenCommandPalette?: () => void;
+  academicYears?: Array<{ id: string; name: string; is_active?: boolean; status?: string }>;
+  selectedAcademicYearId?: string;
+  onSelectAcademicYear?: (id: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -49,6 +52,9 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onToggleSidebar,
   onOpenCommandPalette,
+  academicYears = [],
+  selectedAcademicYearId = '',
+  onSelectAcademicYear,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
@@ -133,507 +139,251 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      {/* Floating glass island header — detached from the top edge with
-          a hairline outer ring and an inner pill core (Double-Bezel). */}
-      <header className="sticky top-3 z-30 w-full px-3 sm:px-5 lg:px-7 pointer-events-none">
-        <div
-          className="tqi-glass-island flex items-center justify-between gap-2 sm:gap-3 px-2.5 sm:px-3.5 py-2 pointer-events-auto"
-          style={{
-            height: 'var(--header-h, 64px)',
-            background:
-              'color-mix(in srgb, var(--card) 78%, transparent)',
-            backdropFilter: 'saturate(180%) blur(24px)',
-            WebkitBackdropFilter: 'saturate(180%) blur(24px)',
-            border: '1px solid color-mix(in srgb, var(--border) 80%, transparent)',
-            borderRadius: 'var(--radius-xl, 18px)',
-            boxShadow:
-              '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 12px 32px -16px rgba(15, 23, 42, 0.18)',
-          }}
-        >
-          {/* Left: mobile toggle + search */}
-          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-            <button
-              type="button"
-              onClick={onToggleSidebar}
-              className="tqi-touch lg:hidden flex items-center justify-center transition-all"
-              style={{
-                width: 38,
-                height: 38,
-                color: 'var(--text-secondary)',
-                background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md, 12px)',
-              }}
-              aria-label="Toggle navigation"
-            >
-              <Sliders size={18} weight="light" />
-            </button>
+      {/* Enterprise Top Header */}
+      <header className="tqi-app-header sticky top-0 z-30 w-full h-14 border-b border-border bg-card px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 shadow-xs">
+        {/* Left: mobile toggle + search */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            className="lg:hidden flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
+            aria-label="Toggle navigation"
+          >
+            <Menu size={18} />
+          </button>
 
-            {/* Mobile search trigger */}
-            <button
-              type="button"
-              onClick={() => setMobileSearchOpen(true)}
-              className="tqi-touch sm:hidden flex items-center justify-center transition-all"
-              style={{
-                width: 38,
-                height: 38,
-                color: 'var(--text-secondary)',
-                background: 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-md, 12px)',
-              }}
-              aria-label="Open search"
-            >
-              <Search size={18} weight="light" />
-            </button>
+          {/* Inline search (tablet+) */}
+          <div
+            ref={searchContainerRef}
+            className={`relative w-full max-w-md hidden sm:flex items-center gap-2 h-9 rounded-md border transition-colors px-2.5 ${
+              searchFocused
+                ? 'border-primary ring-1 ring-primary bg-card'
+                : 'border-border bg-background hover:border-border-strong'
+            }`}
+          >
+            <Search size={14} className="shrink-0 text-muted-foreground" />
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search records, students, sessions, clusters..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setSearchFocused(true)}
+              className="flex-1 bg-transparent border-none outline-none text-xs text-foreground placeholder:text-muted-foreground font-sans"
+            />
+            <kbd className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded border border-border bg-muted/60 text-[10px] font-mono text-muted-foreground">
+              <Command size={10} />K
+            </kbd>
 
-            {/* Inline search (tablet+) — Double-Bezel: outer + inner */}
-            <div
-              ref={searchContainerRef}
-              className="tqi-search w-full max-w-md hidden sm:inline-flex"
-              style={{
-                background: 'color-mix(in srgb, var(--surface) 60%, transparent)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '999px',
-                height: 40,
-                padding: '0 0.875rem',
-                transition:
-                  'border-color var(--dur-fast) var(--ease-out-quart), box-shadow var(--dur-fast) var(--ease-out-quart)',
-              }}
-            >
-              <Search size={16} weight="light" className="shrink-0" style={{ color: 'var(--text-muted)' }} />
-              <input
-                ref={searchRef}
-                type="text"
-                placeholder="Jump to a view, roster, or record…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onFocus={(e) => {
-                  const root = e.currentTarget.parentElement!;
-                  root.style.borderColor = 'var(--brand)';
-                  root.style.boxShadow = '0 0 0 4px var(--brand-ring, color-mix(in srgb, var(--brand) 18%, transparent))';
-                  setSearchFocused(true);
-                }}
-                onBlur={() => {}}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  outline: 'none',
-                  flex: 1,
-                  fontSize: 13.5,
-                  color: 'var(--text)',
-                  fontFamily: 'inherit',
-                }}
-              />
-              <kbd
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  height: 22,
-                  padding: '0 6px',
-                  fontSize: 10,
-                  fontWeight: 600,
-                  letterSpacing: '0.04em',
-                  color: 'var(--text-muted)',
-                  background: 'color-mix(in srgb, var(--card) 70%, transparent)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: 6,
-                  fontFamily: 'inherit',
-                }}
+            {searchFocused && searchQuery && (
+              <div
+                className="absolute left-0 right-0 top-[40px] rounded-md border border-border bg-card py-2 max-h-96 overflow-y-auto custom-scrollbar shadow-lg z-50"
               >
-                <Command size={11} weight="bold" />K
-              </kbd>
-
-              {searchFocused && searchQuery && (
-                <div
-                  className="absolute left-0 right-0 top-[48px] rounded-2xl py-2 max-h-96 overflow-y-auto custom-scrollbar"
-                  style={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    boxShadow:
-                      '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 24px 48px -16px rgba(15, 23, 42, 0.22)',
-                    borderRadius: 'var(--radius-lg, 14px)',
-                    animation:
-                      'tqi-reveal-up var(--dur-base, 320ms) var(--ease-out-quart) both',
-                  }}
-                >
-                  {Object.keys(grouped).length > 0 ? (
-                    Object.entries(grouped).map(([cat, items]) => (
-                      <div key={cat} className="px-1.5">
-                        <div
-                          className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.14em]"
-                          style={{ color: 'var(--text-muted)' }}
-                        >
-                          {cat}
-                        </div>
-                        {items.map((item) => (
-                          <button
-                            key={item.tab}
-                            type="button"
-                            onClick={() => {
-                              onNavigate(item.tab);
-                              setSearchQuery('');
-                            }}
-                            className="tqi-reveal-item flex w-full items-center justify-between rounded-lg px-3 py-2 text-[13px] font-medium transition-colors"
-                            style={{ color: 'var(--text)' }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'var(--surface-hover)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'transparent';
-                            }}
-                          >
-                            <span className="truncate">{item.label}</span>
-                            <CaretDown
-                              size={12}
-                              weight="light"
-                              className="-rotate-90"
-                              style={{ color: 'var(--text-muted)' }}
-                            />
-                          </button>
-                        ))}
+                {Object.keys(grouped).length > 0 ? (
+                  Object.entries(grouped).map(([cat, items]) => (
+                    <div key={cat} className="px-1.5">
+                      <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        {cat}
                       </div>
-                    ))
-                  ) : (
-                    <div
-                      className="px-4 py-10 text-center text-[13px]"
-                      style={{ color: 'var(--text-muted)' }}
-                    >
-                      No results for &ldquo;{searchQuery}&rdquo;.
+                      {items.map((item) => (
+                        <button
+                          key={item.tab}
+                          type="button"
+                          onClick={() => {
+                            onNavigate(item.tab);
+                            setSearchQuery('');
+                            setSearchFocused(false);
+                          }}
+                          className="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-surface-hover transition-colors text-left"
+                        >
+                          <span className="truncate">{item.label}</span>
+                          <CaretDown size={12} className="-rotate-90 text-muted-foreground" />
+                        </button>
+                      ))}
                     </div>
-                  )}
-                </div>
-              )}
-            </div>
+                  ))
+                ) : (
+                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                    No records matching &ldquo;{searchQuery}&rdquo;.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Academic Year, Notifications, Mode, User profile */}
+        <div className="tqi-header-actions flex items-center gap-2 shrink-0">
+          {/* Global Academic Year Selector */}
+          <div className="tqi-header-year relative">
+            <select
+              aria-label="Academic Year"
+              value={selectedAcademicYearId}
+              onChange={(event) => onSelectAcademicYear?.(event.target.value)}
+              className="tqi-header-year-select h-8 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
+            >
+              <option value="">Select Academic Year</option>
+              {academicYears.map((year) => (
+                <option key={year.id} value={year.id}>
+                  {year.name}{(year.is_active || year.status === 'ACTIVE') ? ' (Active)' : ''}
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Right: notifications, mode, profile */}
-          <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Notifications */}
-            <div className="relative" ref={notifRef}>
-              <button
-                type="button"
-                onClick={() => setShowNotifications(!showNotifications)}
-                className="tqi-touch relative flex items-center justify-center transition-all"
-                style={{
-                  width: 38,
-                  height: 38,
-                  color: showNotifications ? 'var(--brand)' : 'var(--text-secondary)',
-                  background: showNotifications
-                    ? 'var(--brand-light)'
-                    : 'color-mix(in srgb, var(--surface) 70%, transparent)',
-                  border: '1px solid',
-                  borderColor: showNotifications ? 'var(--brand-xlight, var(--border))' : 'var(--border-subtle)',
-                  borderRadius: 'var(--radius-md, 12px)',
-                }}
-                aria-label="View notifications"
-              >
-                <Bell size={16} weight="light" />
-                {(unreadCount > 0 || pendingApprovalsCount > 0) && (
-                  <span
-                    className="absolute top-1 right-1 flex h-2 w-2 rounded-full"
-                    style={{
-                      background: 'var(--error, #c0392b)',
-                      boxShadow:
-                        '0 0 0 2px var(--card), 0 0 8px color-mix(in srgb, var(--error, #c0392b) 50%, transparent)',
-                    }}
-                  />
-                )}
-              </button>
-
-              {showNotifications && (
-                <div
-                  className="absolute right-0 mt-2 w-[22rem] rounded-2xl py-3 z-50"
-                  style={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    boxShadow:
-                      '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 24px 48px -16px rgba(15, 23, 42, 0.22)',
-                    animation: 'tqi-reveal-up var(--dur-base, 320ms) var(--ease-out-quart) both',
-                  }}
-                >
-                  <div
-                    className="flex items-center justify-between px-4 pb-2.5 mb-1"
-                    style={{ borderBottom: '1px solid var(--border-subtle)' }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="tqi-eyebrow"
-                        style={{ fontSize: 10, color: 'var(--text-muted)' }}
-                      >
-                        Inbox
-                      </span>
-                      <span className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                        Notifications
-                      </span>
-                    </div>
-                    <Badge color="primary" size="sm">
-                      {unreadCount + pendingApprovalsCount} new
-                    </Badge>
-                  </div>
-                  <div className="max-h-80 overflow-y-auto custom-scrollbar">
-                    {pendingApprovalsCount > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onNavigate('approvals');
-                          setShowNotifications(false);
-                        }}
-                        className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors"
-                        style={{ background: 'var(--warning-bg)' }}
-                      >
-                        <span
-                          className="tqi-icon-chip tqi-icon-chip-warn shrink-0"
-                          style={{ width: 32, height: 32, borderRadius: 'var(--radius-sm)' }}
-                        >
-                          <Lightning size={14} weight="light" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                            {pendingApprovalsCount} pending approvals
-                          </div>
-                          <div
-                            className="text-[11.5px] mt-0.5"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            Attendance and finance entries need verification.
-                          </div>
-                        </div>
-                        <span
-                          className="tqi-pill-icon shrink-0"
-                          aria-hidden
-                          style={{
-                            width: 22,
-                            height: 22,
-                            borderRadius: 999,
-                            background: 'color-mix(in srgb, var(--card) 80%, transparent)',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <ArrowRight size={11} weight="light" />
-                        </span>
-                      </button>
-                    )}
-                    {notifications.slice(0, 4).map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                        onClick={() => {
-                          if (n.actionTab) onNavigate(n.actionTab, n.targetId);
-                          setShowNotifications(false);
-                        }}
-                        className="flex w-full items-start gap-3 px-4 py-2.5 text-left transition-colors"
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'var(--surface-hover)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                        }}
-                      >
-                        <span
-                          className="tqi-icon-chip shrink-0"
-                          style={{ width: 32, height: 32, borderRadius: 'var(--radius-sm)' }}
-                        >
-                          <Bell size={14} weight="light" />
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <div className="text-[13px] font-medium" style={{ color: 'var(--text)' }}>
-                            {n.title}
-                          </div>
-                          <div
-                            className="text-[11.5px] mt-0.5 truncate"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            {n.message}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                    {notifications.length === 0 && pendingApprovalsCount === 0 && (
-                      <div
-                        className="px-4 py-10 text-center"
-                        style={{ color: 'var(--text-muted)' }}
-                      >
-                        <span
-                          className="tqi-icon-chip mx-auto mb-2"
-                          style={{
-                            width: 36,
-                            height: 36,
-                            background: 'var(--success-bg)',
-                            color: 'var(--success)',
-                          }}
-                        >
-                          <CheckCircle size={16} weight="light" />
-                        </span>
-                        <p className="text-[13px]">All caught up. No new notifications.</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+          {/* Notifications */}
+          <div className="relative" ref={notifRef}>
+            <button
+              type="button"
+              onClick={() => setShowNotifications(!showNotifications)}
+              className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors relative ${
+                showNotifications
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'
+              }`}
+              aria-label="View notifications"
+            >
+              <Bell size={15} />
+              {(unreadCount > 0 || pendingApprovalsCount > 0) && (
+                <span className="absolute top-1 right-1 flex h-2 w-2 rounded-full bg-red-600 ring-2 ring-card" />
               )}
-            </div>
+            </button>
 
-            <ModeToggle />
-
-            {/* Profile — chip with avatar + name (no plain border) */}
-            <div className="relative" ref={profileRef}>
-              <button
-                type="button"
-                onClick={() => setShowProfileMenu(!showProfileMenu)}
-                className="flex items-center gap-2 pl-1.5 pr-2.5 py-1.5 text-sm font-medium transition-all"
-                style={{
-                  color: 'var(--text)',
-                  border: '1px solid',
-                  borderColor: showProfileMenu
-                    ? 'var(--brand-xlight, var(--border))'
-                    : 'var(--border-subtle)',
-                  background: showProfileMenu
-                    ? 'var(--brand-light)'
-                    : 'color-mix(in srgb, var(--surface) 60%, transparent)',
-                  borderRadius: 999,
-                  height: 40,
-                }}
+            {showNotifications && (
+              <div
+                className="absolute right-0 mt-2 w-80 rounded-md border border-border bg-card py-2 z-50 shadow-lg"
               >
-                <span
-                  className="flex items-center justify-center h-7 w-7 rounded-full text-[10.5px] font-bold tracking-wider"
-                  style={{
-                    background:
-                      'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 65%, var(--accent)))',
-                    color: 'var(--text-on-brand)',
-                    boxShadow:
-                      '0 1px 0 color-mix(in srgb, var(--text-on-brand) 25%, transparent) inset',
-                  }}
-                >
-                  {userName
-                    .split(' ')
-                    .map((p) => p[0])
-                    .slice(0, 2)
-                    .join('')}
-                </span>
-                <div className="hidden md:flex flex-col text-left leading-tight min-w-0">
-                  <span
-                    className="text-[12.5px] font-semibold truncate max-w-[140px]"
-                    style={{ color: 'var(--text)' }}
-                  >
-                    {userName}
-                  </span>
-                  <span
-                    className="text-[9.5px] font-semibold uppercase tracking-[0.14em]"
-                    style={{ color: 'var(--brand)' }}
-                  >
-                    {userRole}
-                  </span>
+                <div className="flex items-center justify-between px-3.5 pb-2 mb-1 border-b border-border">
+                  <span className="text-xs font-semibold text-foreground">Notifications</span>
+                  <Badge color="primary" size="sm">
+                    {unreadCount + pendingApprovalsCount} new
+                  </Badge>
                 </div>
-                <CaretDown
-                  size={12}
-                  weight="light"
-                  className="shrink-0 transition-transform"
-                  style={{
-                    color: 'var(--text-muted)',
-                    transform: showProfileMenu ? 'rotate(180deg)' : 'rotate(0deg)',
-                    transition: 'transform var(--dur-fast) var(--ease-out-quart)',
-                  }}
-                />
-              </button>
 
-              {showProfileMenu && (
-                <div
-                  className="absolute right-0 mt-2 w-64 rounded-2xl py-2 z-50"
-                  style={{
-                    background: 'var(--card)',
-                    border: '1px solid var(--border)',
-                    boxShadow:
-                      '0 1px 0 color-mix(in srgb, var(--text-on-brand) 8%, transparent) inset, 0 24px 48px -16px rgba(15, 23, 42, 0.22)',
-                    animation: 'tqi-reveal-up var(--dur-base, 320ms) var(--ease-out-quart) both',
-                  }}
-                >
-                  <div
-                    className="px-3 py-2.5 mb-1"
-                    style={{ borderBottom: '1px solid var(--border-subtle)' }}
-                  >
-                    <p className="text-[13px] font-semibold" style={{ color: 'var(--text)' }}>
-                      {userName}
-                    </p>
-                    <p className="text-[11.5px] truncate mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      {userEmail}
-                    </p>
-                    <div className="mt-2">
-                      <Badge color="primary" size="sm">
-                        {userRole}
-                      </Badge>
+                <div className="max-h-80 overflow-y-auto custom-scrollbar">
+                  {pendingApprovalsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onNavigate('approvals');
+                        setShowNotifications(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3.5 py-2 text-left hover:bg-surface-hover border-b border-border/60 transition-colors"
+                    >
+                      <div>
+                        <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          {pendingApprovalsCount} pending approvals
+                        </div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          Attendance, lesson plans &amp; finance reviews
+                        </div>
+                      </div>
+                      <ArrowRight size={12} className="text-muted-foreground shrink-0" />
+                    </button>
+                  )}
+                  {notifications.slice(0, 5).map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => {
+                        if (n.actionTab) onNavigate(n.actionTab, n.targetId);
+                        setShowNotifications(false);
+                      }}
+                      className="flex w-full items-start gap-2.5 px-3.5 py-2 text-left hover:bg-surface-hover border-b border-border/40 transition-colors last:border-b-0"
+                    >
+                      <Bell size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-medium text-foreground">{n.title}</div>
+                        <div className="text-[11px] text-muted-foreground truncate">{n.message}</div>
+                      </div>
+                    </button>
+                  ))}
+                  {notifications.length === 0 && pendingApprovalsCount === 0 && (
+                    <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                      All caught up. No new notifications.
                     </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onNavigate('settings');
-                      setShowProfileMenu(false);
-                    }}
-                    className="tqi-reveal-item flex w-full items-center gap-2.5 px-3 py-2 text-[13px] transition-colors"
-                    style={{ color: 'var(--text-secondary)' }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--surface-hover)';
-                      e.currentTarget.style.color = 'var(--text)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.color = 'var(--text-secondary)';
-                    }}
-                  >
-                    <UserCircle size={15} weight="light" style={{ color: 'var(--text-muted)' }} />
-                    Account settings
-                  </button>
-
-                  <button
-                    type="button"
-                    className="tqi-reveal-item flex w-full items-center gap-2.5 px-3 py-2 text-[13px] transition-colors"
-                    style={{ color: 'var(--text-secondary)' }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--surface-hover)';
-                      e.currentTarget.style.color = 'var(--text)';
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent';
-                      e.currentTarget.style.color = 'var(--text-secondary)';
-                    }}
-                  >
-                    <Question size={15} weight="light" style={{ color: 'var(--text-muted)' }} />
-                    Help &amp; documentation
-                  </button>
-
-                  {onLogout && (
-                    <>
-                      <div
-                        className="my-1 h-px"
-                        style={{ background: 'var(--border-subtle)' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onLogout();
-                          setShowProfileMenu(false);
-                        }}
-                        className="tqi-reveal-item flex w-full items-center gap-2.5 px-3 py-2 text-[13px] font-medium transition-colors"
-                        style={{ color: 'var(--error, #c0392b)' }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'var(--error-bg, #FEF3F2)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                        }}
-                      >
-                        <SignOut size={15} weight="light" />
-                        Sign out
-                      </button>
-                    </>
                   )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+          </div>
+
+          <ModeToggle />
+
+          {/* User Profile */}
+          <div className="relative" ref={profileRef}>
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu(!showProfileMenu)}
+              className={`flex items-center gap-2 h-8 pl-1.5 pr-2.5 rounded-md border text-xs transition-colors ${
+                showProfileMenu
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-card text-foreground hover:bg-surface-hover'
+              }`}
+            >
+              <span className="flex items-center justify-center h-6 w-6 rounded-full bg-primary text-primary-foreground font-bold text-[10px]">
+                {userName
+                  .split(' ')
+                  .map((p) => p[0])
+                  .slice(0, 2)
+                  .join('') || 'AD'}
+              </span>
+              <div className="hidden sm:flex flex-col text-left leading-tight">
+                <span className="text-xs font-semibold text-foreground truncate max-w-[120px]">
+                  {userRole === 'Cluster Admin' ? 'Cluster Admin' : 'Admin'}
+                </span>
+                <span className="text-[9px] font-bold text-primary tracking-wider uppercase">
+                  {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
+                </span>
+              </div>
+              <CaretDown
+                size={11}
+                className={`text-muted-foreground transition-transform ${showProfileMenu ? 'rotate-180' : ''}`}
+              />
+            </button>
+
+            {showProfileMenu && (
+              <div
+                className="absolute right-0 mt-2 w-56 rounded-md border border-border bg-card py-1.5 z-50 shadow-lg"
+              >
+                <div className="px-3 py-2 border-b border-border">
+                  <p className="text-xs font-semibold text-foreground">{userName}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{userEmail}</p>
+                  <span className="inline-block mt-1 text-[10px] font-bold text-primary uppercase">
+                    {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onNavigate('settings');
+                    setShowProfileMenu(false);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-surface-hover transition-colors"
+                >
+                  <UserCircle size={14} className="text-muted-foreground" />
+                  Account Settings
+                </button>
+
+                {onLogout && (
+                  <>
+                    <div className="my-1 h-px bg-border" />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onLogout();
+                        setShowProfileMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
+                    >
+                      <SignOut size={14} />
+                      Sign Out
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </header>

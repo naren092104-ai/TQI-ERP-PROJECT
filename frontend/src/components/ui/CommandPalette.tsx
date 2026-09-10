@@ -52,7 +52,6 @@ const COMMANDS: CommandItem[] = [
   { id: 'go-attendance', title: '8-day attendance', group: 'Navigate', icon: CalendarCheck, tab: 'attendance', keywords: ['log', 'mark'] },
   { id: 'go-sessions', title: 'Session scheduling', group: 'Navigate', icon: ClipboardText, tab: 'sessions' },
   { id: 'go-photos', title: 'Session photos', group: 'Navigate', icon: Camera, tab: 'session-photos' },
-  { id: 'go-dates', title: 'Date change requests', group: 'Navigate', icon: Calendar, tab: 'date-change-requests' },
   { id: 'go-reports', title: 'Session reports', group: 'Navigate', icon: FileText, tab: 'session-reports' },
   { id: 'go-modules', title: 'Module library & PPTs', group: 'Navigate', icon: BookOpen, tab: 'module-library' },
   { id: 'go-lesson', title: 'Lesson plans', group: 'Navigate', icon: FileText, tab: 'lesson-plan' },
