@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS villages (
   name         VARCHAR(255) NOT NULL,
   panchayat_id VARCHAR(64)  NOT NULL,
   cluster_id   VARCHAR(64)  NOT NULL,
+  status       ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
   created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),

@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS volunteers (
   panchayat_id VARCHAR(64)  NULL,
   village_id   VARCHAR(64)  NULL,
   department   VARCHAR(255) NULL,
+  stream       VARCHAR(100) NULL,
+  passing_out_year SMALLINT NULL,
   role         VARCHAR(64)  NULL,
   status       ENUM('Active','Inactive') NOT NULL DEFAULT 'Active',
   created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,

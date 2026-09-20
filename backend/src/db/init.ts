@@ -34,13 +34,12 @@ export async function initDatabaseSchema(): Promise<void> {
     return;
   }
 
-  // 16-char URL-safe random password.
-  const rawPassword = randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+  const rawPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'admin123';
   const passwordHash = await bcrypt.hash(rawPassword, 10);
 
   await pool.query(
     `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status)
-     VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', TRUE, 'Active')`,
+     VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', FALSE, 'Active')`,
     [passwordHash],
   );
 
@@ -51,8 +50,6 @@ export async function initDatabaseSchema(): Promise<void> {
   console.log('   Email    : admin@tqi.org');
   console.log(`   Password : ${rawPassword}`);
   console.log('   Role     : Super Admin');
-  console.log('------------------------------------------------------');
-  console.log('   Change the password on first login (mustChangePassword = true).');
   console.log('======================================================');
   console.log('');
 }

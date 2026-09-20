@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   target_standard   VARCHAR(100) NULL,
   learning_outcomes TEXT         NULL,
   day_number        INT          NULL,
+  academic_year_id  VARCHAR(64)  NULL,
   status            ENUM('Draft','Submitted','Approved','Rejected') NOT NULL DEFAULT 'Draft',
   created_by        VARCHAR(64)  NULL,
   created_at        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -28,6 +29,7 @@ CREATE TABLE IF NOT EXISTS lesson_plans (
   INDEX idx_lesson_plans_cluster (cluster_id),
   INDEX idx_lesson_plans_session (session_id),
   INDEX idx_lesson_plans_module (module_id),
+  INDEX idx_lesson_plans_year (academic_year_id),
   INDEX idx_lesson_plans_created (created_at),
   CONSTRAINT fk_lesson_plans_cluster
     FOREIGN KEY (cluster_id) REFERENCES clusters(id)
@@ -53,6 +55,7 @@ CREATE TABLE IF NOT EXISTS session_photos (
   id                VARCHAR(64)  NOT NULL,
   cluster_id        VARCHAR(64)  NOT NULL,
   session_id        VARCHAR(64)  NULL,
+  academic_year_id  VARCHAR(64)  NULL,
   day_number        INT          NOT NULL,
   file_path         VARCHAR(500) NOT NULL,
   file_url          VARCHAR(500) NULL,
@@ -62,6 +65,7 @@ CREATE TABLE IF NOT EXISTS session_photos (
   PRIMARY KEY (id),
   INDEX idx_session_photos_cluster (cluster_id),
   INDEX idx_session_photos_session (session_id),
+  INDEX idx_session_photos_year (academic_year_id),
   INDEX idx_session_photos_day (day_number),
   INDEX idx_session_photos_uploaded (uploaded_at),
   CONSTRAINT fk_session_photos_cluster
@@ -79,6 +83,7 @@ CREATE TABLE IF NOT EXISTS session_reports (
   id                 VARCHAR(64) NOT NULL,
   session_id         VARCHAR(64) NOT NULL,
   cluster_id         VARCHAR(64) NOT NULL,
+  academic_year_id   VARCHAR(64) NULL,
   day_number         INT         NULL,
   session_summary    TEXT        NULL,
   student_count      INT         NULL DEFAULT 0,
@@ -93,6 +98,7 @@ CREATE TABLE IF NOT EXISTS session_reports (
   PRIMARY KEY (id),
   INDEX idx_session_reports_session (session_id),
   INDEX idx_session_reports_cluster (cluster_id),
+  INDEX idx_session_reports_year (academic_year_id),
   INDEX idx_session_reports_created (created_at),
   CONSTRAINT fk_session_reports_session
     FOREIGN KEY (session_id) REFERENCES sessions(id)

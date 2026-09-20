@@ -1,4 +1,9 @@
-export const API_BASE_URL: string = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/$/, '');
+export const API_BASE_URL: string = (
+  import.meta.env.VITE_API_URL ||
+  (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+    ? 'https://tqi.autorevives.com/api'
+    : 'http://localhost:5000/api')
+).replace(/\/$/, '');
 
 export function apiUrl(path: string): string {
   if (!path) return API_BASE_URL;

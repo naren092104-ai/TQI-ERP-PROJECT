@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS clusters (
   id           VARCHAR(64)  NOT NULL,
   name         VARCHAR(255) NOT NULL,
   district     VARCHAR(255) NULL,
+  college_district VARCHAR(255) NULL,
   state        VARCHAR(255) NULL,
   code         VARCHAR(64)  NULL,
   college_name VARCHAR(255) NULL,

@@ -4,6 +4,8 @@
 CREATE TABLE IF NOT EXISTS finance_entries (
   id             VARCHAR(64)   NOT NULL,
   cluster_id     VARCHAR(64)   NOT NULL,
+  session_id     VARCHAR(64)   NULL,
+  academic_year_id VARCHAR(64) NULL,
   date           DATE          NOT NULL,
   description    VARCHAR(255)  NOT NULL,
   category       VARCHAR(100)  NOT NULL,
@@ -15,6 +17,8 @@ CREATE TABLE IF NOT EXISTS finance_entries (
   updated_at     TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   INDEX idx_finance_cluster (cluster_id),
+  INDEX idx_finance_session (session_id),
+  INDEX idx_finance_year (academic_year_id),
   INDEX idx_finance_date (date),
   INDEX idx_finance_status (status),
   CONSTRAINT fk_finance_cluster
