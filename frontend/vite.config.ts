@@ -46,6 +46,25 @@ export default defineConfig(() => {
     build: {
       outDir: 'dist',
       sourcemap: false,
+      chunkSizeWarningLimit: 1000,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes('node_modules')) {
+              if (id.includes('@react-pdf') || id.includes('pdfkit') || id.includes('fontkit') || id.includes('png-js')) {
+                return 'vendor-pdf';
+              }
+              if (id.includes('xlsx')) {
+                return 'vendor-xlsx';
+              }
+              if (id.includes('lucide-react') || id.includes('@radix-ui')) {
+                return 'vendor-ui';
+              }
+              return 'vendor';
+            }
+          },
+        },
+      },
     },
   };
 });

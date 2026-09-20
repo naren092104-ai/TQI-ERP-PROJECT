@@ -58,7 +58,7 @@ import { NotFoundView } from './components/NotFoundView';
 const KNOWN_TABS: Set<string> = new Set([
   'dashboard', 'academic-setup', 'approvals', 'clusters', 'audit-logs', 'users',
   'panchayats', 'panchayat-detail', 'students', 'volunteers', 'sessions',
-  'attendance', 'lesson-plan', 'session-photos',
+  'attendance', 'volunteer-attendance', 'lesson-plan', 'session-photos',
   'finance', 'finance-statement', 'reports', 'report-preview',
   'notifications', 'settings', 'date-change-requests',
   'session-reports', 'session-submissions', 'module-library',
@@ -154,7 +154,7 @@ export default function App() {
   const [modules, setModules] = useState<TqiModule[]>([]);
 
   // Sync with API Backend
-  const fetchBackendData = useCallback(async (signal: AbortSignal) => {
+  const fetchBackendData = useCallback(async (signal?: AbortSignal) => {
     if (!currentUser?.token) return;
 
     // 300 ms debounce — React 19 Strict Mode unmounts and remounts immediately
@@ -162,9 +162,11 @@ export default function App() {
     // requests fire, so only the second (surviving) mount actually fetches.
     await new Promise<void>((resolve) => {
       const t = setTimeout(resolve, 300);
-      signal.addEventListener('abort', () => clearTimeout(t), { once: true });
+      if (signal) {
+        signal.addEventListener('abort', () => clearTimeout(t), { once: true });
+      }
     });
-    if (signal.aborted) return;
+    if (signal?.aborted) return;
 
     const headers = {
       Authorization: `Bearer ${currentUser.token}`,
@@ -215,7 +217,7 @@ export default function App() {
         get(`/api/audit-logs?clusterId=${currentUserClusterId}`),
         get('/api/notifications'),
         get('/api/clusters'),
-        get('/api/users'),
+        currentUserRole === 'Super Admin' ? get('/api/users') : Promise.resolve({ users: [] }),
         get('/api/date-change-requests'),
         get('/api/session-reports'),
         get('/api/session-submissions'),
@@ -238,8 +240,13 @@ export default function App() {
       if (Array.isArray(clustersRes?.clusters))             setClusters(clustersRes.clusters);
       if (Array.isArray(usersRes?.users))                   setUsers(usersRes.users);
       if (Array.isArray(dateChangeRequestsRes?.dateChangeRequests)) setDateChangeRequests(dateChangeRequestsRes.dateChangeRequests);
-      if (Array.isArray(sessionReportsRes?.sessionReports))         setSessionReports(sessionReportsRes.sessionReports);
+      else if (Array.isArray(dateChangeRequestsRes?.data)) setDateChangeRequests(dateChangeRequestsRes.data);
+
+      if (Array.isArray(sessionReportsRes?.sessionReports)) setSessionReports(sessionReportsRes.sessionReports);
+      else if (Array.isArray(sessionReportsRes?.data)) setSessionReports(sessionReportsRes.data);
+
       if (Array.isArray(sessionSubmissionsRes?.sessionSubmissions)) setSessionSubmissions(sessionSubmissionsRes.sessionSubmissions);
+      else if (Array.isArray(sessionSubmissionsRes?.data)) setSessionSubmissions(sessionSubmissionsRes.data);
       if (Array.isArray(academicYearsRes?.academicYears))           setAcademicYears(academicYearsRes.academicYears);
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
@@ -481,13 +488,19 @@ export default function App() {
   // Delete Cluster Mutation
   const handleDeleteCluster = async (clusterId: string) => {
     try {
-      await fetch(apiUrl(`/api/clusters/${clusterId}`), {
+      const res = await fetch(apiUrl(`/api/clusters/${clusterId}`), {
         method: 'DELETE',
         headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
       });
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => null);
+        throw new Error(errorData?.error || 'Failed to delete cluster.');
+      }
       setClusters((prev) => prev.filter((c) => c.id !== clusterId));
+      setUsers((prev) => prev.filter((u) => u.clusterId !== clusterId));
     } catch (error: any) {
-      setClusters((prev) => prev.filter((c) => c.id !== clusterId));
+      console.error('Failed to delete cluster:', error);
+      throw error;
     }
   };
 
@@ -591,7 +604,7 @@ export default function App() {
   };
 
   // Panchayat mutations
-  const handleAddPanchayat = (newPanchayat: {
+  const handleAddPanchayat = async (newPanchayat: {
     name: string;
     cluster: string;
     status: 'On Track' | 'Correction Required' | 'Action Needed';
@@ -616,17 +629,55 @@ export default function App() {
     };
 
     setPanchayats((prev) => [created, ...prev]);
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/panchayats'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            id: newId,
+            name: newPanchayat.name,
+            clusterId: currentUserClusterId,
+          }),
+        });
+
+        // Also create initial villages
+        for (const v of villagesList) {
+          await fetch(apiUrl('/api/villages'), {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${currentUser.token}`,
+            },
+            body: JSON.stringify({
+              id: v.id,
+              name: v.name,
+              panchayat_id: newId,
+              cluster_id: currentUserClusterId,
+            }),
+          });
+        }
+      } catch (err) {
+        console.error('Failed to persist panchayat to backend:', err);
+      }
+    }
   };
 
-  const handleAddVillage = (panchayatId: string, villageName: string) => {
+  const handleAddVillage = async (panchayatId: string, villageName: string) => {
+    const newVillageId = `v-${Date.now()}`;
+    const newVillage = {
+      id: newVillageId,
+      name: villageName,
+      studentCount: 0,
+    };
+
     setPanchayats((prev) =>
       prev.map((p) => {
         if (p.id === panchayatId) {
-          const newVillage = {
-            id: `v-${Date.now()}`,
-            name: villageName,
-            studentCount: 0,
-          };
           const updatedVillages = [...p.villages, newVillage];
           return {
             ...p,
@@ -637,10 +688,100 @@ export default function App() {
         return p;
       })
     );
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/villages'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            id: newVillageId,
+            name: villageName,
+            panchayat_id: panchayatId,
+            cluster_id: currentUserClusterId,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to persist village to backend:', err);
+      }
+    }
+  };
+
+  const handleUpdatePanchayat = (panchayatId: string, name: string) => {
+    setPanchayats((prev) =>
+      prev.map((p) => (p.id === panchayatId ? { ...p, name } : p))
+    );
+    setStudents((prev) =>
+      prev.map((s) => (s.panchayatId === panchayatId ? { ...s, panchayatName: name } : s))
+    );
+  };
+
+  const handleDeletePanchayat = async (panchayatId: string) => {
+    setPanchayats((prev) => prev.filter((p) => p.id !== panchayatId));
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/panchayats/${panchayatId}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+        });
+      } catch (err) {
+        console.error('Failed to delete panchayat from backend:', err);
+      }
+    }
+  };
+
+  const handleUpdateVillage = (panchayatId: string, villageId: string, name: string) => {
+    setPanchayats((prev) =>
+      prev.map((p) => {
+        if (p.id === panchayatId) {
+          return {
+            ...p,
+            villages: p.villages.map((v) => (v.id === villageId ? { ...v, name } : v)),
+          };
+        }
+        return p;
+      })
+    );
+    setStudents((prev) =>
+      prev.map((s) =>
+        s.panchayatId === panchayatId && s.villageId === villageId
+          ? { ...s, villageName: name }
+          : s
+      )
+    );
+  };
+
+  const handleDeleteVillage = async (panchayatId: string, villageId: string) => {
+    setPanchayats((prev) =>
+      prev.map((p) => {
+        if (p.id === panchayatId) {
+          const updated = p.villages.filter((v) => v.id !== villageId);
+          return {
+            ...p,
+            villages: updated,
+            villagesCount: updated.length,
+          };
+        }
+        return p;
+      })
+    );
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/villages/${villageId}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+        });
+      } catch (err) {
+        console.error('Failed to delete village from backend:', err);
+      }
+    }
   };
 
   // Student mutations
-  const handleAddStudent = (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
+  const handleAddStudent = async (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
     const newId = `stu-${Date.now()}`;
     const code = `STU-24-${String(students.length + 1).padStart(3, '0')}`;
     const avatarLetter = newStudent.name.charAt(0).toUpperCase();
@@ -673,9 +814,29 @@ export default function App() {
         return p;
       })
     );
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/students'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            ...newStudent,
+            id: newId,
+            code,
+            clusterId: currentUserClusterId,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to persist student to backend:', err);
+      }
+    }
   };
 
-  const handleBulkAddStudents = (
+  const handleBulkAddStudents = async (
     newStudentsList: Array<Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>>
   ) => {
     if (!newStudentsList || newStudentsList.length === 0) return;
@@ -723,13 +884,45 @@ export default function App() {
         return p;
       })
     );
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/students/bulk'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            clusterId: currentUserClusterId,
+            students: createdBatch,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to bulk persist students to backend:', err);
+      }
+    }
   };
 
-  const handleUpdateStudent = (id: string, updated: Partial<Student>) => {
+  const handleUpdateStudent = async (id: string, updated: Partial<Student>) => {
     setStudents((prev) => prev.map((s) => (s.id === id ? { ...s, ...updated } : s)));
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/students/${id}`), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify(updated),
+        });
+      } catch (err) {
+        console.error('Failed to update student in backend:', err);
+      }
+    }
   };
 
-  const handleDeleteStudent = (id: string) => {
+  const handleDeleteStudent = async (id: string) => {
     const toDelete = students.find((s) => s.id === id);
     if (toDelete) {
       setPanchayats((prev) =>
@@ -751,10 +944,21 @@ export default function App() {
       );
     }
     setStudents((prev) => prev.filter((s) => s.id !== id));
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/students/${id}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+        });
+      } catch (err) {
+        console.error('Failed to delete student from backend:', err);
+      }
+    }
   };
 
   // Volunteer mutations
-  const handleAddVolunteer = (newVol: Omit<Volunteer, 'id' | 'avatarText' | 'recentSessions' | 'totalSessions' | 'attendanceRate'>) => {
+  const handleAddVolunteer = async (newVol: Omit<Volunteer, 'id' | 'avatarText' | 'recentSessions' | 'totalSessions' | 'attendanceRate'>) => {
     const newId = `vol-${Date.now()}`;
     const names = newVol.name.split(' ');
     const avatarText = names.length > 1 ? `${names[0][0]}${names[1][0]}`.toUpperCase() : newVol.name.slice(0, 2).toUpperCase();
@@ -768,14 +972,57 @@ export default function App() {
       recentSessions: [],
     };
     setVolunteers((prev) => [created, ...prev]);
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/volunteers'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            ...newVol,
+            id: newId,
+            clusterId: currentUserClusterId,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to persist volunteer to backend:', err);
+      }
+    }
   };
 
-  const handleUpdateVolunteer = (id: string, updated: Partial<Volunteer>) => {
+  const handleUpdateVolunteer = async (id: string, updated: Partial<Volunteer>) => {
     setVolunteers((prev) => prev.map((v) => (v.id === id ? { ...v, ...updated } : v)));
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/volunteers/${id}`), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify(updated),
+        });
+      } catch (err) {
+        console.error('Failed to update volunteer in backend:', err);
+      }
+    }
   };
 
-  const handleDeleteVolunteer = (id: string) => {
+  const handleDeleteVolunteer = async (id: string) => {
     setVolunteers((prev) => prev.filter((v) => v.id !== id));
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl(`/api/volunteers/${id}`), {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+        });
+      } catch (err) {
+        console.error('Failed to delete volunteer from backend:', err);
+      }
+    }
   };
 
   // Session mutations
@@ -854,12 +1101,30 @@ export default function App() {
   };
 
   // Finance mutations
-  const handleAddFinanceEntry = (entry: Omit<FinanceEntry, 'id'>) => {
+  const handleAddFinanceEntry = async (entry: Omit<FinanceEntry, 'id'>) => {
     const created: FinanceEntry = {
       ...entry,
       id: `fin-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     };
     setFinanceEntries((prev) => [created, ...prev]);
+
+    if (currentUser?.token) {
+      try {
+        await fetch(apiUrl('/api/finance'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify({
+            ...created,
+            clusterId: currentUserClusterId,
+          }),
+        });
+      } catch (err) {
+        console.error('Failed to persist finance entry to backend:', err);
+      }
+    }
   };
 
   const handleUpdateFinanceEntry = (id: string, updated: Partial<FinanceEntry>) => {
@@ -915,20 +1180,65 @@ export default function App() {
   };
 
   // Lesson Plan mutations
-  const handleAddLessonPlan = (plan: Omit<LessonPlan, 'id'>) => {
+  const handleAddLessonPlan = async (plan: Omit<LessonPlan, 'id'>) => {
+    const newId = `lp-${Date.now()}`;
     const created: LessonPlan = {
       ...plan,
-      id: `lp-${Date.now()}`,
+      id: newId,
     };
     setLessonPlans((prev) => [created, ...prev]);
+
+    if (currentUser?.token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/lesson-plans`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify(created),
+        });
+      } catch (err) {
+        console.error('Failed to save lesson plan to backend:', err);
+      }
+    }
   };
 
-  const handleUpdateLessonPlan = (id: string, plan: Partial<LessonPlan>) => {
+  const handleUpdateLessonPlan = async (id: string, plan: Partial<LessonPlan>) => {
     setLessonPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...plan } : p)));
+
+    if (currentUser?.token) {
+      const existing = lessonPlans.find(p => p.id === id);
+      const merged = { ...(existing || {}), ...plan, id };
+      try {
+        await fetch(`${API_BASE_URL}/api/lesson-plans`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+          body: JSON.stringify(merged),
+        });
+      } catch (err) {
+        console.error('Failed to update lesson plan in backend:', err);
+      }
+    }
   };
 
-  const handleDeleteLessonPlan = (id: string) => {
+  const handleDeleteLessonPlan = async (id: string) => {
     setLessonPlans((prev) => prev.filter((p) => p.id !== id));
+    if (currentUser?.token) {
+      try {
+        await fetch(`${API_BASE_URL}/api/lesson-plans/${id}`, {
+          method: 'DELETE',
+          headers: {
+            Authorization: `Bearer ${currentUser.token}`,
+          },
+        });
+      } catch (err) {
+        console.error('Failed to delete lesson plan from backend:', err);
+      }
+    }
   };
 
   // Notification actions
@@ -1192,7 +1502,8 @@ export default function App() {
   const pendingCount = notifications.filter((n) => !n.isRead).length;
 
   const currentClusterObj = clusters.find((c) => c.id === currentUserClusterId) || clusters[0];
-  const activeClusterName = currentUserRole === 'Super Admin' ? 'All Clusters (Tamil Nadu)' : (currentClusterObj?.name || 'Dharmapuri Cluster');
+  const activeClusterName = currentUserRole === 'Super Admin' ? 'All Clusters (Tamil Nadu)' : (currentClusterObj?.name || 'Cluster');
+  const activeCollegeName = currentClusterObj?.collegeName || (currentUserRole === 'Super Admin' ? 'All Partner Institutions' : 'Partner Institution');
 
   return (
     <AdminLayout
@@ -1210,24 +1521,24 @@ export default function App() {
       }
       sidebar={
         <Navigation
-        currentTab={currentTab}
-        onSelectTab={(tab) => {
-          if (tab === 'attendance') setActiveDraftId(undefined);
-          if (tab === 'students') setInitialStudentFilters(undefined);
-          setCurrentTab(tab as TabType);
-          setMobileSidebarOpen(false);
-        }}
-        notifications={notifications}
-        userRole={currentUserRole}
-        clusterName={activeClusterName}
-        adminName={currentUser.name}
-        userEmail={currentUser.email}
-        pendingApprovalsCount={pendingApprovalsCount}
-        isCollapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
-        onLogout={handleLogout}
-        isMobileOpen={mobileSidebarOpen}
-        onCloseMobile={() => setMobileSidebarOpen(false)}
+          currentTab={currentTab}
+          onSelectTab={(tab) => {
+            if (tab === 'attendance') setActiveDraftId(undefined);
+            if (tab === 'students') setInitialStudentFilters(undefined);
+            setCurrentTab(tab as TabType);
+            setMobileSidebarOpen(false);
+          }}
+          notifications={notifications}
+          userRole={currentUserRole}
+          clusterName={activeClusterName}
+          adminName={currentUser.name}
+          userEmail={currentUser.email}
+          pendingApprovalsCount={pendingApprovalsCount}
+          isCollapsed={sidebarCollapsed}
+          onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+          onLogout={handleLogout}
+          isMobileOpen={mobileSidebarOpen}
+          onCloseMobile={() => setMobileSidebarOpen(false)}
         />
       }
       header={
@@ -1357,10 +1668,20 @@ export default function App() {
               {currentTab === 'panchayat-detail' && (
                 <PanchayatDetailView
                   panchayat={currentPanchayat}
-                  students={displayStudents}
+                  panchayats={displayPanchayats}
                   onBack={() => setCurrentTab('panchayats')}
+                  onSelectPanchayat={(id) => setSelectedPanchayatId(id)}
+                  onSelectVillage={(pId, vId) => {
+                    setSelectedPanchayatId(pId);
+                    setInitialStudentFilters({ panchayatId: pId, villageId: vId });
+                    setCurrentTab('students');
+                  }}
                   onNavigate={handleNavigate}
+                  onUpdatePanchayat={handleUpdatePanchayat}
+                  onDeletePanchayat={handleDeletePanchayat}
                   onAddVillage={handleAddVillage}
+                  onUpdateVillage={handleUpdateVillage}
+                  onDeleteVillage={handleDeleteVillage}
                 />
               )}
 
@@ -1370,7 +1691,6 @@ export default function App() {
                   panchayats={displayPanchayats}
                   initialFilters={initialStudentFilters}
                   onAddStudent={handleAddStudent}
-                  onBulkImportStudents={handleBulkAddStudents}
                   onUpdateStudent={handleUpdateStudent}
                   onDeleteStudent={handleDeleteStudent}
                 />
@@ -1389,24 +1709,32 @@ export default function App() {
               {currentTab === 'sessions' && (
                 <SessionsView
                   sessions={displaySessions}
+                  clusters={clusters}
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
+                  userRole={currentUserRole}
+                  dateChangeRequests={displayDateChangeRequests}
                   onNavigate={handleNavigate}
                   onAddSession={handleAddSession}
                   onUpdateSession={handleUpdateSession}
                   onDeleteSession={handleDeleteSession}
-                  canManageSchedule={currentUserRole === 'Cluster Admin'}
+                  onRequestDateChange={handleSubmitDateChangeRequest}
+                  onReviewDateChange={handleReviewDateChangeRequest}
+                  canManageSchedule={true}
                 />
               )}
 
-              {currentTab === 'attendance' && (
+              {(currentTab === 'attendance' || currentTab === 'volunteer-attendance') && (
                 <AttendanceView
                   attendanceSessions={displayAttendance}
                   students={displayStudents}
+                  volunteers={displayVolunteers}
                   panchayats={displayPanchayats}
                   clusters={clusters}
+                  sessions={displaySessions}
                   userRole={currentUserRole}
                   draftId={activeDraftId}
+                  initialSubject={currentTab === 'volunteer-attendance' ? 'volunteers' : 'students'}
                   onNavigate={handleNavigate}
                   onSaveAttendance={handleSaveAttendance}
                 />
@@ -1418,11 +1746,15 @@ export default function App() {
                   sessions={displaySessions}
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
+                  currentUserRole={currentUserRole}
+                  currentCluster={currentUserClusterId === 'all' ? (currentClusterObj?.name || 'All Clusters') : (currentClusterObj?.name || currentUserClusterId)}
+                  currentAcademicYear="2025 – 2026"
                   selectedLessonPlanId={selectedLessonPlanId}
                   onNavigate={handleNavigate}
                   onAddLessonPlan={handleAddLessonPlan}
                   onUpdateLessonPlan={handleUpdateLessonPlan}
                   onDeleteLessonPlan={handleDeleteLessonPlan}
+                  onRefreshLessonPlans={fetchBackendData}
                 />
               )}
 
@@ -1432,7 +1764,7 @@ export default function App() {
                   clusters={clusters}
                   authToken={currentUser.token}
                   userRole={currentUserRole}
-                  currentCluster={currentUserClusterId === 'all' ? 'Dharmapuri' : currentUserClusterId}
+                  currentCluster={currentUserClusterId === 'all' ? (currentClusterObj?.name || 'All Clusters') : (currentClusterObj?.name || currentUserClusterId)}
                   onNavigate={handleNavigate}
                 />
               )}
@@ -1443,6 +1775,8 @@ export default function App() {
                   panchayats={displayPanchayats}
                   sessions={sessions}
                   drafts={displayFinanceDrafts}
+                  clusterName={currentUserRole === 'Super Admin' ? 'All Clusters' : (currentClusterObj?.name || 'Cluster')}
+                  collegeName={activeCollegeName}
                   onNavigate={handleNavigate}
                   onAddFinanceEntry={handleAddFinanceEntry}
                   onUpdateFinanceEntry={handleUpdateFinanceEntry}
@@ -1460,6 +1794,8 @@ export default function App() {
                   entries={displayFinance}
                   drafts={displayFinanceDrafts}
                   activeDraftId={activeFinanceDraftId}
+                  clusterName={currentUserRole === 'Super Admin' ? 'All Clusters' : (currentClusterObj?.name || 'Cluster')}
+                  collegeName={activeCollegeName}
                   onBack={() => setCurrentTab('finance')}
                   onNavigate={handleNavigate}
                   onSaveDraft={handleSaveFinanceDraft}
@@ -1478,6 +1814,8 @@ export default function App() {
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
                   students={displayStudents}
+                  clusters={clusters}
+                  financeEntries={displayFinance}
                   onNavigate={handleNavigate}
                 />
               )}
@@ -1554,6 +1892,7 @@ export default function App() {
                   onDeleteModule={handleDeleteModule}
                   onUploadResource={handleUploadModuleResource}
                   onDownloadResource={handleDownloadModuleResource}
+                  onRefreshModules={fetchBackendData}
                 />
               )}
 

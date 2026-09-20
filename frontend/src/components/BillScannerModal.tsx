@@ -15,7 +15,8 @@ import {
   Crop,
   Layers,
   Sliders,
-  ScanLine
+  ScanLine,
+  RotateCcw
 } from './ui/icons';
 import { ActionButton } from './ui/action-button';
 
@@ -49,6 +50,7 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
   const [cameraActive, setCameraActive] = useState<boolean>(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [rotationAngle, setRotationAngle] = useState<number>(0);
   const [fileName, setFileName] = useState<string>('');
   const [detectedAmount, setDetectedAmount] = useState<number>(expectedAmount || 0);
   const [isScanning, setIsScanning] = useState<boolean>(false);
@@ -66,19 +68,19 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
   // Sample realistic bills for testing
   const sampleBills = [
     {
-      title: 'Bus Ticket (KSR College → Salem)',
+      title: 'Bus Ticket (College Campus → City Hub)',
       category: 'Travel',
       amount: 200,
-      from: 'KSR College',
-      to: 'Salem',
+      from: 'College Campus',
+      to: 'City Hub',
       url: 'https://images.unsplash.com/photo-1554415707-9e49fe74a6d0?w=600&auto=format&fit=crop&q=80',
     },
     {
-      title: 'Bus Ticket (Dharmapuri → Pennagaram)',
+      title: 'Bus Ticket (City Center → Learning Center)',
       category: 'Travel',
       amount: 60,
-      from: 'Dharmapuri',
-      to: 'Pennagaram',
+      from: 'City Center',
+      to: 'Learning Center',
       url: 'https://images.unsplash.com/photo-1544620347-c4fd4a3d5957?w=600&auto=format&fit=crop&q=80',
     },
     {
@@ -133,6 +135,7 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
     if (isOpen) {
       setDetectedAmount(expectedAmount || 0);
       setCapturedImage(null);
+      setRotationAngle(0);
       setClarityResult(null);
       setExtractedData(null);
       setClarityWarning(null);
@@ -156,8 +159,9 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (ctx) {
       ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
       stopCamera();
+      setRotationAngle(0);
       processScannedImage(dataUrl, `captured_receipt_${Date.now()}.jpg`);
     }
   };
@@ -170,6 +174,7 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
     const reader = new FileReader();
     reader.onload = (event) => {
       const dataUrl = event.target?.result as string;
+      setRotationAngle(0);
       processScannedImage(dataUrl, file.name);
     };
     reader.readAsDataURL(file);
@@ -177,7 +182,37 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
 
   // Select sample receipt
   const handleSelectSample = (sample: typeof sampleBills[0]) => {
+    setRotationAngle(0);
     processScannedImage(sample.url, `${sample.title.replace(/\s+/g, '_')}.jpg`, sample);
+  };
+
+  // Rotate bill by 90 degrees
+  const handleRotate = () => {
+    setRotationAngle((prev) => (prev + 90) % 360);
+  };
+
+  // Helper to bake rotation into final image data URL
+  const getOrientedImageUrl = (srcUrl: string, angle: number): Promise<string> => {
+    if (angle === 0) return Promise.resolve(srcUrl);
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const isPerpendicular = angle === 90 || angle === 270;
+        canvas.width = isPerpendicular ? img.height : img.width;
+        canvas.height = isPerpendicular ? img.width : img.height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(srcUrl);
+
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((angle * Math.PI) / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      };
+      img.onerror = () => resolve(srcUrl);
+      img.src = srcUrl;
+    });
   };
 
   // Process and run clear-scan OCR detection
@@ -227,11 +262,13 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
   };
 
   // Confirm Attachment
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!capturedImage) return;
 
+    const finalUrl = await getOrientedImageUrl(capturedImage, rotationAngle);
+
     const finalAttachment: BillAttachment = {
-      url: capturedImage,
+      url: finalUrl,
       fileName: fileName || 'scanned_receipt.jpg',
       detectedAmount: detectedAmount,
       isVerified: clarityResult?.isClear ?? true,
@@ -475,8 +512,8 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
           {/* 4. Preview & OCR Clear Scanner Results */}
           {capturedImage && (
             <div className="space-y-4">
-              {/* Document Filter Controls (Clear Scanner / High Contrast / Original) */}
-              <div className="flex items-center justify-between">
+              {/* Document Filter Controls (Clear Scanner / High Contrast / Original) & Orientation */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl text-xs font-semibold">
                   <button
                     type="button"
@@ -513,31 +550,45 @@ export const BillScannerModal: React.FC<BillScannerModalProps> = ({
                   </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCapturedImage(null);
-                    setClarityResult(null);
-                    setExtractedData(null);
-                    if (mode === 'camera') startCamera();
-                  }}
-                  className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Retake
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleRotate}
+                    className="inline-flex items-center gap-1.5 px-3 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-xs font-semibold text-gray-700 dark:text-gray-300 hover:bg-gray-50 shadow-theme-xs transition"
+                    title="Rotate Document 90°"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span>Rotate ({rotationAngle}°)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCapturedImage(null);
+                      setRotationAngle(0);
+                      setClarityResult(null);
+                      setExtractedData(null);
+                      if (mode === 'camera') startCamera();
+                    }}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    <span>Retake</span>
+                  </button>
+                </div>
               </div>
 
               {/* Scanned Document Canvas */}
-              <div className="relative bg-gray-900 rounded-2xl overflow-hidden max-h-[220px] flex items-center justify-center border border-gray-800">
+              <div className="relative bg-gray-900 rounded-2xl overflow-hidden min-h-[200px] max-h-[260px] flex items-center justify-center border border-gray-800 p-2">
                 <img
                   src={capturedImage}
                   alt="Scanned Bill"
-                  className={`max-h-[220px] w-auto object-contain transition-all ${
+                  style={{ transform: `rotate(${rotationAngle}deg)` }}
+                  className={`max-h-[240px] max-w-full object-contain transition-transform duration-200 ${
                     scannerFilter === 'clear'
-                      ? 'contrast-125 brightness-105'
+                      ? 'contrast-125 brightness-105 saturate-50'
                       : scannerFilter === 'bw'
-                      ? 'grayscale contrast-150'
+                      ? 'grayscale contrast-150 brightness-110'
                       : ''
                   }`}
                 />

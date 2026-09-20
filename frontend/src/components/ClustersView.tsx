@@ -13,6 +13,8 @@ import {
   Trash2
 } from './ui/icons';
 import { Cluster, TabType } from '../types';
+import { DistrictCombobox } from './ui/DistrictCombobox';
+import { TAMIL_NADU_ALL_CITIES_AND_DISTRICTS } from '../data/districts';
 
 interface ClustersViewProps {
   clusters: Cluster[];
@@ -35,17 +37,23 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
   const [clusterToDelete, setClusterToDelete] = useState<Cluster | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
 
   const [newCollegeName, setNewCollegeName] = useState('');
+  const [newCollegeDistrict, setNewCollegeDistrict] = useState('');
   const [newClusterDistrict, setNewClusterDistrict] = useState('');
   const [newSpocName, setNewSpocName] = useState('');
   const [newSpocMobile, setNewSpocMobile] = useState('');
   const [newSpocEmail, setNewSpocEmail] = useState('');
 
-  const filteredClusters = clusters.filter(
+  const activeClusters = clusters.filter((c) => c.status !== 'Inactive');
+
+  const filteredClusters = activeClusters.filter(
     (c) =>
       (c.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.district || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (c.collegeDistrict || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.collegeName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.spocName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (c.adminName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -56,12 +64,20 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     e.preventDefault();
     setFormError('');
 
+    const trimmedCollegeName = newCollegeName.trim();
+    const trimmedCollegeDistrict = newCollegeDistrict.trim();
+    const trimmedClusterDistrict = newClusterDistrict.trim();
+    const trimmedSpocName = newSpocName.trim();
+    const trimmedSpocMobile = newSpocMobile.trim();
+    const trimmedSpocEmail = newSpocEmail.trim().toLowerCase();
+
     if (
-      !newCollegeName.trim() ||
-      !newClusterDistrict.trim() ||
-      !newSpocName.trim() ||
-      !newSpocMobile.trim() ||
-      !newSpocEmail.trim()
+      !trimmedCollegeName ||
+      !trimmedCollegeDistrict ||
+      !trimmedClusterDistrict ||
+      !trimmedSpocName ||
+      !trimmedSpocMobile ||
+      !trimmedSpocEmail
     ) {
       setFormError('Please fill in all required fields marked with *.');
       return;
@@ -71,14 +87,16 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     try {
       if (onAddCluster) {
         const res = await onAddCluster({
-          collegeName: newCollegeName.trim(),
-          district: newClusterDistrict.trim(),
-          name: `${newCollegeName.trim()} (${newClusterDistrict.trim()})`,
-          spocName: newSpocName.trim(),
-          spocMobile: newSpocMobile.trim(),
-          adminName: newSpocName.trim(),
-          adminEmail: newSpocEmail.trim().toLowerCase(),
-          adminPhone: newSpocMobile.trim(),
+          collegeName: trimmedCollegeName,
+          collegeDistrict: trimmedCollegeDistrict,
+          district: trimmedClusterDistrict,
+          clusterDistrict: trimmedClusterDistrict,
+          name: `${trimmedCollegeName} (${trimmedClusterDistrict})`,
+          spocName: trimmedSpocName,
+          spocMobile: trimmedSpocMobile,
+          adminName: trimmedSpocName,
+          adminEmail: trimmedSpocEmail,
+          adminPhone: trimmedSpocMobile,
           status: 'Active',
         });
 
@@ -90,6 +108,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
 
       setIsAddModalOpen(false);
       setNewCollegeName('');
+      setNewCollegeDistrict('');
       setNewClusterDistrict('');
       setNewSpocName('');
       setNewSpocMobile('');
@@ -133,7 +152,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <span>Colleges</span>
           </div>
           <div className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-            {clusters.length}
+            {activeClusters.length}
           </div>
         </div>
 
@@ -143,7 +162,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <span>Panchayats</span>
           </div>
           <div className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-            {clusters.reduce((acc, c) => acc + (c.activePanchayats || 0), 0)}
+            {activeClusters.reduce((acc, c) => acc + (c.activePanchayats || 0), 0)}
           </div>
         </div>
 
@@ -153,7 +172,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <span>Students</span>
           </div>
           <div className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-            {clusters.reduce((acc, c) => acc + (c.totalStudents || 0), 0)}
+            {activeClusters.reduce((acc, c) => acc + (c.totalStudents || 0), 0)}
           </div>
         </div>
 
@@ -163,7 +182,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <span>Volunteers</span>
           </div>
           <div className="mt-2 text-xl font-semibold text-gray-900 dark:text-white">
-            {clusters.reduce((acc, c) => acc + (c.totalVolunteers || 0), 0)}
+            {activeClusters.reduce((acc, c) => acc + (c.totalVolunteers || 0), 0)}
           </div>
         </div>
       </div>
@@ -218,7 +237,11 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                     </h3>
                     <p className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                       <MapPin className="h-3 w-3 shrink-0 text-gray-400" />
-                      <span className="truncate">{cluster.district}, Tamil Nadu</span>
+                      <span className="truncate">
+                        {cluster.collegeDistrict && cluster.collegeDistrict !== cluster.district
+                          ? `${cluster.collegeDistrict} · Cluster: ${cluster.district}`
+                          : `${cluster.district}, Tamil Nadu`}
+                      </span>
                     </p>
                   </div>
                   <span
@@ -355,18 +378,29 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  District
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Dharmapuri"
-                  value={newClusterDistrict}
-                  onChange={(e) => setNewClusterDistrict(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <DistrictCombobox
+                    id="college-district"
+                    label="College district"
+                    placeholder="Select college district"
+                    required
+                    value={newCollegeDistrict}
+                    onChange={(val) => setNewCollegeDistrict(val)}
+                    options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS}
+                  />
+                </div>
+                <div>
+                  <DistrictCombobox
+                    id="cluster-district"
+                    label="Cluster district"
+                    placeholder="Select cluster district"
+                    required
+                    value={newClusterDistrict}
+                    onChange={(val) => setNewClusterDistrict(val)}
+                    options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS}
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -385,14 +419,19 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    SPOC mobile
+                    SPOC mobile <span className="text-red-500">*</span>
                   </label>
                   <input
                     type="tel"
                     required
-                    placeholder="+91 98765 43210"
+                    maxLength={10}
+                    inputMode="numeric"
+                    placeholder="9876543210"
                     value={newSpocMobile}
-                    onChange={(e) => setNewSpocMobile(e.target.value)}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setNewSpocMobile(digits);
+                    }}
                     className="w-full rounded-md border border-gray-300 bg-transparent px-3 py-2 text-sm text-gray-800 placeholder:text-gray-400 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/20 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
                   />
                 </div>
@@ -400,7 +439,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  SPOC email
+                  SPOC email <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="email"
@@ -447,28 +486,47 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
                 <p className="text-xs text-gray-500 dark:text-gray-400">This action cannot be undone.</p>
               </div>
             </div>
-            <p className="text-xs text-gray-600 dark:text-gray-300 mb-5 leading-relaxed">
+            <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 leading-relaxed">
               Are you sure you want to permanently delete <strong>{clusterToDelete.collegeName || clusterToDelete.name}</strong> ({clusterToDelete.district})? Associated local operational mapping will be unassigned.
             </p>
+            {deleteError && (
+              <div className="mb-4 rounded-lg border border-error-200 bg-error-50 px-3 py-2 text-xs text-error-700 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-300 flex items-center gap-2">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
             <div className="flex justify-end gap-2.5">
               <button
                 type="button"
-                onClick={() => setClusterToDelete(null)}
+                disabled={isDeleting}
+                onClick={() => {
+                  setClusterToDelete(null);
+                  setDeleteError('');
+                }}
                 className="rounded-xl border border-gray-300 bg-white px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-white/5 transition"
               >
                 Cancel
               </button>
               <button
                 type="button"
+                disabled={isDeleting}
                 onClick={async () => {
                   if (onDeleteCluster && clusterToDelete) {
-                    await onDeleteCluster(clusterToDelete.id);
-                    setClusterToDelete(null);
+                    setIsDeleting(true);
+                    setDeleteError('');
+                    try {
+                      await onDeleteCluster(clusterToDelete.id);
+                      setClusterToDelete(null);
+                    } catch (err: any) {
+                      setDeleteError(err?.message || 'Failed to delete cluster.');
+                    } finally {
+                      setIsDeleting(false);
+                    }
                   }
                 }}
-                className="rounded-xl bg-error-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-error-600 transition"
+                className="rounded-xl bg-error-500 px-4 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-error-600 transition disabled:opacity-50"
               >
-                Confirm Delete
+                {isDeleting ? 'Deleting…' : 'Confirm Delete'}
               </button>
             </div>
           </div>

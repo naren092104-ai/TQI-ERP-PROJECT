@@ -58,22 +58,49 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
       (u.clusterName && u.clusterName.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
   const handleCreateSuperAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAddError("");
-    if (!newName.trim() || !newEmail.trim()) {
+    const trimmedName = newName.trim();
+    const trimmedEmail = newEmail.trim().toLowerCase();
+    const trimmedPhone = newPhone.trim();
+
+    if (!trimmedName || !trimmedEmail) {
       setAddError("Full name and email address are required.");
       return;
+    }
+
+    if (!EMAIL_REGEX.test(trimmedEmail)) {
+      setAddError("Please enter a valid email address (e.g. name@tqi.org).");
+      return;
+    }
+
+    let formattedPhone = "+91 90000 00000";
+    if (trimmedPhone) {
+      const digitsOnly = trimmedPhone.replace(/\D/g, '');
+      let finalDigits = digitsOnly;
+      if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+        finalDigits = digitsOnly.slice(2);
+      } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+        finalDigits = digitsOnly.slice(1);
+      }
+      if (finalDigits.length !== 10) {
+        setAddError("Phone number must be exactly 10 digits (e.g. 9876543210).");
+        return;
+      }
+      formattedPhone = `+91 ${finalDigits}`;
     }
 
     setIsSubmitting(true);
     try {
       if (onAddUser) {
         const success = await onAddUser({
-          name: newName.trim(),
-          email: newEmail.trim(),
+          name: trimmedName,
+          email: trimmedEmail,
           role: "Super Admin",
-          phone: newPhone.trim() || "+91 90000 00000",
+          phone: formattedPhone,
           status: "Active",
         });
 
@@ -346,11 +373,42 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
             <form
               onSubmit={async (e) => {
                 e.preventDefault();
+                setEditError("");
+                const trimmedName = editName.trim();
+                const trimmedEmail = editEmail.trim().toLowerCase();
+                const trimmedPhone = editPhone.trim();
+
+                if (!trimmedName || !trimmedEmail) {
+                  setEditError("Full name and email address are required.");
+                  return;
+                }
+
+                if (!EMAIL_REGEX.test(trimmedEmail)) {
+                  setEditError("Please enter a valid email address.");
+                  return;
+                }
+
+                let formattedPhone = "+91 90000 00000";
+                if (trimmedPhone) {
+                  const digitsOnly = trimmedPhone.replace(/\D/g, '');
+                  let finalDigits = digitsOnly;
+                  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+                    finalDigits = digitsOnly.slice(2);
+                  } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+                    finalDigits = digitsOnly.slice(1);
+                  }
+                  if (finalDigits.length !== 10) {
+                    setEditError("Phone number must be exactly 10 digits.");
+                    return;
+                  }
+                  formattedPhone = `+91 ${finalDigits}`;
+                }
+
                 const selectedCluster = clusters.find((cluster) => cluster.id === editClusterId);
                 const updated = await onUpdateUser?.(editingUser.id, {
-                  name: editName.trim(),
-                  email: editEmail.trim(),
-                  phone: editPhone.trim(),
+                  name: trimmedName,
+                  email: trimmedEmail,
+                  phone: formattedPhone,
                   role: editRole,
                   clusterId: editRole === "Cluster Admin" ? editClusterId : undefined,
                   clusterName: editRole === "Cluster Admin" ? selectedCluster?.name : undefined,

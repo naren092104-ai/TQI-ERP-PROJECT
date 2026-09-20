@@ -253,60 +253,107 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 2. Compact KPI Blocks */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-        {[
-          {
-            label: 'Total Clusters',
-            val: totalClusters,
-            tab: 'clusters' as TabType,
-            hint: 'Active networks',
-          },
-          {
-            label: 'Total Students',
-            val: totalStudents,
-            tab: 'students' as TabType,
-            hint: 'Enrolled roster',
-          },
-          {
-            label: 'Total Volunteers',
-            val: totalVolunteers,
-            tab: 'volunteers' as TabType,
-            hint: 'Field mentors',
-          },
-          {
-            label: 'Total Sessions',
-            val: totalSessions,
-            tab: 'sessions' as TabType,
-            hint: 'Curriculum logs',
-          },
-          {
-            label: 'Completed',
-            val: completedSessions,
-            tab: 'sessions' as TabType,
-            hint: 'Verified delivery',
-          },
-          {
-            label: 'Pending Review',
-            val: pendingReview,
-            tab: 'approvals' as TabType,
-            hint: 'Requires action',
-            highlight: pendingReview > 0,
-          },
-          {
-            label: 'Resubmissions',
-            val: resubmissions,
-            tab: 'approvals' as TabType,
-            hint: 'Returned items',
-            alert: resubmissions > 0,
-          },
-        ].map((kpi) => (
+        {(isClusterAdmin
+          ? [
+              {
+                label: 'Assigned Villages',
+                val: panchayats.length,
+                tab: 'panchayats' as TabType,
+                hint: `${clusterName} area`,
+              },
+              {
+                label: 'My Students',
+                val: totalStudents,
+                tab: 'students' as TabType,
+                hint: 'Enrolled in cluster',
+              },
+              {
+                label: 'My Volunteers',
+                val: totalVolunteers,
+                tab: 'volunteers' as TabType,
+                hint: 'Cluster mentors',
+              },
+              {
+                label: 'Cluster Sessions',
+                val: totalSessions,
+                tab: 'sessions' as TabType,
+                hint: 'Scheduled & logs',
+              },
+              {
+                label: 'Sessions Done',
+                val: completedSessions,
+                tab: 'sessions' as TabType,
+                hint: 'Delivered',
+              },
+              {
+                label: 'Finance Spent',
+                val: formatINR(totalExpenses),
+                tab: 'finance' as TabType,
+                hint: 'Approved vouchers',
+              },
+              {
+                label: 'Balance Remaining',
+                val: formatINR(balanceAvailable),
+                tab: 'finance' as TabType,
+                hint: 'Advance left',
+                highlight: balanceAvailable < 15000,
+              },
+            ]
+          : [
+              {
+                label: 'Total Clusters',
+                val: totalClusters,
+                tab: 'clusters' as TabType,
+                hint: 'Active networks',
+              },
+              {
+                label: 'Total Students',
+                val: totalStudents,
+                tab: 'students' as TabType,
+                hint: 'Enrolled roster',
+              },
+              {
+                label: 'Total Volunteers',
+                val: totalVolunteers,
+                tab: 'volunteers' as TabType,
+                hint: 'Field mentors',
+              },
+              {
+                label: 'Total Sessions',
+                val: totalSessions,
+                tab: 'sessions' as TabType,
+                hint: 'Curriculum logs',
+              },
+              {
+                label: 'Completed',
+                val: completedSessions,
+                tab: 'sessions' as TabType,
+                hint: 'Verified delivery',
+              },
+              {
+                label: 'Pending Review',
+                val: pendingReview,
+                tab: 'approvals' as TabType,
+                hint: 'Requires action',
+                highlight: pendingReview > 0,
+              },
+              {
+                label: 'Resubmissions',
+                val: resubmissions,
+                tab: 'approvals' as TabType,
+                hint: 'Returned items',
+                alert: resubmissions > 0,
+              },
+            ]
+        ).map((kpi) => (
           <button
             key={kpi.label}
             type="button"
             onClick={() => onNavigate(kpi.tab)}
             className={`flex flex-col justify-between p-3.5 rounded-md border bg-card text-left transition-colors hover:border-border-strong hover:bg-surface-hover shadow-xs ${
-              kpi.alert
+              (kpi as any).alert
                 ? 'border-red-200 dark:border-red-900/60'
-                : kpi.highlight
+                : (kpi as any).highlight
                 ? 'border-amber-200 dark:border-amber-900/60'
                 : 'border-border'
             }`}
@@ -316,9 +363,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
             <span
               className={`mt-1.5 text-2xl font-bold tracking-tight ${
-                kpi.alert
+                (kpi as any).alert
                   ? 'text-red-700 dark:text-red-400'
-                  : kpi.highlight
+                  : (kpi as any).highlight
                   ? 'text-amber-700 dark:text-amber-400'
                   : 'text-foreground'
               }`}
@@ -468,10 +515,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => onNavigate('academic-setup')}
+                onClick={() => onNavigate(isClusterAdmin ? 'lesson-plans' : 'academic-setup')}
                 className="text-xs font-medium text-primary hover:underline"
               >
-                Academic Term Setup
+                {isClusterAdmin ? 'View Lesson Plans' : 'Academic Term Setup'}
               </button>
             </div>
 
@@ -479,10 +526,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {dayProgressList.map((d) => (
                 <div
                   key={d.dayNumber}
-                  className="flex flex-col justify-between p-3 rounded border border-border bg-muted/20"
+                  className="rounded border border-border p-3 bg-muted/20 flex flex-col justify-between"
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-bold text-foreground">Day {d.dayNumber}</span>
+                    <span className="text-xs font-bold text-foreground">Day {d.dayNumber}</span>
                     <Badge
                       variant={
                         d.status === 'Completed'
@@ -496,47 +543,55 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       {d.status}
                     </Badge>
                   </div>
-                  <p className="mt-1.5 text-xs text-muted-foreground font-medium truncate">
+                  <div className="mt-2 text-[11px] font-medium text-foreground truncate">
                     {d.dayName}
-                  </p>
-                  <span className="mt-1 text-[10px] text-muted-foreground">
-                    {d.sessionsCount} sessions
-                  </span>
+                  </div>
+                  <div className="mt-1 text-[10px] text-muted-foreground">
+                    {d.sessionsCount} session{d.sessionsCount === 1 ? '' : 's'} logged
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         </div>
 
-        {/* Right 1 Col: Finance Summary & Activity */}
+        {/* Right Col: Finance Overview & Approvals / Quick Actions */}
         <div className="space-y-6">
-          {/* Finance Summary */}
+          {/* Finance Budget Widget */}
           <div className="rounded-md border border-border bg-card p-4 shadow-xs">
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">Finance Summary</h2>
-                <p className="text-xs text-muted-foreground">Operational budget reconciliation</p>
+                <h2 className="text-sm font-semibold text-foreground">
+                  {isClusterAdmin ? `${clusterName} Finance` : 'State HQ Advance'}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {isClusterAdmin ? 'Cluster budget & claims' : 'Combined cluster budget'}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => onNavigate('finance')}
                 className="text-xs font-medium text-primary hover:underline"
               >
-                Finance Ledger
+                Finance Hub
               </button>
             </div>
 
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center justify-between text-xs pb-2 border-b border-border/60">
-                <span className="text-muted-foreground">Advance Budget</span>
-                <span className="font-semibold text-foreground">{formatINR(totalAdvanceAllocated)}</span>
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Total Budget Allocated</span>
+                <span className="font-semibold text-foreground">
+                  {formatINR(totalAdvanceAllocated)}
+                </span>
               </div>
-              <div className="flex items-center justify-between text-xs pb-2 border-b border-border/60">
-                <span className="text-muted-foreground">Verified Expenses</span>
-                <span className="font-semibold text-foreground">{formatINR(totalExpenses)}</span>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Approved Expenses</span>
+                <span className="font-semibold text-foreground">
+                  {formatINR(totalExpenses)}
+                </span>
               </div>
-              <div className="flex items-center justify-between text-xs pb-2 border-b border-border/60">
-                <span className="text-muted-foreground">Pending Review</span>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Pending / In Draft</span>
                 <span className="font-semibold text-amber-700 dark:text-amber-400">
                   {formatINR(pendingExpenses)}
                 </span>
@@ -550,19 +605,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
 
-          {/* Pending Reviews Queue */}
+          {/* Pending Reviews Queue (Super Admin) OR My Submissions Status (Cluster Admin) */}
           <div className="rounded-md border border-border bg-card p-4 shadow-xs">
             <div className="flex items-center justify-between pb-3 border-b border-border">
               <div>
-                <h2 className="text-sm font-semibold text-foreground">Approval Center</h2>
-                <p className="text-xs text-muted-foreground">Items awaiting Super Admin decision</p>
+                <h2 className="text-sm font-semibold text-foreground">
+                  {isClusterAdmin ? 'My Submissions Status' : 'Approval Center'}
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  {isClusterAdmin
+                    ? 'Track decisions on your cluster records'
+                    : 'Items awaiting Super Admin decision'}
+                </p>
               </div>
               <button
                 type="button"
                 onClick={() => onNavigate('approvals')}
                 className="text-xs font-medium text-primary hover:underline"
               >
-                Review All ({pendingReview})
+                {isClusterAdmin ? 'View All Submissions' : `Review All (${pendingReview})`}
               </button>
             </div>
 
@@ -578,7 +639,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                       {item.recordTitle || item.module}
                     </div>
                     <div className="text-[11px] text-muted-foreground truncate">
-                      {item.submittedBy} &middot; {item.clusterName}
+                      {isClusterAdmin
+                        ? `Submitted ${item.submittedAt || (item as any).date || 'Recently'}`
+                        : `${item.submittedBy} · ${item.clusterName}`}
                     </div>
                   </div>
                   <Badge
@@ -598,7 +661,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ))}
               {approvals.length === 0 && (
                 <p className="py-6 text-center text-xs text-muted-foreground">
-                  Approval queue is clear.
+                  {isClusterAdmin ? 'No submissions currently in review.' : 'Approval queue is clear.'}
                 </p>
               )}
             </div>

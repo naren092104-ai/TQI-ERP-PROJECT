@@ -64,6 +64,8 @@ export interface Cluster {
   completedSessions?: number;
   totalSessions?: number;
   collegeName?: string;
+  collegeDistrict?: string;
+  clusterDistrict?: string;
   spocName?: string;
   spocMobile?: string;
 }
@@ -102,6 +104,7 @@ export interface Student {
   panchayatName: string;
   villageId: string;
   villageName: string;
+  schoolName?: string;
   parentName: string;
   phone: string;
   status: 'active' | 'inactive';
@@ -185,6 +188,18 @@ export interface LessonPlanSection {
   methodology: string;
 }
 
+export interface LessonPlanActivity {
+  activityNumber: number;
+  title: string;
+  description: string;
+}
+
+export interface LessonPlanGradeSegment {
+  grade: string;
+  title: string;
+  description: string;
+}
+
 export interface LessonPlan {
   id: string;
   sessionId?: string;
@@ -210,14 +225,24 @@ export interface LessonPlan {
   cluster?: string;
   clusterId?: string;
   collegeName?: string;
+  teamCollegeName?: string;
   panchayatId?: string;
   panchayatName?: string;
   villageId?: string;
   villageName?: string;
+  villagesList?: string[];
   volunteerId?: string;
   volunteerName?: string;
   volunteersCount?: number;
+  assignedVolunteers?: string[];
   dayOfSession?: string;
+  dayNumber?: number;
+  summitNumbers?: string;
+  grades?: string;
+  overview?: string;
+  gradeSegments?: LessonPlanGradeSegment[];
+  activitiesDetailed?: LessonPlanActivity[];
+  expectedOutcome?: string;
   date?: string;
   lastUpdated?: string;
   spoc?: string;
@@ -258,6 +283,7 @@ export interface SessionPhotoItem {
   uploadedAt: string;
   status: 'active' | 'archived';
   caption?: string;
+  photoType?: 'session' | 'homework' | 'feedback';
   academicYearId?: string;
   deleteRequestStatus?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
   deleteRequestId?: string | null;

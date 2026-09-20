@@ -218,6 +218,24 @@ const ensureAcademicSetupTable = async () => {
       console.warn('[DB] ensureAcademicSetupTable: failed to add session_date:', error.message);
     }
   });
+
+  // Ensure clusters has college_district column
+  await pool.query(
+    `ALTER TABLE clusters ADD COLUMN college_district VARCHAR(255) NULL AFTER district`
+  ).catch((error: any) => {
+    if (error?.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('[DB] failed to add college_district to clusters:', error.message);
+    }
+  });
+
+  // Ensure modules has academic_year and day_number columns
+  await pool.query(
+    `ALTER TABLE modules ADD COLUMN academic_year VARCHAR(50) NULL, ADD COLUMN day_number INT NULL`
+  ).catch((error: any) => {
+    if (error?.code !== 'ER_DUP_FIELDNAME') {
+      console.warn('[DB] failed to add academic_year/day_number to modules:', error.message);
+    }
+  });
 };
 
 const buildWhereClause = (user: any, extra = '') => {
@@ -229,6 +247,7 @@ const mapCluster = (row: any) => ({
   id: row.id,
   name: row.name,
   district: row.district || 'Tamil Nadu',
+  collegeDistrict: row.college_district || row.district || 'Tamil Nadu',
   state: row.state || 'Tamil Nadu',
   code: row.code || row.id.toUpperCase(),
   activePanchayats: 0,
@@ -362,29 +381,44 @@ const photoUploadMiddleware = multer({
   },
 });
 
-const mapSessionPhotoRow = (row: any, userName?: string): any => ({
-  id: row.id,
-  clusterId: row.cluster_id,
-  clusterName: row.cluster_id || 'Dharmapuri',
-  sessionId: row.session_id || row.id,
-  sessionTitle: row.original_filename || `Day ${row.day_number || 1} Photos`,
-  dayNumber: Number(row.day_number || 1),
-  date: row.uploaded_at ? new Date(row.uploaded_at).toISOString().slice(0, 10) : '',
-  panchayatId: '',
-  panchayatName: '',
-  villageId: '',
-  villageName: '',
-  filePath: row.file_path,
-  fileUrl: row.file_url || `/api/session-photos/file/${row.id}`,
-  originalFilename: row.original_filename || 'photo.jpg',
-  mimeType: row.mime_type || 'image/jpeg',
-  fileSize: Number(row.file_size || 0),
-  uploadedBy: row.uploaded_by || userName || 'Cluster Admin',
-  uploadedRole: 'Cluster Admin',
-  uploadedAt: row.uploaded_at,
-  status: 'active',
-  caption: row.original_filename || `Day ${row.day_number || 1} photo`,
-});
+const parsePhotoType = (caption?: string, originalType?: string): 'session' | 'homework' | 'feedback' => {
+  if (originalType === 'homework' || originalType === 'feedback' || originalType === 'session') {
+    return originalType;
+  }
+  if (!caption) return 'session';
+  const lower = caption.toLowerCase();
+  if (lower.startsWith('[homework]') || lower.includes('#homework')) return 'homework';
+  if (lower.startsWith('[feedback]') || lower.includes('#feedback')) return 'feedback';
+  return 'session';
+};
+
+const mapSessionPhotoRow = (row: any, userName?: string): any => {
+  const photoType = parsePhotoType(row.caption || row.original_filename, row.photo_type);
+  return {
+    id: row.id,
+    clusterId: row.cluster_id,
+    clusterName: row.cluster_id || 'Dharmapuri',
+    sessionId: row.session_id || row.id,
+    sessionTitle: row.original_filename || `Day ${row.day_number || 1} Photos`,
+    dayNumber: Number(row.day_number || 1),
+    date: row.uploaded_at ? new Date(row.uploaded_at).toISOString().slice(0, 10) : '',
+    panchayatId: '',
+    panchayatName: '',
+    villageId: '',
+    villageName: '',
+    filePath: row.file_path,
+    fileUrl: row.file_url || `/api/session-photos/file/${row.id}`,
+    originalFilename: row.original_filename || 'photo.jpg',
+    mimeType: row.mime_type || 'image/jpeg',
+    fileSize: Number(row.file_size || 0),
+    uploadedBy: row.uploaded_by || userName || 'Cluster Admin',
+    uploadedRole: 'Cluster Admin',
+    uploadedAt: row.uploaded_at,
+    status: 'active',
+    caption: row.caption || row.original_filename || `Day ${row.day_number || 1} photo`,
+    photoType,
+  };
+};
 
 app.get('/api/health', async (_req: Request, res: Response) => {
   const dbState = await getDatabaseStatus();
@@ -551,7 +585,36 @@ app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT id, name, code, description, is_active, created_at FROM modules ORDER BY code ASC, name ASC');
+    const [rows] = await pool.query<any[]>(
+      'SELECT id, name, code, description, is_active, academic_year, day_number, created_at FROM modules ORDER BY day_number ASC, code ASC, name ASC'
+    );
+    const [resRows] = await pool.query<any[]>(
+      'SELECT id, module_id, file_path, file_url, original_filename, created_at FROM module_resources'
+    ).catch(() => [[]]);
+
+    const resourcesByModule: Record<string, any[]> = {};
+    if (Array.isArray(resRows)) {
+      resRows.forEach((r: any) => {
+        if (!resourcesByModule[r.module_id]) resourcesByModule[r.module_id] = [];
+        const ext = path.extname(r.original_filename || '').toUpperCase().replace('.', '');
+        const fileType = ext === 'PPT' || ext === 'PPTX' ? 'PPT' : ext === 'PDF' ? 'PDF' : ext;
+        resourcesByModule[r.module_id].push({
+          id: r.id,
+          moduleId: r.module_id,
+          fileName: r.original_filename || 'resource.pptx',
+          originalFileName: r.original_filename || 'resource.pptx',
+          fileType,
+          mimeType: ext === 'PPTX' ? 'application/vnd.openxmlformats-officedocument.presentationml.presentation' : ext === 'PPT' ? 'application/vnd.ms-powerpoint' : 'application/octet-stream',
+          fileSize: 0,
+          fileSizeFormatted: '',
+          fileUrl: r.file_url || `/api/modules/${r.module_id}/resources/${r.id}/download`,
+          isPrimaryPPT: ext === 'PPT' || ext === 'PPTX',
+          storageProvider: 'local',
+          uploadedAt: r.created_at || new Date().toISOString(),
+        });
+      });
+    }
+
     res.json({
       success: true,
       modules: rows.map((row) => ({
@@ -559,11 +622,13 @@ app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Res
         moduleNumber: row.code || row.id,
         moduleName: row.name,
         topic: row.name,
-        academicYear: '2026-2027',
+        academicYear: row.academic_year || '2026-2027',
+        dayNumber: row.day_number || 1,
+        dayLabel: `Day ${row.day_number || 1}`,
         description: row.description || '',
         status: row.is_active ? 'Active' : 'Archived',
         version: 1,
-        resources: [],
+        resources: resourcesByModule[row.id] || [],
         createdBy: '',
         createdAt: row.created_at,
         updatedAt: row.created_at,
@@ -721,6 +786,11 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
     const sessionTitle = String(req.body.sessionTitle || `Session Day ${dayNumber}`);
     const uploaderName = uploadedBy || req.user.name || 'Cluster Admin';
 
+    const photoType = String(req.body.photoType || 'session').toLowerCase();
+    const rawCaption = String(req.body.caption || '').trim();
+    // Prefix caption with category tag if not already prefixed so category is preserved across storage layers
+    const finalCaption = rawCaption ? `[${photoType.toUpperCase()}] ${rawCaption}` : `[${photoType.toUpperCase()}] Day ${dayNumber} photo`;
+
     const savedPhotos: any[] = [];
     for (const file of files) {
       const rowId = randomUUID();
@@ -745,6 +815,8 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
         file_size: file.size,
         uploaded_by: uploaderName,
         uploaded_at: new Date().toISOString(),
+        caption: finalCaption,
+        photo_type: photoType,
       }, req.user.name));
     }
 
@@ -949,10 +1021,10 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
 
 app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone FROM clusters c LEFT JOIN users u ON u.id = c.admin_id';
+    let sql = "SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE c.status = 'Active'";
     const params: any[] = [];
     if (req.user.role === 'Cluster Admin') {
-      sql += ' WHERE c.id = ?';
+      sql += ' AND c.id = ?';
       params.push(req.user.clusterId);
     }
 
@@ -971,7 +1043,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   }
 
   const collegeName = String(req.body.collegeName || '').trim();
-  const district = String(req.body.district || 'Tamil Nadu').trim();
+  const district = String(req.body.district || req.body.clusterDistrict || 'Tamil Nadu').trim();
+  const collegeDistrict = String(req.body.collegeDistrict || district).trim();
   const spocName = String(req.body.spocName || req.body.adminName || '').trim();
   const spocMobile = String(req.body.spocMobile || req.body.adminPhone || '').trim();
   const adminEmail = String(req.body.adminEmail || req.body.spocEmail || req.body.email || '').trim().toLowerCase();
@@ -986,6 +1059,29 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     res.status(400).json({ success: false, error: 'College name, district, SPOC name, SPOC mobile, and login email are required.' });
     return;
   }
+
+  // Validate 10-digit SPOC mobile
+  const digitsOnly = spocMobile.replace(/\D/g, '');
+  let finalMobile = digitsOnly;
+  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+    finalMobile = digitsOnly.slice(2);
+  } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+    finalMobile = digitsOnly.slice(1);
+  }
+
+  if (finalMobile.length !== 10) {
+    res.status(400).json({ success: false, error: 'SPOC mobile number must be exactly 10 digits.' });
+    return;
+  }
+
+  // Validate email format
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(adminEmail)) {
+    res.status(400).json({ success: false, error: 'Please enter a valid SPOC email address.' });
+    return;
+  }
+
+  const normalizedPhone = `+91 ${finalMobile}`;
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
   try {
@@ -995,12 +1091,18 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     //   users.cluster_id    -> clusters.id (fk_users_cluster)
     // Insert cluster first with admin_id = NULL, then user, then link the two.
     await pool.query(
-      `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
-      [clusterId, name, district, code, collegeName, spocName, spocMobile],
-    );
+      `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
+      [clusterId, name, district, collegeDistrict, code, collegeName, spocName, normalizedPhone],
+    ).catch(async () => {
+      // Fallback in case college_district column doesn't exist yet
+      return pool.query(
+        `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
+        [clusterId, name, district, code, collegeName, spocName, normalizedPhone],
+      );
+    });
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'Cluster Admin', ?, ?, TRUE, 'Active')`,
-      [adminId, adminName, adminEmail, passwordHash, clusterId, spocMobile],
+      [adminId, adminName, adminEmail, passwordHash, clusterId, normalizedPhone],
     );
     await pool.query(
       `UPDATE clusters SET admin_id = ? WHERE id = ?`,
@@ -1038,8 +1140,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     res.status(201).json({
       success: true,
       temporaryPassword,
-      cluster: mapCluster({ id: clusterId, name, district, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: spocMobile, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: spocMobile, status: 'Active' }),
-      user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'Cluster Admin', cluster_id: clusterId, phone: spocMobile, status: 'Active', must_change_password: true }),
+      cluster: mapCluster({ id: clusterId, name, district, college_district: collegeDistrict, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: normalizedPhone, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: normalizedPhone, status: 'Active' }),
+      user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'Cluster Admin', cluster_id: clusterId, phone: normalizedPhone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
     await pool.query('ROLLBACK').catch(() => undefined);
@@ -1081,17 +1183,39 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
     sql += ' GROUP BY p.id, p.name, p.cluster_id, c.name ORDER BY p.name ASC';
 
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, panchayats: rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      cluster: row.cluster_name || row.cluster_id,
-      clusterId: row.cluster_id,
-      villagesCount: Number(row.villages_count || 0),
-      activeStudents: 0,
-      volunteersCount: 0,
-      status: 'On Track',
-      villages: [],
-    })) });
+    
+    // Eager-load villages for these panchayats
+    const panchayatIds = rows.map(r => r.id);
+    let villagesByPanchayat: Record<string, any[]> = {};
+    if (panchayatIds.length > 0) {
+      const [vRows] = await pool.query<any[]>(
+        'SELECT v.id, v.name, v.panchayat_id, COUNT(s.id) AS student_count FROM villages v LEFT JOIN students s ON s.village_id = v.id WHERE v.panchayat_id IN (?) GROUP BY v.id, v.name, v.panchayat_id ORDER BY v.name ASC',
+        [panchayatIds]
+      );
+      vRows.forEach((v) => {
+        if (!villagesByPanchayat[v.panchayat_id]) villagesByPanchayat[v.panchayat_id] = [];
+        villagesByPanchayat[v.panchayat_id].push({
+          id: v.id,
+          name: v.name,
+          studentCount: Number(v.student_count || 0),
+        });
+      });
+    }
+
+    res.json({ success: true, panchayats: rows.map((row) => {
+      const vList = villagesByPanchayat[row.id] || [];
+      return {
+        id: row.id,
+        name: row.name,
+        cluster: row.cluster_name || row.cluster_id,
+        clusterId: row.cluster_id,
+        villagesCount: vList.length || Number(row.villages_count || 0),
+        activeStudents: vList.reduce((sum, v) => sum + v.studentCount, 0),
+        volunteersCount: 0,
+        status: 'On Track',
+        villages: vList,
+      };
+    }) });
   } catch (error) {
     console.error('Failed to load panchayats:', error);
     res.status(503).json({ success: false, error: 'Unable to load data. Please try again.' });
@@ -1100,7 +1224,11 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
 
 app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || req.body.cluster || 'dharmapuri');
+    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || req.body.cluster || '');
+    if (!clusterId || clusterId === 'all') {
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    }
     const panchayatId = String(req.body.id || req.body.name || `panchayat-${Date.now()}`).trim().toLowerCase().replace(/\s+/g, '-');
     const name = String(req.body.name || 'New Panchayat').trim();
 
@@ -1153,18 +1281,24 @@ app.get('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    if (!clusterId || clusterId === 'all') {
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    }
     const id = String(req.body.id || `student-${Date.now()}`).trim();
     const name = String(req.body.name || 'New Student').trim();
-    const panchayatId = String(req.body.panchayatId || '');
-    const villageId = String(req.body.villageId || '');
+    const rawPanchayatId = req.body.panchayatId ? String(req.body.panchayatId).trim() : null;
+    const panchayatId = rawPanchayatId && rawPanchayatId !== 'all' ? rawPanchayatId : null;
+    const rawVillageId = req.body.villageId ? String(req.body.villageId).trim() : null;
+    const villageId = rawVillageId && rawVillageId !== 'all' ? rawVillageId : null;
 
     await pool.query(
       `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
       [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'Active')]
     );
 
-    res.json({ success: true, student: { id, code: String(req.body.code || id), name, gender: req.body.gender || 'female', dob: req.body.dob || '2014-01-01', standard: req.body.standard || '6th Standard', clusterId, panchayatId, panchayatName: req.body.panchayatName || panchayatId, villageId, villageName: req.body.villageName || villageId, parentName: req.body.parentName || 'Parent', phone: req.body.phone || '', status: req.body.status || 'active' } });
+    res.json({ success: true, student: { id, code: String(req.body.code || id), name, gender: req.body.gender || 'female', dob: req.body.dob || '2014-01-01', standard: req.body.standard || '6th Standard', clusterId, panchayatId: panchayatId || '', panchayatName: req.body.panchayatName || panchayatId || '', villageId: villageId || '', villageName: req.body.villageName || villageId || '', parentName: req.body.parentName || 'Parent', phone: req.body.phone || '', status: req.body.status || 'active' } });
   } catch (error) {
     console.error('Failed to create student:', error);
     res.status(500).json({ success: false, error: 'Unable to save student.' });
@@ -1196,13 +1330,20 @@ app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: R
 
 app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    if (!clusterId || clusterId === 'all') {
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    }
     const id = String(req.body.id || `volunteer-${Date.now()}`).trim();
+    const rawPanchayatId = req.body.panchayatId ? String(req.body.panchayatId).trim() : null;
+    const panchayatId = rawPanchayatId && rawPanchayatId !== 'all' ? rawPanchayatId : null;
+
     await pool.query(
       'INSERT INTO volunteers (id, name, email, phone, cluster_id, panchayat_id, department, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), role = VALUES(role), status = VALUES(status)',
-      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, String(req.body.panchayatId || ''), String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active')]
+      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, panchayatId, String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active')]
     );
-    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', clusterId, panchayatId: req.body.panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
+    res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', clusterId, panchayatId: panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
   } catch (error) {
     console.error('Failed to save volunteer:', error);
     res.status(500).json({ success: false, error: 'Unable to save volunteer.' });
@@ -1262,16 +1403,26 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.post('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    if (!clusterId || clusterId === 'all') {
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    }
     const id = String(req.body.id || `session-${Date.now()}`).trim();
     const date = String(req.body.date || new Date().toISOString().split('T')[0]);
+    const rawPanchayatId = req.body.panchayatId ? String(req.body.panchayatId).trim() : null;
+    const panchayatId = rawPanchayatId && rawPanchayatId !== 'all' ? rawPanchayatId : null;
+    const rawVillageId = req.body.villageId ? String(req.body.villageId).trim() : null;
+    const villageId = rawVillageId && rawVillageId !== 'all' ? rawVillageId : null;
+    const rawVolunteerId = req.body.volunteerId ? String(req.body.volunteerId).trim() : null;
+    const volunteerId = rawVolunteerId && rawVolunteerId !== 'all' ? rawVolunteerId : null;
 
     await pool.query(
       'INSERT INTO sessions (id, code, name, module_id, cluster_id, panchayat_id, village_id, volunteer_id, date, time, session_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), date = VALUES(date), time = VALUES(time), session_status = VALUES(session_status)',
-      [id, String(req.body.code || id), String(req.body.name || 'Session').trim(), String(req.body.moduleId || 'module-english'), clusterId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), String(req.body.volunteerId || ''), date, String(req.body.time || '09:00'), String(req.body.status || 'Draft')]
+      [id, String(req.body.code || id), String(req.body.name || 'Session').trim(), String(req.body.moduleId || 'module-english'), clusterId, panchayatId, villageId, volunteerId, date, String(req.body.time || '09:00'), String(req.body.status || 'Draft')]
     );
 
-    res.json({ success: true, session: { id, code: String(req.body.code || id), name: req.body.name || 'Session', clusterId, panchayatId: req.body.panchayatId || '', villageId: req.body.villageId || '', date, time: req.body.time || '09:00', status: req.body.status || 'Draft' } });
+    res.json({ success: true, session: { id, code: String(req.body.code || id), name: req.body.name || 'Session', clusterId, panchayatId: panchayatId || '', villageId: villageId || '', date, time: req.body.time || '09:00', status: req.body.status || 'Draft' } });
   } catch (error) {
     console.error('Failed to save session:', error);
     res.status(500).json({ success: false, error: 'Unable to save session.' });
@@ -1431,7 +1582,7 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
         `INSERT INTO approvals (id, module, status, requested_by, session_id, cluster_id, date)
          SELECT ?, ?, ?, ?, ?, ?, CURDATE()
          WHERE NOT EXISTS (SELECT 1 FROM approvals WHERE session_id = ? AND status IN ('Open', 'Pending'))`,
-        [randomUUID(), 'Attendance', 'Pending', req.user.id, id, clusterId, id],
+        [randomUUID(), 'Attendance', 'Pending', req.user.id, sessionId, clusterId, sessionId],
       );
     }
 
@@ -1461,7 +1612,66 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
 
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, lessonPlans: rows.map((row) => ({ id: row.id, sessionId: row.session_id, moduleId: row.module_id, clusterId: row.cluster_id, panchayatId: row.panchayat_id, title: row.title, status: row.status || 'Draft', createdBy: row.created_by })) });
+    
+    const lessonPlans = rows.map((row) => {
+      let extraMeta: any = {};
+      try {
+        if (row.remarks && row.remarks.startsWith('{')) {
+          extraMeta = JSON.parse(row.remarks);
+        }
+      } catch {
+        extraMeta = {};
+      }
+
+      let parsedActivities: any = null;
+      try {
+        if (row.activities && (row.activities.startsWith('[') || row.activities.startsWith('{'))) {
+          parsedActivities = JSON.parse(row.activities);
+        }
+      } catch {
+        parsedActivities = null;
+      }
+
+      return {
+        id: row.id,
+        sessionId: row.session_id,
+        moduleId: row.module_id,
+        clusterId: row.cluster_id,
+        cluster: row.cluster_id ? row.cluster_id.charAt(0).toUpperCase() + row.cluster_id.slice(1) : 'Dharmapuri',
+        panchayatId: row.panchayat_id,
+        panchayatName: extraMeta.panchayatName || '',
+        villageName: extraMeta.villageName || '',
+        villagesList: extraMeta.villagesList || (extraMeta.villageName ? [extraMeta.villageName] : []),
+        teamCollegeName: extraMeta.teamCollegeName || 'K.S.Rangasamy College of Technology',
+        summitNumbers: extraMeta.summitNumbers || 'I, III',
+        dayNumber: row.day_number || extraMeta.dayNumber || 7,
+        grades: row.target_standard || extraMeta.grades || 'IX, XI',
+        targetStandard: row.target_standard || extraMeta.grades || 'IX, XI',
+        date: extraMeta.date || (row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : ''),
+        academicYear: extraMeta.academicYear || '2025 – 2026',
+        title: row.title,
+        topic: row.topic || row.title,
+        objective: row.objective || '',
+        overview: extraMeta.overview || row.objective || '',
+        gradeSegments: extraMeta.gradeSegments || [],
+        activitiesDetailed: extraMeta.activitiesDetailed || (Array.isArray(parsedActivities) ? parsedActivities : []),
+        expectedOutcome: row.learning_outcomes || extraMeta.expectedOutcome || '',
+        learningOutcomes: extraMeta.learningOutcomes || (row.learning_outcomes ? [row.learning_outcomes] : []),
+        assignedVolunteers: extraMeta.assignedVolunteers || [],
+        volunteerName: extraMeta.volunteerName || (extraMeta.assignedVolunteers?.[0] || ''),
+        teachingMethod: row.teaching_method || '',
+        assessmentTask: row.assessment_task || '',
+        materials: row.materials || '',
+        duration: row.duration || '90 Mins',
+        status: row.status || 'Draft',
+        createdBy: row.created_by,
+        correctionReason: extraMeta.correctionReason,
+        correctionRequestedBy: extraMeta.correctionRequestedBy,
+        correctionDate: extraMeta.correctionDate
+      };
+    });
+
+    res.json({ success: true, lessonPlans });
   } catch (error) {
     console.error('Failed to load lesson plans:', error);
     res.status(503).json({ success: false, error: 'Unable to load data. Please try again.' });
@@ -1482,29 +1692,64 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
       }
       await autoTransitionToInProgress(lpSessionId);
     }
+
+    const extraMeta = {
+      teamCollegeName: req.body.teamCollegeName || 'K.S.Rangasamy College of Technology',
+      summitNumbers: req.body.summitNumbers || 'I, III',
+      dayNumber: req.body.dayNumber || 7,
+      grades: req.body.grades || req.body.targetStandard || 'IX, XI',
+      date: req.body.date || new Date().toISOString().split('T')[0],
+      academicYear: req.body.academicYear || '2025 – 2026',
+      panchayatName: req.body.panchayatName || '',
+      villageName: req.body.villageName || '',
+      villagesList: req.body.villagesList || [],
+      assignedVolunteers: req.body.assignedVolunteers || [],
+      volunteerName: req.body.volunteerName || (req.body.assignedVolunteers?.[0] || ''),
+      overview: req.body.overview || req.body.objective || '',
+      gradeSegments: req.body.gradeSegments || [],
+      activitiesDetailed: req.body.activitiesDetailed || [],
+      expectedOutcome: req.body.expectedOutcome || req.body.learningOutcomes || '',
+      correctionReason: req.body.correctionReason,
+      correctionRequestedBy: req.body.correctionRequestedBy,
+      correctionDate: req.body.correctionDate
+    };
+
+    const statusVal = ['Draft', 'Submitted', 'Approved', 'Rejected'].includes(req.body.status) 
+      ? req.body.status 
+      : (req.body.status === 'Correction Requested' ? 'Rejected' : 'Draft');
+
+    let finalModuleId: string | null = req.body.moduleId ? String(req.body.moduleId) : null;
+    if (finalModuleId) {
+      const [modCheck] = await pool.query<any[]>('SELECT id FROM modules WHERE id = ? LIMIT 1', [finalModuleId]);
+      if (!modCheck.length) {
+        finalModuleId = null;
+      }
+    }
+
     await pool.query(
       `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, status, created_by) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
        ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), materials = VALUES(materials), duration = VALUES(duration), remarks = VALUES(remarks), teaching_method = VALUES(teaching_method), assessment_task = VALUES(assessment_task), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), volunteer_id = VALUES(volunteer_id), status = VALUES(status), created_by = VALUES(created_by)`,
       [
-        id, String(req.body.sessionId || ''), String(req.body.moduleId || 'module-english'), clusterId, String(req.body.panchayatId || ''), String(req.body.title || 'Lesson Plan').trim(),
+        id, String(req.body.sessionId || ''), finalModuleId, clusterId, String(req.body.panchayatId || ''), String(req.body.title || req.body.topic || 'Lesson Plan').trim(),
         req.body.topic ? String(req.body.topic) : null,
-        req.body.objective ? String(req.body.objective) : null,
-        req.body.activities ? (typeof req.body.activities === 'string' ? req.body.activities : JSON.stringify(req.body.activities)) : null,
-        req.body.materials ? String(req.body.materials) : null,
-        req.body.duration ? Number(req.body.duration) : null,
-        req.body.remarks ? String(req.body.remarks) : null,
+        req.body.objective || req.body.overview ? String(req.body.objective || req.body.overview) : null,
+        req.body.activitiesDetailed ? JSON.stringify(req.body.activitiesDetailed) : (req.body.activities ? String(req.body.activities) : null),
+        req.body.materials ? (typeof req.body.materials === 'string' ? req.body.materials : JSON.stringify(req.body.materials)) : null,
+        req.body.duration ? String(req.body.duration) : null,
+        JSON.stringify(extraMeta),
         req.body.teachingMethod ? String(req.body.teachingMethod) : null,
         req.body.assessmentTask ? String(req.body.assessmentTask) : null,
-        req.body.targetStandard ? String(req.body.targetStandard) : null,
-        req.body.learningOutcomes ? String(req.body.learningOutcomes) : null,
-        req.body.dayNumber ? Number(req.body.dayNumber) : null,
+        req.body.grades || req.body.targetStandard ? String(req.body.grades || req.body.targetStandard) : null,
+        req.body.expectedOutcome || req.body.learningOutcomes ? (typeof req.body.expectedOutcome === 'string' ? req.body.expectedOutcome : JSON.stringify(req.body.expectedOutcome || req.body.learningOutcomes)) : null,
+        req.body.dayNumber ? Number(req.body.dayNumber) : 7,
         req.body.volunteerId ? String(req.body.volunteerId) : null,
-        String(req.body.status || 'Draft'), String(req.user.id)
+        statusVal,
+        String(req.user.id)
       ]
     );
 
-    res.json({ success: true, lessonPlan: { id, title: req.body.title || 'Lesson Plan', clusterId, status: req.body.status || 'Draft' } });
+    res.json({ success: true, lessonPlan: { id, title: req.body.title || req.body.topic || 'Lesson Plan', clusterId, status: req.body.status || 'Draft', ...extraMeta } });
   } catch (error) {
     console.error('Failed to save lesson plan:', error);
     res.status(500).json({ success: false, error: 'Unable to save lesson plan.' });
@@ -1536,7 +1781,11 @@ app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Resp
 
 app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    if (!clusterId || clusterId === 'all') {
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    }
     const id = String(req.body.id || `finance-${Date.now()}`).trim();
     // Phase 4: Check if linked session is editable
     const finSessionId = String(req.body.sessionId || '');
@@ -1596,13 +1845,13 @@ app.get('/api/audit-logs', requireAuth, async (req: AuthenticatedRequest, res: R
 });
 
 app.get('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can access user management.' });
+    return;
+  }
   try {
     const params: any[] = [];
     let sql = "SELECT * FROM users WHERE status = 'Active'";
-    if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
-    }
     sql += ' ORDER BY name ASC';
     const [rows] = await pool.query<any[]>(sql, params);
     res.json({ success: true, users: rows.map(serializeUser) });
@@ -1630,6 +1879,28 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     return;
   }
 
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+    return;
+  }
+
+  let formattedPhone = phone;
+  if (phone) {
+    const digitsOnly = phone.replace(/\D/g, '');
+    let finalDigits = digitsOnly;
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+      finalDigits = digitsOnly.slice(2);
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+      finalDigits = digitsOnly.slice(1);
+    }
+    if (finalDigits.length !== 10) {
+      res.status(400).json({ success: false, error: 'Phone number must be exactly 10 digits.' });
+      return;
+    }
+    formattedPhone = `+91 ${finalDigits}`;
+  }
+
   if (role === 'Cluster Admin' && !clusterId) {
     res.status(400).json({ success: false, error: 'Please select a cluster for the Cluster Admin role.' });
     return;
@@ -1642,7 +1913,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     await pool.query('START TRANSACTION');
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'Active')`,
-      [userId, name, email, passwordHash, role, clusterId, phone],
+      [userId, name, email, passwordHash, role, clusterId, formattedPhone],
     );
 
     if (clusterId && role === 'Cluster Admin') {
@@ -1688,7 +1959,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     res.status(201).json({
       success: true,
       temporaryPassword,
-      user: serializeUser(createdRows[0] || { id: userId, name, email, role, cluster_id: clusterId, phone, status: 'Active', must_change_password: true }),
+      user: serializeUser(createdRows[0] || { id: userId, name, email, role, cluster_id: clusterId, phone: formattedPhone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
     await pool.query('ROLLBACK').catch(() => undefined);
@@ -1708,8 +1979,31 @@ app.put('/api/users/:id', requireAuth, async (req: AuthenticatedRequest, res: Re
   const role = req.body.role === 'Super Admin' ? 'Super Admin' : 'Cluster Admin';
   const clusterId = role === 'Cluster Admin' ? String(req.body.clusterId || '').trim() || null : null;
   if (!name || !email) { res.status(400).json({ success: false, error: 'Name and email are required.' }); return; }
+  
+  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+  if (!emailRegex.test(email)) {
+    res.status(400).json({ success: false, error: 'Please enter a valid email address.' });
+    return;
+  }
+
+  let formattedPhone = phone;
+  if (phone) {
+    const digitsOnly = phone.replace(/\D/g, '');
+    let finalDigits = digitsOnly;
+    if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
+      finalDigits = digitsOnly.slice(2);
+    } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
+      finalDigits = digitsOnly.slice(1);
+    }
+    if (finalDigits.length !== 10) {
+      res.status(400).json({ success: false, error: 'Phone number must be exactly 10 digits.' });
+      return;
+    }
+    formattedPhone = `+91 ${finalDigits}`;
+  }
+
   try {
-    await pool.query('UPDATE users SET name = ?, email = ?, phone = ?, role = ?, cluster_id = ? WHERE id = ?', [name, email, phone, role, clusterId, req.params.id]);
+    await pool.query('UPDATE users SET name = ?, email = ?, phone = ?, role = ?, cluster_id = ? WHERE id = ?', [name, email, formattedPhone, role, clusterId, req.params.id]);
     await pool.query('UPDATE clusters SET admin_id = NULL WHERE admin_id = ?', [req.params.id]);
     if (clusterId) await pool.query('UPDATE clusters SET admin_id = ? WHERE id = ?', [req.params.id, clusterId]);
     const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE id = ? LIMIT 1', [req.params.id]);
@@ -1724,11 +2018,30 @@ app.delete('/api/users/:id', requireAuth, async (req: AuthenticatedRequest, res:
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete users.' }); return; }
   if (req.params.id === req.user.id) { res.status(400).json({ success: false, error: 'You cannot delete your own account.' }); return; }
   try {
+    await pool.query('START TRANSACTION');
     await pool.query('UPDATE clusters SET admin_id = NULL WHERE admin_id = ?', [req.params.id]);
-    const [result] = await pool.query<any>("UPDATE users SET status = 'Inactive' WHERE id = ?", [req.params.id]);
-    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'User not found.' }); return; }
+    await pool.query('DELETE FROM notifications WHERE user_id = ?', [req.params.id]);
+    await pool.query('UPDATE audit_logs SET user_id = NULL WHERE user_id = ?', [req.params.id]);
+    const [result] = await pool.query<any>('DELETE FROM users WHERE id = ?', [req.params.id]);
+    if (!result.affectedRows) {
+      await pool.query('ROLLBACK');
+      res.status(404).json({ success: false, error: 'User not found.' });
+      return;
+    }
+    await pool.query('COMMIT');
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    // If foreign key constraint blocks deletion due to historical records, fallback to Inactive status
+    if (error?.code === 'ER_ROW_IS_REFERENCED_2' || error?.code === 'ER_ROW_IS_REFERENCED') {
+      try {
+        await pool.query("UPDATE users SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+        res.json({ success: true, message: 'User marked inactive due to linked records.' });
+        return;
+      } catch (err) {
+        // pass
+      }
+    }
     res.status(503).json({ success: false, error: 'Unable to delete user.' });
   }
 });
@@ -1770,12 +2083,54 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
 app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete clusters.' }); return; }
   try {
-    const [result] = await pool.query<any>("UPDATE clusters SET status = 'Inactive' WHERE id = ?", [req.params.id]);
-    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
-    await pool.query("UPDATE users SET status = 'Inactive' WHERE cluster_id = ? AND role = 'Cluster Admin'", [req.params.id]);
-    await pool.query('INSERT INTO audit_logs (id, user_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'DELETE_CLUSTER', 'CLUSTERS', req.params.id, '{}']);
+    await pool.query('START TRANSACTION');
+
+    // 1. Break bidirectional FK link between clusters and users
+    await pool.query('UPDATE clusters SET admin_id = NULL WHERE id = ?', [req.params.id]);
+
+    // 2. Remove notifications and unbind audit logs for users belonging to this cluster
+    await pool.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
+    await pool.query('UPDATE audit_logs SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
+
+    // 3. Delete cluster users (e.g. Cluster Admin)
+    await pool.query('DELETE FROM users WHERE cluster_id = ?', [req.params.id]);
+
+    // 4. Delete cluster from clusters table
+    const [result] = await pool.query<any>('DELETE FROM clusters WHERE id = ?', [req.params.id]);
+    if (!result.affectedRows) {
+      await pool.query('ROLLBACK');
+      res.status(404).json({ success: false, error: 'Cluster not found.' });
+      return;
+    }
+
+    // 5. Record audit log
+    await pool.query('INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)', [
+      crypto.randomUUID(),
+      req.user.id,
+      req.user.name,
+      req.user.role,
+      'DELETE_CLUSTER',
+      'CLUSTERS',
+      req.params.id,
+      `Permanently deleted cluster ${req.params.id} and associated cluster admin accounts.`
+    ]);
+
+    await pool.query('COMMIT');
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
+    await pool.query('ROLLBACK').catch(() => undefined);
+    console.error('Failed to delete cluster:', error);
+    // If foreign key constraint blocks hard deletion due to operational records (sessions, attendance, etc.)
+    if (error?.code === 'ER_ROW_IS_REFERENCED_2' || error?.code === 'ER_ROW_IS_REFERENCED') {
+      try {
+        await pool.query("UPDATE clusters SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+        await pool.query("UPDATE users SET status = 'Inactive' WHERE cluster_id = ?", [req.params.id]);
+        res.json({ success: true, message: 'Cluster deactivated due to linked historical sessions/students.' });
+        return;
+      } catch (innerErr) {
+        // pass
+      }
+    }
     res.status(503).json({ success: false, error: 'Failed to delete cluster.' });
   }
 });
@@ -1856,11 +2211,25 @@ app.delete('/api/panchayats/:id', requireAuth, async (req: AuthenticatedRequest,
 
 // 7. PUT /api/students/:id
 app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status } = req.body;
+  const { name, gender, dob, standard, panchayat_id, panchayatId, village_id, villageId, parent_name, parentName, phone, status } = req.body;
+  const pId = panchayat_id !== undefined ? panchayat_id : panchayatId;
+  const vId = village_id !== undefined ? village_id : villageId;
+  const parName = parent_name !== undefined ? parent_name : parentName;
+
   try {
     const [result] = await pool.query<any>(
-      'UPDATE students SET name = ?, gender = ?, dob = ?, standard = ?, panchayat_id = ?, village_id = ?, parent_name = ?, phone = ?, status = ? WHERE id = ?',
-      [name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status, req.params.id]
+      `UPDATE students SET 
+        name = COALESCE(?, name), 
+        gender = COALESCE(?, gender), 
+        dob = COALESCE(?, dob), 
+        standard = COALESCE(?, standard), 
+        panchayat_id = COALESCE(?, panchayat_id), 
+        village_id = COALESCE(?, village_id), 
+        parent_name = COALESCE(?, parent_name), 
+        phone = COALESCE(?, phone), 
+        status = COALESCE(?, status) 
+       WHERE id = ?`,
+      [name ?? null, gender ?? null, dob ?? null, standard ?? null, pId ?? null, vId ?? null, parName ?? null, phone ?? null, status ?? null, req.params.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
     res.json({ success: true, data: { id: req.params.id } });
@@ -1890,9 +2259,10 @@ app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, re
   let count = 0;
   try {
     for (const student of students) {
+      const studentId = student.id || crypto.randomUUID();
       await pool.query(
-        'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), clusterId, student.name, student.gender, student.dob, student.standard, student.panchayatId || null, student.villageId || null, student.parentName, student.phone, 'Active']
+        'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), standard = VALUES(standard), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id)',
+        [studentId, clusterId, student.name, student.gender || 'male', student.dob || '2014-01-01', student.standard || '6th Standard', student.panchayatId || student.panchayat_id || null, student.villageId || student.village_id || null, student.parentName || student.parent_name || 'Parent', student.phone || '', 'Active']
       );
       count++;
     }
@@ -1904,11 +2274,23 @@ app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, re
 
 // 10. PUT /api/volunteers/:id
 app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, email, phone, department, role, panchayat_id, village_id, status } = req.body;
+  const { name, email, phone, department, role, panchayat_id, panchayatId, village_id, villageId, status } = req.body;
+  const pId = panchayat_id !== undefined ? panchayat_id : panchayatId;
+  const vId = village_id !== undefined ? village_id : villageId;
+
   try {
     const [result] = await pool.query<any>(
-      'UPDATE volunteers SET name = ?, email = ?, phone = ?, department = ?, role = ?, panchayat_id = ?, village_id = ?, status = ? WHERE id = ?',
-      [name, email, phone, department, role, panchayat_id, village_id, status, req.params.id]
+      `UPDATE volunteers SET 
+        name = COALESCE(?, name), 
+        email = COALESCE(?, email), 
+        phone = COALESCE(?, phone), 
+        department = COALESCE(?, department), 
+        role = COALESCE(?, role), 
+        panchayat_id = COALESCE(?, panchayat_id), 
+        village_id = COALESCE(?, village_id), 
+        status = COALESCE(?, status) 
+       WHERE id = ?`,
+      [name ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, pId ?? null, vId ?? null, status ?? null, req.params.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
     res.json({ success: true, data: { id: req.params.id } });
@@ -2018,7 +2400,7 @@ app.get('/api/date-change-requests', requireAuth, async (req: AuthenticatedReque
 
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: rows, dateChangeRequests: rows });
   } catch (error) {
     console.error('Failed to fetch date change requests:', error);
     res.status(503).json({ success: false, error: 'Unable to load data.' });
@@ -2089,7 +2471,7 @@ app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, r
     }
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: rows, sessionReports: rows });
   } catch (error) {
     console.error('Failed to fetch session reports:', error);
     res.status(503).json({ success: false, error: 'Unable to load data.' });
@@ -2202,7 +2584,7 @@ app.get('/api/session-submissions', requireAuth, async (req: AuthenticatedReques
     }
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, data: rows });
+    res.json({ success: true, data: rows, sessionSubmissions: rows });
   } catch (error) {
     console.error('Failed to fetch session submissions:', error);
     res.status(503).json({ success: false, error: 'Unable to load data.' });
@@ -2392,7 +2774,25 @@ app.post('/api/modules/:id/resources', requireAuth, moduleUploadMiddleware.singl
       [resourceId, req.params.id, filePath, fileUrl, req.file.originalname]
     );
 
-    res.json({ success: true, resource: { id: resourceId, url: fileUrl } });
+    const ext = path.extname(req.file.originalname || '').toUpperCase().replace('.', '');
+    const fileType = ext === 'PPT' || ext === 'PPTX' ? 'PPT' : ext === 'PDF' ? 'PDF' : ext;
+
+    const resourceObj = {
+      id: resourceId,
+      moduleId: req.params.id,
+      fileName: req.file.originalname,
+      originalFileName: req.file.originalname,
+      fileType,
+      mimeType: req.file.mimetype,
+      fileSize: req.file.size || 0,
+      fileSizeFormatted: `${((req.file.size || 0) / (1024 * 1024)).toFixed(1)} MB`,
+      fileUrl,
+      isPrimaryPPT: ext === 'PPT' || ext === 'PPTX',
+      storageProvider: 'local',
+      uploadedAt: new Date().toISOString(),
+    };
+
+    res.json({ success: true, resource: resourceObj });
   } catch (error) {
     console.error('Failed to upload module resource:', error);
     res.status(500).json({ success: false, error: 'Unable to upload resource.' });

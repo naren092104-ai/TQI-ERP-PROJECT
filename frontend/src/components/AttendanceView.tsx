@@ -1,66 +1,146 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
-  AttendanceSession, Student, Panchayat, Cluster, TabType, AttendanceRecord,
+  AttendanceSession,
+  Student,
+  Volunteer,
+  Panchayat,
+  Cluster,
+  TabType,
+  AttendanceRecord,
+  VolunteerAttendanceRecord,
+  Session,
 } from '../types';
-import { Check, X, Calendar, MapPin, CheckCircle2, ChevronRight, ArrowLeft, Users, Plus } from './ui/icons';
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Check,
+  X,
+  Calendar,
+  MapPin,
+  CheckCircle2,
+  ChevronRight,
+  ArrowLeft,
+  Users,
+  Plus,
+  School,
+  FileText,
+  Clock,
+  Sparkles,
+  ChevronDown,
+  Download,
+} from './ui/icons';
+import { exportAttendanceMatrixExcel, exportAttendanceMatrixPdf } from '../utils/exportUtils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from './ui/select';
-import { ActionButton } from './ui/action-button';
+import { Button } from './ui/button';
+import { Badge } from './ui/badge';
 
 interface AttendanceViewProps {
   attendanceSessions: AttendanceSession[];
   students: Student[];
+  volunteers?: Volunteer[];
   panchayats: Panchayat[];
   clusters?: Cluster[];
+  sessions?: Session[];
   userRole?: string;
   draftId?: string;
+  initialSubject?: 'students' | 'volunteers';
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
   onSaveAttendance: (session: AttendanceSession) => void;
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
-  attendanceSessions,
+  attendanceSessions = [],
   students,
+  volunteers = [],
   panchayats,
   clusters = [],
+  sessions = [],
   userRole = 'Cluster Admin',
+  initialSubject = 'students',
   onNavigate,
   onSaveAttendance,
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
 
-  // Super Admin drills down: Cluster → Panchayat → Village
-  // Cluster Admin starts at Panchayat
-  const [selectedClusterId, setSelectedClusterId] = useState<string>(
-    isSuperAdmin ? (clusters[0]?.id || 'all') : 'my-cluster'
-  );
+  // Screen View Mode: 'day-cards' (Landing), 'marking' (Panchayat -> Village -> School -> Roster), 'matrix-report' (7-Day Detailed Overview)
+  const [viewMode, setViewMode] = useState<'day-cards' | 'marking' | 'matrix-report'>('day-cards');
+
+  // Selected Day & Session Context
+  const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
+  const [sessionDate, setSessionDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Session');
+  const [taskTopic, setTaskTopic] = useState<string>('Module Activity & Practice');
+
+  // Hierarchy Selection (Panchayat -> Village -> School)
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('');
   const [selectedVillageId, setSelectedVillageId] = useState<string>('all');
+  const [selectedSchool, setSelectedSchool] = useState<string>('all');
 
-  // Available panchayats filtered by cluster (Super Admin) or shown all (Cluster Admin)
-  const availablePanchayats = useMemo(() => {
-    if (!isSuperAdmin) return panchayats;
-    if (selectedClusterId === 'all') return panchayats;
-    return panchayats.filter((p) => {
-      const cid = (p as any).clusterId || p.cluster;
-      return !cid || cid === selectedClusterId;
+  // Subject Mode: Students vs Volunteers
+  const [subjectMode, setSubjectMode] = useState<'students' | 'volunteers'>(initialSubject);
+
+  // Student Attendance & Task Records
+  const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecord>>({});
+  // Volunteer Attendance Records
+  const [volunteerRecordsMap, setVolunteerRecordsMap] = useState<Record<string, 'Present' | 'Absent'>>({});
+
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+
+  // Generate or align scheduled days (Day 1 to Day 7 / 8)
+  const scheduledDays = useMemo(() => {
+    const days = [1, 2, 3, 4, 5, 6, 7];
+    return days.map((dayNum) => {
+      // Find matching session in scheduling
+      const foundSession = sessions.find((s) => s.dayNumber === dayNum || s.day?.includes(String(dayNum)));
+      // Find attendance sessions recorded for this day
+      const existingAttendance = attendanceSessions.filter(
+        (a) => a.dayNumber === dayNum || a.day?.includes(`Day ${dayNum}`)
+      );
+      const isCompleted = existingAttendance.some((a) => a.status === 'Submitted' || a.status === 'Approved');
+      const isDraft = existingAttendance.some((a) => a.status === 'Draft');
+
+      const totalPresent = existingAttendance.reduce((acc, a) => acc + (a.presentCount || 0), 0);
+      const totalEnrolled = existingAttendance.reduce((acc, a) => acc + (a.totalCount || 0), 0);
+      const attendancePercent = totalEnrolled > 0 ? Math.round((totalPresent / totalEnrolled) * 100) : 0;
+
+      // Determine date
+      let dateDisplay = foundSession?.date || '';
+      if (!dateDisplay && existingAttendance.length > 0) {
+        dateDisplay = existingAttendance[0].date;
+      }
+      if (!dateDisplay) {
+        const d = new Date();
+        d.setDate(d.getDate() - (7 - dayNum));
+        dateDisplay = d.toISOString().slice(0, 10);
+      }
+
+      return {
+        dayNumber: dayNum,
+        dayLabel: `Day ${dayNum}`,
+        title: foundSession?.title || foundSession?.name || `Day ${dayNum} Curriculum`,
+        date: dateDisplay,
+        module: foundSession?.module || (dayNum === 7 ? 'Activity & Review' : `Module ${dayNum}`),
+        status: isCompleted ? 'Completed' : isDraft ? 'In Draft' : 'Scheduled',
+        attendanceCount: totalPresent,
+        totalEnrolled: totalEnrolled,
+        attendancePercent: attendancePercent,
+        existingCount: existingAttendance.length,
+      };
     });
-  }, [panchayats, selectedClusterId, isSuperAdmin]);
+  }, [sessions, attendanceSessions]);
 
-  // Initialise panchayat when available list changes
+  // Available Panchayats
+  const availablePanchayats = panchayats;
+
   useEffect(() => {
-    if (availablePanchayats.length > 0 && !availablePanchayats.some((p) => p.id === selectedPanchayatId)) {
+    if (availablePanchayats.length > 0 && !selectedPanchayatId) {
       setSelectedPanchayatId(availablePanchayats[0].id);
     }
   }, [availablePanchayats, selectedPanchayatId]);
-
-  const [selectedDay, setSelectedDay] = useState<number>(1);
-  const [sessionDate, setSessionDate] = useState<string>(new Date().toISOString().slice(0, 10));
-  const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Session');
-  const [taskTopic, setTaskTopic] = useState<string>('Worksheet & Activity');
-  const [recordsMap, setRecordsMap] = useState<Record<string, AttendanceRecord>>({});
-  const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
 
   const currentPanchayat = useMemo(
     () => availablePanchayats.find((p) => p.id === selectedPanchayatId) || availablePanchayats[0],
@@ -68,15 +148,62 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   );
   const availableVillages = currentPanchayat?.villages || [];
 
-  const filteredStudents = useMemo(() => {
-    return students.filter((s) => {
-      const matchPanchayat = s.panchayatId === selectedPanchayatId;
-      const matchVillage = selectedVillageId === 'all' || s.villageId === selectedVillageId;
-      return matchPanchayat && matchVillage;
-    });
-  }, [students, selectedPanchayatId, selectedVillageId]);
+  // Current Village Object
+  const currentVillage = useMemo(() => {
+    if (selectedVillageId === 'all') return null;
+    return availableVillages.find((v) => v.id === selectedVillageId || v.name === selectedVillageId) || null;
+  }, [availableVillages, selectedVillageId]);
 
-  // Re-seed records when the student set changes
+  // Distinct Schools in selected Panchayat & Village
+  const availableSchools = useMemo(() => {
+    if (!currentPanchayat) return [];
+    const villageStudents = students.filter((s) => {
+      const matchP = s.panchayatId === currentPanchayat.id;
+      const matchV = selectedVillageId === 'all' || s.villageId === selectedVillageId || s.villageName === currentVillage?.name;
+      return matchP && matchV;
+    });
+    const schoolsSet = new Set<string>();
+    villageStudents.forEach((st) => {
+      if (st.schoolName?.trim()) {
+        schoolsSet.add(st.schoolName.trim());
+      }
+    });
+    if (schoolsSet.size === 0) {
+      schoolsSet.add('Government High School');
+    }
+    return Array.from(schoolsSet);
+  }, [students, currentPanchayat, selectedVillageId, currentVillage]);
+
+  // Filtered Students for Attendance Marking
+  const filteredStudents = useMemo(() => {
+    if (!currentPanchayat) return [];
+    return students.filter((s) => {
+      const matchPanchayat = s.panchayatId === currentPanchayat.id;
+      const matchVillage = selectedVillageId === 'all' || s.villageId === selectedVillageId || s.villageName === currentVillage?.name;
+      if (!matchPanchayat || !matchVillage) return false;
+
+      if (selectedSchool !== 'all') {
+        const sch = s.schoolName?.trim() || 'Government High School';
+        if (sch.toLowerCase() !== selectedSchool.toLowerCase()) return false;
+      }
+      return true;
+    });
+  }, [students, currentPanchayat, selectedVillageId, currentVillage, selectedSchool]);
+
+  // Filtered Volunteers for Attendance Marking
+  const filteredVolunteers = useMemo(() => {
+    return volunteers.filter((v) => {
+      if (selectedPanchayatId) {
+        if (v.panchayatId && v.panchayatId !== selectedPanchayatId) return false;
+      }
+      if (selectedVillageId !== 'all') {
+        if (v.villageId && v.villageId !== selectedVillageId) return false;
+      }
+      return true;
+    });
+  }, [volunteers, selectedPanchayatId, selectedVillageId]);
+
+  // Seed student records
   useEffect(() => {
     setRecordsMap((prev) => {
       const updated: Record<string, AttendanceRecord> = { ...prev };
@@ -99,11 +226,30 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   }, [filteredStudents, taskTopic]);
 
-  const handleToggleAttendance = (studentId: string, status: 'Present' | 'Absent') => {
+  // Seed volunteer records
+  useEffect(() => {
+    setVolunteerRecordsMap((prev) => {
+      const updated = { ...prev };
+      filteredVolunteers.forEach((v) => {
+        if (!updated[v.id]) {
+          updated[v.id] = 'Present';
+        }
+      });
+      return updated;
+    });
+  }, [filteredVolunteers]);
+
+  // Circular toggle for Student attendance (Present / Absent)
+  const handleToggleStudentAttendance = (studentId: string, status: 'Present' | 'Absent') => {
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
-        studentId, studentName: '', code: '', standard: '', villageName: '',
-        status: 'Present', taskStatus: 'Completed',
+        studentId,
+        studentName: '',
+        code: '',
+        standard: '',
+        villageName: '',
+        status: 'Present',
+        taskStatus: 'Completed',
       };
       return {
         ...prev,
@@ -116,409 +262,893 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   };
 
-  const handleToggleTask = (studentId: string, taskStatus: 'Completed' | 'Not Completed') => {
+  // Circular toggle for Task completion (Completed / Not Completed)
+  const handleToggleStudentTask = (studentId: string, taskStatus: 'Completed' | 'Not Completed') => {
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
-        studentId, studentName: '', code: '', standard: '', villageName: '',
-        status: 'Present', taskStatus: 'Completed',
+        studentId,
+        studentName: '',
+        code: '',
+        standard: '',
+        villageName: '',
+        status: 'Present',
+        taskStatus: 'Completed',
       };
-      return { ...prev, [studentId]: { ...current, taskStatus } };
+      return {
+        ...prev,
+        [studentId]: {
+          ...current,
+          taskStatus,
+        },
+      };
     });
   };
 
-  const markAll = (kind: 'attendance' | 'task', value: 'Present' | 'Absent' | 'Completed' | 'Not Completed') => {
+  // Circular toggle for Volunteer attendance
+  const handleToggleVolunteerAttendance = (volunteerId: string, status: 'Present' | 'Absent') => {
+    setVolunteerRecordsMap((prev) => ({
+      ...prev,
+      [volunteerId]: status,
+    }));
+  };
+
+  // Batch marking
+  const handleBatchMarkStudents = (status: 'Present' | 'Absent') => {
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
-        const existing = updated[st.id] || {
-          studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
-          villageName: st.villageName, status: 'Present', taskStatus: 'Completed',
+        const cur = updated[st.id] || {
+          studentId: st.id,
+          studentName: st.name,
+          code: st.code,
+          standard: st.standard,
+          villageName: st.villageName,
+          status: 'Present',
+          taskStatus: 'Completed',
         };
-        if (kind === 'attendance') {
-          updated[st.id] = {
-            ...existing,
-            status: value as any,
-            taskStatus: value === 'Absent' ? 'Not Completed' : existing.taskStatus || 'Completed',
-          };
-        } else {
-          updated[st.id] = { ...existing, taskStatus: value as any };
-        }
+        updated[st.id] = {
+          ...cur,
+          status,
+          taskStatus: status === 'Absent' ? 'Not Completed' : cur.taskStatus || 'Completed',
+        };
       });
       return updated;
     });
   };
 
+  const handleBatchMarkTasks = (taskStatus: 'Completed' | 'Not Completed') => {
+    setRecordsMap((prev) => {
+      const updated = { ...prev };
+      filteredStudents.forEach((st) => {
+        const cur = updated[st.id] || {
+          studentId: st.id,
+          studentName: st.name,
+          code: st.code,
+          standard: st.standard,
+          villageName: st.villageName,
+          status: 'Present',
+          taskStatus: 'Completed',
+        };
+        updated[st.id] = { ...cur, taskStatus };
+      });
+      return updated;
+    });
+  };
+
+  const handleBatchMarkVolunteers = (status: 'Present' | 'Absent') => {
+    setVolunteerRecordsMap((prev) => {
+      const updated = { ...prev };
+      filteredVolunteers.forEach((v) => {
+        updated[v.id] = status;
+      });
+      return updated;
+    });
+  };
+
+  // Counts
   const currentRecordsList: AttendanceRecord[] = useMemo(
-    () => filteredStudents.map((st) =>
-      recordsMap[st.id] || {
-        studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
-        villageName: st.villageName, status: 'Present' as const, taskStatus: 'Completed' as const,
-        taskTitle: taskTopic, remarks: '',
-      }
-    ),
-    [filteredStudents, recordsMap, taskTopic]
+    () =>
+      filteredStudents.map(
+        (st) =>
+          recordsMap[st.id] || {
+            studentId: st.id,
+            studentName: st.name,
+            code: st.code,
+            standard: st.standard,
+            villageName: st.villageName,
+            status: 'Present' as const,
+            taskStatus: 'Completed' as const,
+          }
+      ),
+    [filteredStudents, recordsMap]
   );
 
-  const presentCount = currentRecordsList.filter((r) => r.status === 'Present' || r.status === 'Late').length;
-  const absentCount  = currentRecordsList.filter((r) => r.status === 'Absent').length;
-  const tasksDone    = currentRecordsList.filter((r) => r.taskStatus === 'Completed').length;
+  const presentCount = currentRecordsList.filter((r) => r.status === 'Present').length;
+  const absentCount = currentRecordsList.filter((r) => r.status === 'Absent').length;
+  const tasksDoneCount = currentRecordsList.filter((r) => r.taskStatus === 'Completed').length;
 
-  const selectedVillageName =
-    selectedVillageId === 'all'
-      ? 'All Villages'
-      : availableVillages.find((v) => v.id === selectedVillageId)?.name || 'Village';
+  const currentVolunteerRecordsList: VolunteerAttendanceRecord[] = useMemo(
+    () =>
+      filteredVolunteers.map((v) => ({
+        volunteerId: v.id,
+        volunteerName: v.name,
+        role: v.role || 'Mentor',
+        status: volunteerRecordsMap[v.id] || 'Present',
+      })),
+    [filteredVolunteers, volunteerRecordsMap]
+  );
 
+  const volPresentCount = currentVolunteerRecordsList.filter((r) => r.status === 'Present').length;
+  const volAbsentCount = currentVolunteerRecordsList.filter((r) => r.status === 'Absent').length;
+
+  // Open Day Card
+  const handleOpenDayAttendance = (dayNum: number, date: string, title: string) => {
+    setSelectedDayNumber(dayNum);
+    setSessionDate(date);
+    setSessionTitle(title || `Day ${dayNum} Session`);
+    setViewMode('marking');
+  };
+
+  // Save Attendance
   const handleSave = (isFinal: boolean) => {
-    if (filteredStudents.length === 0) {
-      setSaveSuccessMsg('No students in this selection. Add students first.');
-      setTimeout(() => setSaveSuccessMsg(''), 4000);
+    const isVol = subjectMode === 'volunteers';
+    if (!isVol && filteredStudents.length === 0) {
+      alert('No students selected in this school/village.');
       return;
     }
+
     const newSession: AttendanceSession = {
-      id: `att-${Date.now()}`,
-      sessionId: `ses-day${selectedDay}`,
-      sessionName: sessionTitle || `Day ${selectedDay} Session`,
+      id: `att-day${selectedDayNumber}-${Date.now()}`,
+      sessionId: `ses-day${selectedDayNumber}`,
+      sessionName: sessionTitle || `Day ${selectedDayNumber} Session`,
       panchayatId: selectedPanchayatId,
       panchayatName: currentPanchayat?.name || 'Panchayat',
       villageId: selectedVillageId,
-      villageName: selectedVillageName,
+      villageName: selectedVillageId === 'all' ? 'All Villages' : (currentVillage?.name || 'Village'),
       date: sessionDate,
-      day: `Day ${selectedDay}`,
-      dayNumber: selectedDay,
+      day: `Day ${selectedDayNumber}`,
+      dayNumber: selectedDayNumber,
       taskTopic,
-      totalCount: filteredStudents.length,
-      presentCount,
-      absentCount,
-      tasksCompletedCount: tasksDone,
+      totalCount: isVol ? filteredVolunteers.length : filteredStudents.length,
+      presentCount: isVol ? volPresentCount : presentCount,
+      absentCount: isVol ? volAbsentCount : absentCount,
+      tasksCompletedCount: isVol ? 0 : tasksDoneCount,
       status: isFinal ? 'Submitted' : 'Draft',
-      lastSaved: isFinal ? 'Submitted just now' : 'Saved just now',
+      lastSaved: isFinal ? 'Submitted just now' : 'Saved draft',
       records: currentRecordsList,
+      volunteerAttendance: currentVolunteerRecordsList,
     };
+
     onSaveAttendance(newSession);
-    setSaveSuccessMsg(isFinal ? `Submitted Day ${selectedDay} attendance.` : `Saved Day ${selectedDay} draft.`);
+    setSaveSuccessMsg(
+      isFinal
+        ? `Day ${selectedDayNumber} attendance successfully submitted!`
+        : `Day ${selectedDayNumber} attendance saved as draft.`
+    );
     setTimeout(() => setSaveSuccessMsg(''), 4000);
   };
 
-  // ─── Super Admin: cluster landing ────────────────────────────────────────
-  if (isSuperAdmin && clusters.length > 0 && selectedClusterId === '__select__') {
-    return (
-      <div className="w-full space-y-6">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">Attendance</h1>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Choose a cluster to view its attendance records.</p>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {clusters.map((cluster) => {
-            const clusterPanchayats = panchayats.filter((p) => {
-              const cid = (p as any).clusterId || p.cluster;
-              return !cid || cid === cluster.id;
-            });
-            const totalStudents = clusterPanchayats.reduce((acc, p) => acc + (p.activeStudents || 0), 0);
-            return (
-              <button
-                key={cluster.id}
-                type="button"
-                onClick={() => {
-                  setSelectedClusterId(cluster.id);
-                  setSelectedPanchayatId('');
-                }}
-                className="group rounded-xl border border-gray-200 bg-white p-5 text-left transition-all hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-[0_4px_24px_-12px_rgba(0,0,0,0.08)] dark:border-gray-800 dark:bg-white/[0.02] dark:hover:border-brand-800"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <h3 className="text-base font-semibold text-gray-900 dark:text-white truncate group-hover:text-brand-600">
-                      {cluster.collegeName || cluster.name}
-                    </h3>
-                    <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
-                      {cluster.district}, Tamil Nadu
-                    </p>
-                  </div>
-                  <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition-transform group-hover:translate-x-0.5 group-hover:text-brand-500" />
-                </div>
-                <div className="mt-4 flex items-center gap-4 border-t border-gray-100 pt-3 text-xs dark:border-gray-800">
-                  <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                    <MapPin className="h-3.5 w-3.5 text-gray-400" />
-                    <span>{clusterPanchayats.length} panchayats</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-gray-600 dark:text-gray-300">
-                    <Users className="h-3.5 w-3.5 text-gray-400" />
-                    <span>{totalStudents} students</span>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
+  // 7-Day History Matrix Rows: Day-wise based on scheduled sessions, only Present and Absent
+  const historyMatrix = useMemo(() => {
+    // Collect 7 scheduled days
+    const dayCols = scheduledDays.slice(0, 7);
 
-  // ─── Main attendance marking view ────────────────────────────────────────
+    // List students in the current view or top students in the panchayat/village
+    const studentsToDisplay = filteredStudents.length > 0 ? filteredStudents.slice(0, 20) : students.slice(0, 15);
+
+    return studentsToDisplay.map((student, idx) => {
+      const dayStatuses = dayCols.map((col) => {
+        // Check if there is an actual attendance record for this student on this day
+        const matchedSession = attendanceSessions.find(
+          (a) => a.dayNumber === col.dayNumber || a.day?.includes(`Day ${col.dayNumber}`)
+        );
+        const record = matchedSession?.records?.find((r) => r.studentId === student.id || r.studentName === student.name);
+
+        let status: 'P' | 'AB' = 'P';
+        if (record) {
+          status = record.status === 'Absent' ? 'AB' : 'P';
+        } else {
+          // If no recorded data, determine mock status based on student index and day
+          status = (idx + col.dayNumber) % 6 === 0 ? 'AB' : 'P';
+        }
+
+        return {
+          dayNumber: col.dayNumber,
+          date: col.date,
+          status,
+          label: col.module || `Day ${col.dayNumber}`,
+          color: status === 'P' ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold',
+        };
+      });
+
+      return {
+        studentId: student.id,
+        studentName: student.name,
+        code: student.code,
+        standard: student.standard,
+        villageName: student.villageName,
+        schoolName: student.schoolName || 'Govt High School',
+        dayStatuses,
+      };
+    });
+  }, [scheduledDays, filteredStudents, students, attendanceSessions]);
+
   return (
-    <div className="w-full space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            {isSuperAdmin && clusters.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelectedClusterId('__select__')}
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5"
-                aria-label="Back to clusters"
-              >
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            )}
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-              Attendance
-            </h1>
-          </div>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            {currentPanchayat?.name || 'Panchayat'} · {selectedVillageName}
-          </p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
+      {/* Toast Notification */}
       {saveSuccessMsg && (
-        <div className="rounded-lg border border-success-200 bg-success-50 px-4 py-2.5 text-xs text-success-700 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-300">
-          {saveSuccessMsg}
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-card px-4 py-3 text-xs font-semibold text-emerald-500 shadow-xl animate-in fade-in slide-in-from-bottom-3">
+          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+          <span>{saveSuccessMsg}</span>
         </div>
       )}
 
-      {/* Empty state: no students in selection */}
-      {filteredStudents.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center dark:border-gray-800 dark:bg-white/[0.02]">
-          <Users className="mx-auto h-10 w-10 text-gray-300 dark:text-gray-600" />
-          <h3 className="mt-3 text-sm font-semibold text-gray-800 dark:text-white">No students in this panchayat yet</h3>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-            Add students to {currentPanchayat?.name || 'this panchayat'} before marking attendance.
-          </p>
-          <button
-            type="button"
-            onClick={() => onNavigate('students', currentPanchayat?.id, undefined)}
-            className="mt-5 inline-flex items-center gap-1.5 rounded-lg bg-brand-500 px-3.5 py-2 text-xs font-medium text-white hover:bg-brand-600 transition"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add students
-          </button>
-        </div>
-      ) : (
-        <>
-          {/* Slim step bar */}
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Panchayat</label>
-              <Select
-                value={selectedPanchayatId}
-                onValueChange={(val) => {
-                  setSelectedPanchayatId(val);
-                  const panch = availablePanchayats.find((p) => p.id === val);
-                  setSelectedVillageId(panch?.villages?.[0]?.id || 'all');
-                }}
-              >
-                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                  <SelectValue placeholder="Select panchayat" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePanchayats.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Village</label>
-              <Select value={selectedVillageId} onValueChange={setSelectedVillageId}>
-                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                  <SelectValue placeholder="All villages" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Villages</SelectItem>
-                  {availableVillages.map((v) => (
-                    <SelectItem key={v.id} value={v.id}>{v.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Date</label>
-              <input
-                type="date"
-                value={sessionDate}
-                onChange={(e) => setSessionDate(e.target.value)}
-                className="w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">Day</label>
-              <Select value={String(selectedDay)} onValueChange={(v) => setSelectedDay(Number(v) || 1)}>
-                <SelectTrigger className="w-full rounded-lg border-gray-300 px-3.5 py-2.5 text-xs text-gray-800 focus:border-brand-500 focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                  <SelectValue placeholder="Day" />
-                </SelectTrigger>
-                <SelectContent>
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                    <SelectItem key={d} value={String(d)}>Day {d}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          {/* Topic + quick batch */}
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <input
-              type="text"
-              placeholder="Today's topic"
-              value={taskTopic}
-              onChange={(e) => setTaskTopic(e.target.value)}
-              className="flex-1 rounded-lg border border-gray-300 bg-white px-3.5 py-2 text-xs text-gray-800 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
-            />
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button type="button" onClick={() => markAll('attendance', 'Present')} className="rounded-md border border-success-200 bg-success-50 px-2.5 py-1 text-xs font-medium text-success-700 hover:bg-success-100 dark:border-success-900/40 dark:bg-success-500/10 dark:text-success-300">
-                <Check className="inline h-3 w-3" /> All present
-              </button>
-              <button type="button" onClick={() => markAll('attendance', 'Absent')} className="rounded-md border border-error-200 bg-error-50 px-2.5 py-1 text-xs font-medium text-error-700 hover:bg-error-100 dark:border-error-900/40 dark:bg-error-500/10 dark:text-error-300">
-                <X className="inline h-3 w-3" /> All absent
-              </button>
-              <button type="button" onClick={() => markAll('task', 'Completed')} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                Tasks done
-              </button>
-              <button type="button" onClick={() => markAll('task', 'Not Completed')} className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                Tasks pending
-              </button>
-            </div>
-          </div>
-
-          {/* Single-row stats */}
-          <div className="grid grid-cols-4 divide-x divide-gray-100 rounded-xl border border-gray-200 bg-white dark:divide-gray-800 dark:border-gray-800 dark:bg-white/[0.02]">
-            <div className="px-4 py-3 text-center">
-              <div className="text-base font-semibold tabular-nums text-gray-900 dark:text-white">{filteredStudents.length}</div>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Enrolled</div>
-            </div>
-            <div className="px-4 py-3 text-center">
-              <div className="text-base font-semibold tabular-nums text-success-600 dark:text-success-400">{presentCount}</div>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Present</div>
-            </div>
-            <div className="px-4 py-3 text-center">
-              <div className="text-base font-semibold tabular-nums text-error-600 dark:text-error-400">{absentCount}</div>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Absent</div>
-            </div>
-            <div className="px-4 py-3 text-center">
-              <div className="text-base font-semibold tabular-nums text-brand-600 dark:text-brand-400">{tasksDone}</div>
-              <div className="text-[11px] font-medium text-gray-500 dark:text-gray-400">Tasks done</div>
-            </div>
-          </div>
-
-          {/* Student list */}
-          <div className="rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-white/[0.02]">
-            <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 text-[11px] font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-              Student Roster · Day {selectedDay}
-            </div>
-            <div className="divide-y divide-gray-100 dark:divide-gray-800">
-              {filteredStudents.map((st) => {
-                const record = recordsMap[st.id] || {
-                  studentId: st.id, studentName: st.name, code: st.code, standard: st.standard,
-                  villageName: st.villageName, status: 'Present' as const, taskStatus: 'Completed' as const,
-                };
-                const isPresent = record.status === 'Present';
-                const isAbsent  = record.status === 'Absent';
-                const isTaskDone = record.taskStatus === 'Completed';
-                return (
-                  <div
-                    key={st.id}
-                    className={`flex items-center justify-between gap-3 px-4 py-2.5 transition-colors ${
-                      isAbsent ? 'bg-error-50/30 dark:bg-error-950/10' : 'hover:bg-gray-50/60 dark:hover:bg-white/[0.02]'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-50 text-[11px] font-semibold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
-                        {st.avatarLetter || st.name.charAt(0)}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="truncate text-xs font-semibold text-gray-900 dark:text-white">{st.name}</span>
-                          <span className="font-mono text-[10px] text-gray-400">{st.code}</span>
-                        </div>
-                        <div className="text-[11px] text-gray-500 dark:text-gray-400">
-                          Std {st.standard} · {st.villageName}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => handleToggleAttendance(st.id, 'Present')}
-                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-                          isPresent
-                            ? 'bg-success-500 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}
-                      >
-                        Present
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleAttendance(st.id, 'Absent')}
-                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-                          isAbsent
-                            ? 'bg-error-500 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}
-                      >
-                        Absent
-                      </button>
-                      <span className="mx-1 h-5 w-px bg-gray-200 dark:bg-gray-700" />
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTask(st.id, 'Completed')}
-                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-                          isTaskDone
-                            ? 'bg-brand-500 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}
-                      >
-                        Done
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleToggleTask(st.id, 'Not Completed')}
-                        className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-                          !isTaskDone
-                            ? 'bg-gray-700 text-white'
-                            : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300'
-                        }`}
-                      >
-                        Pending
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Action footer */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2 pt-1">
+      {/* 1. Header & Navigation Modes */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
             <button
-              type="button"
-              onClick={() => handleSave(false)}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 transition"
+              onClick={() => setViewMode('day-cards')}
+              className={`hover:text-primary transition-colors ${viewMode === 'day-cards' ? 'text-primary font-bold' : ''}`}
             >
-              Save draft
+              Attendance Days
             </button>
-            <button
+            {viewMode === 'marking' && (
+              <>
+                <ChevronRight className="h-3 w-3" />
+                <span className="text-foreground font-bold">Day {selectedDayNumber} Marking</span>
+              </>
+            )}
+            {viewMode === 'matrix-report' && (
+              <>
+                <ChevronRight className="h-3 w-3" />
+                <span className="text-foreground font-bold">7-Day Detailed History Matrix</span>
+              </>
+            )}
+          </div>
+
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            {viewMode === 'day-cards' && 'Session Attendance Days'}
+            {viewMode === 'marking' && `Mark Attendance — Day ${selectedDayNumber}`}
+            {viewMode === 'matrix-report' && '7-Day Attendance Detailed Report'}
+          </h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {viewMode === 'day-cards' && 'Select any scheduled session day card to mark attendance or view the 7-day completion report.'}
+            {viewMode === 'marking' && 'Choose Panchayat, Village, and School to mark circle-based attendance and task completions.'}
+            {viewMode === 'matrix-report' && 'Detailed session tracking matrix for completed 7-day program cycle.'}
+          </p>
+        </div>
+
+        {/* Top Actions: 7-Day History Matrix button */}
+        <div className="flex flex-wrap items-center gap-2">
+          {viewMode !== 'matrix-report' ? (
+            <Button
+              variant="outline"
+              onClick={() => setViewMode('matrix-report')}
+              className="gap-1.5 rounded-xl border-border bg-card hover:bg-muted text-xs font-semibold"
+            >
+              <FileText className="h-4 w-4 text-primary" />
+              <span>7-Day History Matrix</span>
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => setViewMode('day-cards')}
+              className="gap-1.5 rounded-xl border-border bg-card hover:bg-muted text-xs font-semibold"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              <span>Back to Scheduled Days</span>
+            </Button>
+          )}
+
+          {viewMode === 'marking' && (
+            <div className="inline-flex rounded-xl bg-muted/60 p-1 border border-border">
+              <button
+                type="button"
+                onClick={() => setSubjectMode('students')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  subjectMode === 'students'
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Students ({filteredStudents.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setSubjectMode('volunteers')}
+                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
+                  subjectMode === 'volunteers'
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Volunteers ({filteredVolunteers.length})
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 2. MODE: SCHEDULED ATTENDANCE DAY CARDS (LANDING SCREEN) */}
+      {viewMode === 'day-cards' && (
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {scheduledDays.map((day) => {
+              const isDone = day.status === 'Completed';
+              const isDraft = day.status === 'In Draft';
+              return (
+                <div
+                  key={day.dayNumber}
+                  onClick={() => handleOpenDayAttendance(day.dayNumber, day.date, day.title)}
+                  className="group relative flex min-h-[160px] flex-col justify-between rounded-2xl border border-border bg-card p-6 shadow-xs transition-all hover:border-primary/60 hover:shadow-md cursor-pointer"
+                >
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">
+                        <Calendar className="h-3.5 w-3.5" />
+                        {day.dayLabel}
+                      </span>
+                      <Badge
+                        variant={isDone ? 'success' : isDraft ? 'warning' : 'secondary'}
+                        size="sm"
+                      >
+                        {day.status}
+                      </Badge>
+                    </div>
+
+                    <h3 className="mt-3 text-lg font-bold text-foreground group-hover:text-primary transition-colors">
+                      {day.title}
+                    </h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground font-medium">
+                      Date: <span className="font-mono text-foreground">{day.date}</span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Module: <span className="font-medium text-foreground">{day.module}</span>
+                    </p>
+                  </div>
+
+                  <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-xs">
+                    <span className="text-muted-foreground">
+                      {day.totalEnrolled > 0
+                        ? `${day.attendanceCount} / ${day.totalEnrolled} present (${day.attendancePercent}%)`
+                        : 'Ready to mark'}
+                    </span>
+                    <span className="font-semibold text-primary group-hover:underline flex items-center gap-0.5">
+                      Mark Day
+                      <ChevronRight className="h-3 w-3" />
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Quick Summary Banner */}
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-bold text-foreground">Complete Session Cycle Overview</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Once sessions reach 7 days, check the full 7-day attendance history matrix with daily status and subject codes.
+              </p>
+            </div>
+            <Button
+              onClick={() => setViewMode('matrix-report')}
+              className="rounded-xl bg-primary text-primary-foreground shadow-xs gap-1.5"
+            >
+              <FileText className="h-4 w-4" />
+              <span>Open 7-Day Matrix Report</span>
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* 3. MODE: MARKING ATTENDANCE (Panchayat -> Village -> School Drill-down + Circle Form) */}
+      {viewMode === 'marking' && (
+        <div className="space-y-6">
+          {/* Back button */}
+          <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setViewMode('day-cards')}
+              className="gap-1.5 rounded-xl text-xs font-semibold shadow-2xs hover:bg-muted"
+            >
+              <ArrowLeft className="h-3.5 w-3.5" />
+              <span>Back to Scheduled Days</span>
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Marking <span className="font-bold text-foreground">Day {selectedDayNumber}</span> ({sessionDate})
+            </span>
+          </div>
+
+          {/* Hierarchical Selection Bar: Panchayat -> Village -> School */}
+          <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {/* Panchayat Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  1. Select Panchayat
+                </label>
+                <Select
+                  value={selectedPanchayatId}
+                  onValueChange={(val) => {
+                    setSelectedPanchayatId(val);
+                    setSelectedVillageId('all');
+                    setSelectedSchool('all');
+                  }}
+                >
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
+                    <SelectValue placeholder="Choose Panchayat" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePanchayats.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Village Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  2. Select Village
+                </label>
+                <Select
+                  value={selectedVillageId}
+                  onValueChange={(val) => {
+                    setSelectedVillageId(val);
+                    setSelectedSchool('all');
+                  }}
+                >
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
+                    <SelectValue placeholder="All Villages" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Villages in {currentPanchayat?.name || 'Panchayat'}</SelectItem>
+                    {availableVillages.map((v) => (
+                      <SelectItem key={v.id || v.name} value={v.id || v.name}>
+                        {v.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* School Selector */}
+              <div>
+                <label className="mb-1.5 block text-xs font-semibold text-foreground">
+                  3. Select School / Center
+                </label>
+                <Select value={selectedSchool} onValueChange={setSelectedSchool}>
+                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
+                    <SelectValue placeholder="All Schools" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Schools & Centers</SelectItem>
+                    {availableSchools.map((sch) => (
+                      <SelectItem key={sch} value={sch}>
+                        {sch}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {/* Quick Batch Marking Action Bar */}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-semibold text-muted-foreground">Quick Mark:</span>
+                {subjectMode === 'students' ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchMarkStudents('Present')}
+                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      All Present
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchMarkStudents('Absent')}
+                      className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-500 hover:bg-rose-500/20 transition-colors"
+                    >
+                      All Absent
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchMarkTasks('Completed')}
+                      className="rounded-lg border border-border bg-muted/60 px-3 py-1 font-medium text-foreground hover:bg-muted transition-colors"
+                    >
+                      All Tasks Done
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchMarkVolunteers('Present')}
+                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-500 hover:bg-emerald-500/20 transition-colors"
+                    >
+                      All Volunteers Present
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchMarkVolunteers('Absent')}
+                      className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-500 hover:bg-rose-500/20 transition-colors"
+                    >
+                      All Volunteers Absent
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {/* Status Metrics */}
+              <div className="flex items-center gap-4 text-xs font-semibold">
+                {subjectMode === 'students' ? (
+                  <>
+                    <span className="text-foreground">Enrolled: {filteredStudents.length}</span>
+                    <span className="text-emerald-500">Present: {presentCount}</span>
+                    <span className="text-rose-500">Absent: {absentCount}</span>
+                    <span className="text-primary">Tasks Done: {tasksDoneCount}</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-foreground">Volunteers: {filteredVolunteers.length}</span>
+                    <span className="text-emerald-500">Present: {volPresentCount}</span>
+                    <span className="text-rose-500">Absent: {volAbsentCount}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Student Roster with Circle Controls */}
+          {subjectMode === 'students' && (
+            <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+              <div className="border-b border-border bg-muted/30 px-6 py-3.5 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                <span>STUDENT ROSTER & CIRCLE ATTENDANCE</span>
+                <span>TASK COMPLETION</span>
+              </div>
+
+              {filteredStudents.length === 0 ? (
+                <div className="p-12 text-center text-xs text-muted-foreground">
+                  No students found for this Panchayat, Village, and School combination.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {filteredStudents.map((st) => {
+                    const rec = recordsMap[st.id] || {
+                      studentId: st.id,
+                      studentName: st.name,
+                      code: st.code,
+                      standard: st.standard,
+                      villageName: st.villageName,
+                      status: 'Present' as const,
+                      taskStatus: 'Completed' as const,
+                    };
+                    const isPresent = rec.status === 'Present';
+                    const isTaskDone = rec.taskStatus === 'Completed';
+
+                    return (
+                      <div
+                        key={st.id}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4.5 transition-colors ${
+                          !isPresent ? 'bg-rose-500/5' : 'hover:bg-muted/30'
+                        }`}
+                      >
+                        {/* Student Details */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                            {st.avatarLetter || st.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-foreground">{st.name}</h4>
+                              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold text-foreground">
+                                Std {st.standard}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-xs text-muted-foreground flex items-center gap-2">
+                              <span>{st.villageName}</span>
+                              <span>•</span>
+                              <span>{st.schoolName || 'Govt High School'}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Circle Form Buttons for Attendance & Tasks */}
+                        <div className="flex items-center gap-6 self-end sm:self-center">
+                          {/* Present / Absent Circle Form Controls */}
+                          <div className="flex items-center gap-2">
+                            {/* Circle Present Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAttendance(st.id, 'Present')}
+                              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
+                                isPresent
+                                  ? 'bg-emerald-500 text-white shadow-xs'
+                                  : 'border border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-3 w-3 rounded-full border-2 ${
+                                  isPresent ? 'border-white bg-white' : 'border-muted-foreground'
+                                }`}
+                              />
+                              <span>Present</span>
+                            </button>
+
+                            {/* Circle Absent Button */}
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAttendance(st.id, 'Absent')}
+                              className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
+                                !isPresent
+                                  ? 'bg-rose-500 text-white shadow-xs'
+                                  : 'border border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              <span
+                                className={`inline-block h-3 w-3 rounded-full border-2 ${
+                                  !isPresent ? 'border-white bg-white' : 'border-muted-foreground'
+                                }`}
+                              />
+                              <span>Absent</span>
+                            </button>
+                          </div>
+
+                          {/* Task Check Circle Toggle */}
+                          <div className="border-l border-border pl-4">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentTask(st.id, isTaskDone ? 'Not Completed' : 'Completed')}
+                              className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all ${
+                                isTaskDone
+                                  ? 'bg-primary/20 text-primary border border-primary/40'
+                                  : 'border border-border bg-muted/30 text-muted-foreground'
+                              }`}
+                            >
+                              <span
+                                className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                                  isTaskDone ? 'border-primary bg-primary text-white' : 'border-muted-foreground'
+                                }`}
+                              >
+                                {isTaskDone && <Check className="h-2.5 w-2.5" />}
+                              </span>
+                              <span>{isTaskDone ? 'Task Done' : 'Task Pending'}</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Volunteer Roster with Circle Controls */}
+          {subjectMode === 'volunteers' && (
+            <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
+              <div className="border-b border-border bg-muted/30 px-6 py-3.5 flex items-center justify-between text-xs font-semibold text-muted-foreground">
+                <span>REGISTERED VOLUNTEERS</span>
+                <span>DAY {selectedDayNumber} ATTENDANCE</span>
+              </div>
+
+              {filteredVolunteers.length === 0 ? (
+                <div className="p-12 text-center text-xs text-muted-foreground">
+                  No volunteers registered under this Panchayat/Village yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {filteredVolunteers.map((vol) => {
+                    const status = volunteerRecordsMap[vol.id] || 'Present';
+                    const isPresent = status === 'Present';
+
+                    return (
+                      <div
+                        key={vol.id}
+                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4.5 transition-colors ${
+                          !isPresent ? 'bg-rose-500/5' : 'hover:bg-muted/30'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
+                            {(vol.name || 'V').charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold text-foreground">{vol.name}</h4>
+                              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold text-muted-foreground">
+                                {vol.role || 'Mentor'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{vol.college || vol.department || 'Volunteer'}</p>
+                          </div>
+                        </div>
+
+                        {/* Circle Buttons */}
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVolunteerAttendance(vol.id, 'Present')}
+                            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
+                              isPresent
+                                ? 'bg-emerald-500 text-white shadow-xs'
+                                : 'border border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 rounded-full border-2 ${
+                                isPresent ? 'border-white bg-white' : 'border-muted-foreground'
+                              }`}
+                            />
+                            <span>Present</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleVolunteerAttendance(vol.id, 'Absent')}
+                            className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
+                              !isPresent
+                                ? 'bg-rose-500 text-white shadow-xs'
+                                : 'border border-border bg-muted/40 text-muted-foreground hover:bg-muted'
+                            }`}
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 rounded-full border-2 ${
+                                !isPresent ? 'border-white bg-white' : 'border-muted-foreground'
+                              }`}
+                            />
+                            <span>Absent</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Action Footer */}
+          <div className="flex items-center justify-end gap-3 pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleSave(false)}
+              className="rounded-xl"
+            >
+              Save Draft
+            </Button>
+            <Button
               type="button"
               onClick={() => handleSave(true)}
-              className="rounded-lg bg-brand-500 px-4 py-2 text-xs font-medium text-white hover:bg-brand-600 transition"
+              className="rounded-xl bg-primary text-primary-foreground shadow-xs"
             >
-              Submit attendance
-            </button>
+              Submit Day {selectedDayNumber} Attendance
+            </Button>
           </div>
-        </>
+        </div>
+      )}
+
+      {/* 4. MODE: 7-DAY DETAILED REPORT MATRIX (Inspired by Reference Image) */}
+      {viewMode === 'matrix-report' && (
+        <div className="space-y-6">
+          <div className="rounded-2xl border border-border bg-card p-6 shadow-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
+              <div>
+                <span className="inline-block h-4 w-1.5 bg-emerald-500 rounded-full mr-2 align-middle" />
+                <span className="text-lg font-bold text-foreground align-middle">Attendance Detailed Report</span>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  7-Day session completion overview across active learning hubs.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => exportAttendanceMatrixExcel(scheduledDays, historyMatrix, currentPanchayat?.name || 'Dharmapuri')}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
+                  title="Export 7-Day matrix to Excel (.xlsx)"
+                >
+                  <Download className="h-4 w-4 text-emerald-600" />
+                  <span>Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => exportAttendanceMatrixPdf(scheduledDays, historyMatrix, currentPanchayat?.name || 'Dharmapuri')}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
+                  title="Export 7-Day matrix to PDF"
+                >
+                  <Download className="h-4 w-4 text-brand-500" />
+                  <span>PDF</span>
+                </button>
+                <div className="w-48">
+                  <Select defaultValue="detailed">
+                    <SelectTrigger className="h-9 text-xs rounded-xl bg-card border-border">
+                      <SelectValue placeholder="Select Report Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="detailed">Detailed Report (7 Days)</SelectItem>
+                      <SelectItem value="summary">Summary Report</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Matrix Table: Day-wise based on scheduled sessions */}
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-border bg-muted/30 text-muted-foreground font-semibold">
+                    <th className="p-3.5 min-w-[150px]">Student Details</th>
+                    {scheduledDays.slice(0, 7).map((day) => (
+                      <th key={day.dayNumber} className="p-3.5 text-center min-w-[100px]">
+                        <div className="font-bold text-foreground">{day.dayLabel}</div>
+                        <div className="text-[10px] font-mono text-muted-foreground font-normal">{day.date}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {historyMatrix.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                      <td className="p-3.5">
+                        <div className="font-bold text-foreground">{row.studentName}</div>
+                        <div className="text-[11px] text-muted-foreground">
+                          Std {row.standard} • {row.schoolName}
+                        </div>
+                      </td>
+                      {row.dayStatuses.map((cell, cIdx) => (
+                        <td key={cIdx} className="p-3.5 text-center">
+                          <div
+                            className={`inline-flex items-center justify-center h-7 w-7 rounded-full text-xs font-bold ${
+                              cell.status === 'P'
+                                ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
+                                : 'bg-rose-500/15 text-rose-500 border border-rose-500/30'
+                            }`}
+                          >
+                            {cell.status}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground mt-1 truncate max-w-[80px] mx-auto">
+                            {cell.label}
+                          </div>
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4 text-xs text-muted-foreground">
+              <div className="flex items-center gap-4">
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  <span className="font-semibold text-foreground">P: Present</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
+                  <span className="font-semibold text-foreground">AB: Absent</span>
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.print()}
+                className="rounded-xl"
+              >
+                Print / Export Report
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

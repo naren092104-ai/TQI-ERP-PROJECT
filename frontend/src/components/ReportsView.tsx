@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { TabType, Session, LessonPlan, Panchayat, Volunteer, Student } from '../types';
+import { TabType, Session, LessonPlan, Panchayat, Volunteer, Student, Cluster, FinanceEntry } from '../types';
 import {
   Select,
   SelectContent,
@@ -7,6 +7,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { Download } from './ui/icons';
+import {
+  exportSuperAdminConsolidatedExcel,
+  exportSuperAdminConsolidatedPdf,
+  type ClusterConsolidationData,
+} from '../utils/exportUtils';
 
 interface ReportsViewProps {
   sessions: Session[];
@@ -14,6 +20,8 @@ interface ReportsViewProps {
   panchayats: Panchayat[];
   volunteers: Volunteer[];
   students?: Student[];
+  clusters?: Cluster[];
+  financeEntries?: FinanceEntry[];
   onNavigate: (tab: TabType, targetId?: string) => void;
 }
 
@@ -24,6 +32,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
   lessonPlans = [],
   panchayats = [],
   volunteers = [],
+  students = [],
+  clusters = [],
+  financeEntries = [],
   onNavigate,
 }) => {
   // Report Configuration
@@ -244,8 +255,39 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     document.body.removeChild(link);
   };
 
-  const handlePrintReport = () => {
-    window.print();
+  // Super Admin cluster export state
+  const [selectedClusterExport, setSelectedClusterExport] = useState<string>('all');
+
+  const clusterConsolidationList: ClusterConsolidationData[] = useMemo(() => {
+    // If clusters list provided, build consolidation object per cluster
+    const clusterNames = clusters.length > 0
+      ? Array.from(new Set(clusters.map((c) => c.name)))
+      : ['Dharmapuri', 'Salem', 'Coimbatore', 'Erode'];
+
+    return clusterNames.map((cName) => {
+      const cSessions = sessions.filter((s) => !s.cluster || s.cluster.toLowerCase() === cName.toLowerCase());
+      const cFinance = financeEntries.filter((f) => !f.clusterName || f.clusterName.toLowerCase() === cName.toLowerCase());
+      const cPlans = lessonPlans.filter((p) => !p.cluster || p.cluster.toLowerCase() === cName.toLowerCase());
+      const cStudents = students.filter((st) => !st.cluster || st.cluster.toLowerCase() === cName.toLowerCase());
+      const cVolunteers = volunteers.filter((v) => !v.cluster || v.cluster.toLowerCase() === cName.toLowerCase());
+
+      return {
+        clusterName: cName,
+        sessions: cSessions,
+        financeEntries: cFinance,
+        lessonPlans: cPlans,
+        students: cStudents,
+        volunteers: cVolunteers,
+      };
+    });
+  }, [clusters, sessions, financeEntries, lessonPlans, students, volunteers]);
+
+  const handleExportSuperAdminExcel = () => {
+    exportSuperAdminConsolidatedExcel(clusterConsolidationList, selectedClusterExport);
+  };
+
+  const handleExportSuperAdminPdf = () => {
+    exportSuperAdminConsolidatedPdf(clusterConsolidationList, selectedClusterExport);
   };
 
   return (
@@ -257,24 +299,60 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             Operational &amp; Academic Reports
           </h1>
           <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Generate, filter, visualize, and export attendance, sessions, and curriculum reports.
+            Generate, filter, visualize, and export attendance, sessions, finance, and curriculum reports.
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 self-start sm:self-auto">
+        {/* Super Admin Universal Cluster Export Toolbar */}
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <div className="w-40 sm:w-48">
+            <Select value={selectedClusterExport} onValueChange={(v) => setSelectedClusterExport(v)}>
+              <SelectTrigger className="h-9 text-xs">
+                <SelectValue placeholder="Select Cluster" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Consolidated: All Clusters</SelectItem>
+                <SelectItem value="Dharmapuri">Dharmapuri Cluster</SelectItem>
+                <SelectItem value="Salem">Salem Cluster</SelectItem>
+                <SelectItem value="Coimbatore">Coimbatore Cluster</SelectItem>
+                <SelectItem value="Erode">Erode Cluster</SelectItem>
+                {clusters
+                  .filter((c) => !['dharmapuri', 'salem', 'coimbatore', 'erode'].includes(c.name.toLowerCase()))
+                  .map((c) => (
+                    <SelectItem key={c.id} value={c.name}>
+                      {c.name} Cluster
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExportSuperAdminExcel}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-theme-xs hover:bg-emerald-50 dark:border-gray-800 dark:bg-gray-800 dark:text-emerald-400 transition"
+            title="Download full cluster data as Excel (.xlsx)"
+          >
+            <Download className="h-4 w-4 text-emerald-600" />
+            <span>Excel</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleExportSuperAdminPdf}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+            title="Download full cluster data as PDF document"
+          >
+            <Download className="h-4 w-4 text-brand-500" />
+            <span>PDF</span>
+          </button>
+
           <button
             type="button"
             onClick={handlePrintReport}
-            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
           >
-            <span>Print / PDF</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
-          >
-            <span>Export CSV</span>
+            <span>Print</span>
           </button>
         </div>
       </div>

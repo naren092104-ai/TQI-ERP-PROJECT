@@ -69,6 +69,14 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   const [selectedVillage, setSelectedVillage] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
+  // Month & Date Filtering (Allows viewing multiple visits in a month)
+  const currentMonthStr = useMemo(() => new Date().toISOString().slice(0, 7), []);
+  const [selectedMonth, setSelectedMonth] = useState<string>('all');
+  const [selectedDate, setSelectedDate] = useState<string>('all');
+
+  // Photo Category Filtering ('all' | 'session' | 'homework' | 'feedback')
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'session' | 'homework' | 'feedback'>('all');
+
   // Dedicated Day Page (both Cluster Admin and Super Admin)
   const [activeDayNumber, setActiveDayNumber] = useState<number | null>(null);
 
@@ -114,6 +122,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [uploadTitle, setUploadTitle] = useState<string>('Interactive Learning Workshop');
   const [uploadDay, setUploadDay] = useState<number>(1);
+  const [uploadPhotoType, setUploadPhotoType] = useState<'session' | 'homework' | 'feedback'>('session');
   const [uploadPanchayat, setUploadPanchayat] = useState<string>(panchayats[0]?.id || '');
   const [uploadVillage, setUploadVillage] = useState<string>(panchayats[0]?.villages[0]?.name || '');
   const [uploadDate, setUploadDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -351,6 +360,43 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     return p?.villages || [];
   }, [panchayats, uploadPanchayat]);
 
+  // Available months derived from photos
+  const availableMonths = useMemo(() => {
+    const set = new Set<string>();
+    photos.forEach((p) => {
+      const d = p.date || (p.uploadedAt ? p.uploadedAt.slice(0, 10) : '');
+      if (d && d.length >= 7) {
+        set.add(d.slice(0, 7));
+      }
+    });
+    // Ensure current month is included
+    const nowMonth = new Date().toISOString().slice(0, 7);
+    set.add(nowMonth);
+    return Array.from(set).sort().reverse();
+  }, [photos]);
+
+  // Available dates for selected month
+  const availableDates = useMemo(() => {
+    const set = new Set<string>();
+    photos.forEach((p) => {
+      const d = p.date || (p.uploadedAt ? p.uploadedAt.slice(0, 10) : '');
+      if (!d) return;
+      if (selectedMonth === 'all' || d.startsWith(selectedMonth)) {
+        set.add(d);
+      }
+    });
+    return Array.from(set).sort().reverse();
+  }, [photos, selectedMonth]);
+
+  // Helper to determine photoType
+  const getPhotoType = (p: SessionPhotoItem): 'session' | 'homework' | 'feedback' => {
+    if (p.photoType) return p.photoType;
+    const caption = (p.caption || p.originalFilename || '').toLowerCase();
+    if (caption.includes('[homework]') || caption.includes('homework') || caption.includes('#homework')) return 'homework';
+    if (caption.includes('[feedback]') || caption.includes('feedback') || caption.includes('#feedback')) return 'feedback';
+    return 'session';
+  };
+
   // Filtered Photos for Gallery or Dedicated Day
   const filteredPhotos = useMemo(() => {
     return photos.filter((p) => {
@@ -365,6 +411,13 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       const targetDay = activeDayNumber !== null ? activeDayNumber : selectedDayTab;
       const matchDay = targetDay === 'all' || p.dayNumber === targetDay;
 
+      const pDate = p.date || (p.uploadedAt ? p.uploadedAt.slice(0, 10) : '');
+      const matchMonth = selectedMonth === 'all' || pDate.startsWith(selectedMonth);
+      const matchDate = selectedDate === 'all' || pDate === selectedDate;
+
+      const type = getPhotoType(p);
+      const matchCategory = selectedCategory === 'all' || type === selectedCategory;
+
       const matchPanchayat =
         selectedPanchayat === 'all' ||
         (p.panchayatId || '').toLowerCase() === selectedPanchayat.toLowerCase() ||
@@ -378,15 +431,29 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       const matchSearch =
         !q ||
         (p.sessionTitle || '').toLowerCase().includes(q) ||
+        (p.panchayatName || '').toLowerCase() === q ||
         (p.panchayatName || '').toLowerCase().includes(q) ||
         (p.villageName || '').toLowerCase().includes(q) ||
         (p.uploadedBy || '').toLowerCase().includes(q) ||
         (p.caption || '').toLowerCase().includes(q) ||
         (p.originalFilename || '').toLowerCase().includes(q);
 
-      return matchCluster && matchDay && matchPanchayat && matchVillage && matchSearch;
+      return matchCluster && matchDay && matchMonth && matchDate && matchCategory && matchPanchayat && matchVillage && matchSearch;
     });
-  }, [photos, selectedCluster, userRole, selectedDayTab, activeDayNumber, selectedPanchayat, selectedVillage, searchQuery, currentCluster]);
+  }, [
+    photos,
+    selectedCluster,
+    userRole,
+    selectedDayTab,
+    activeDayNumber,
+    selectedMonth,
+    selectedDate,
+    selectedCategory,
+    selectedPanchayat,
+    selectedVillage,
+    searchQuery,
+    currentCluster,
+  ]);
 
   // Count of pending delete requests for Super Admin badge
   const pendingDeleteCount = useMemo(() => {
@@ -746,6 +813,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     formData.append('villageName', uploadVillage);
     formData.append('uploadedBy', uploadUploader);
     formData.append('uploadedRole', userRole);
+    formData.append('photoType', uploadPhotoType);
     formData.append('caption', uploadCaption);
 
     uploadFiles.forEach((file) => {
@@ -1205,7 +1273,77 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             </div>
           )}
 
-          {/* Filter Bar inside Day View */}
+          {/* Category Filter Tabs: All, Session Photos, Homework, Feedback */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+            <div className="flex items-center gap-1 overflow-x-auto py-1">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'all'
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>All Photographs</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => (activeDayNumber === null || p.dayNumber === activeDayNumber)).length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('session')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'session'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>📸 Session Activities</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => (activeDayNumber === null || p.dayNumber === activeDayNumber) && getPhotoType(p) === 'session').length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('homework')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'homework'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>📝 Homework Photos</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => (activeDayNumber === null || p.dayNumber === activeDayNumber) && getPhotoType(p) === 'homework').length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('feedback')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'feedback'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>💬 Feedback Photos</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => (activeDayNumber === null || p.dayNumber === activeDayNumber) && getPhotoType(p) === 'feedback').length}
+                </span>
+              </button>
+            </div>
+
+            {/* Quick stats tag */}
+            <div className="text-xs text-muted-foreground">
+              Showing <span className="font-semibold text-foreground">{filteredPhotos.length}</span> photos
+            </div>
+          </div>
+
+          {/* Filter Bar inside Day View (Search, Month, Date, Panchayat, Village) */}
           <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
             <div className="relative min-w-[200px] flex-1">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -1217,7 +1355,58 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               />
             </div>
 
-            <div className="w-44">
+            {/* Month Selector */}
+            <div className="w-36">
+              <Select
+                value={selectedMonth}
+                onValueChange={(val) => {
+                  setSelectedMonth(val);
+                  setSelectedDate('all');
+                }}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <Calendar className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <SelectValue placeholder="All Months" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Months</SelectItem>
+                  {availableMonths.map((m) => {
+                    const [yyyy, mm] = m.split('-');
+                    const dateObj = new Date(Number(yyyy), Number(mm) - 1, 1);
+                    const label = dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                    return (
+                      <SelectItem key={m} value={m}>
+                        {label}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date Selector */}
+            {availableDates.length > 0 && (
+              <div className="w-36">
+                <Select
+                  value={selectedDate}
+                  onValueChange={(val) => setSelectedDate(val)}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="All Dates" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Visit Dates</SelectItem>
+                    {availableDates.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="w-40">
               <Select
                 value={selectedPanchayat}
                 onValueChange={(val) => {
@@ -1239,7 +1428,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               </Select>
             </div>
 
-            <div className="w-44">
+            <div className="w-40">
               <Select
                 value={selectedVillage}
                 onValueChange={(val) => setSelectedVillage(val)}
@@ -1282,10 +1471,15 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               <EmptyState
                 icon={ImageIcon}
                 title="No photographs found for this Day"
-                description="No photos have been uploaded for this day and cluster yet."
-                actionLabel={userRole === 'Super Admin' || !activeDayConfig?.isLocked ? '+ Upload First Photo' : undefined}
+                description={
+                  selectedCategory !== 'all'
+                    ? `No ${selectedCategory} photos have been uploaded for this day and criteria.`
+                    : 'No photos have been uploaded for this day and cluster yet.'
+                }
+                actionLabel={userRole === 'Super Admin' || !activeDayConfig?.isLocked ? '+ Upload Photo' : undefined}
                 onAction={() => {
-                  setUploadDay(activeDayNumber);
+                  setUploadDay(activeDayNumber || 1);
+                  if (selectedCategory !== 'all') setUploadPhotoType(selectedCategory);
                   setShowUploadModal(true);
                 }}
               />
@@ -1297,6 +1491,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                 const isPhotoLocked = userRole === 'Cluster Admin' && activeDayConfig?.isLocked;
                 const isDeleteRequested = photo.deleteRequestStatus === 'PENDING';
                 const isDeleteRejected = photo.deleteRequestStatus === 'REJECTED';
+                const pType = getPhotoType(photo);
 
                 return (
                   <div
@@ -1318,9 +1513,22 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                       />
 
                       <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
-                        <div className="flex items-center gap-1">
-                          <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20 text-[10px]">
                             Day {photo.dayNumber}
+                          </Badge>
+                          <Badge
+                            variant="default"
+                            size="sm"
+                            className={`text-[10px] font-semibold text-white border-none ${
+                              pType === 'homework'
+                                ? 'bg-emerald-600'
+                                : pType === 'feedback'
+                                ? 'bg-purple-600'
+                                : 'bg-blue-600'
+                            }`}
+                          >
+                            {pType === 'homework' ? '📝 Homework' : pType === 'feedback' ? '💬 Feedback' : '📸 Session'}
                           </Badge>
                           {isDeleteRequested && (
                             <Badge variant="default" size="sm" className="bg-amber-600 text-white text-[10px]">
@@ -1346,9 +1554,20 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       </div>
-
                     </div>
 
+                    {/* Photo Card Footer Details */}
+                    <div className="p-2.5 bg-card border-t border-border flex flex-col gap-1 text-[11px]">
+                      <div className="flex items-center justify-between font-semibold text-foreground truncate">
+                        <span className="truncate" title={photo.caption || photo.originalFilename}>
+                          {photo.caption?.replace(/^\[(SESSION|HOMEWORK|FEEDBACK)\]\s*/i, '') || photo.originalFilename}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground text-[10px]">
+                        <span>{photo.date || (photo.uploadedAt ? photo.uploadedAt.slice(0, 10) : 'Date recorded')}</span>
+                        <span>{photo.uploadedBy || 'Cluster Mentor'}</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -1454,6 +1673,74 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
         <div className="space-y-6">
           {selectedCluster === 'all' ? (
             <>
+              {/* Super Admin Month & Date Filter Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border border-border bg-card shadow-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-muted-foreground px-1">Filter Month:</span>
+                  <div className="w-44">
+                    <Select
+                      value={selectedMonth}
+                      onValueChange={(val) => {
+                        setSelectedMonth(val);
+                        setSelectedDate('all');
+                      }}
+                    >
+                      <SelectTrigger className="h-8.5 text-xs">
+                        <Calendar className="mr-1.5 h-3.5 w-3.5 text-primary" />
+                        <SelectValue placeholder="All Months" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Months</SelectItem>
+                        {availableMonths.map((m) => {
+                          const [yyyy, mm] = m.split('-');
+                          const dateObj = new Date(Number(yyyy), Number(mm) - 1, 1);
+                          const label = dateObj.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+                          return (
+                            <SelectItem key={m} value={m}>
+                              {label}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {availableDates.length > 0 && (
+                    <div className="w-40">
+                      <Select
+                        value={selectedDate}
+                        onValueChange={(val) => setSelectedDate(val)}
+                      >
+                        <SelectTrigger className="h-8.5 text-xs">
+                          <SelectValue placeholder="All Visit Dates" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Visit Dates</SelectItem>
+                          {availableDates.map((d) => (
+                            <SelectItem key={d} value={d}>
+                              {d}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <span>Showing clusters for:</span>
+                  <Badge variant="outline" className="font-semibold text-foreground">
+                    {selectedMonth === 'all'
+                      ? 'All Time'
+                      : (() => {
+                          const [yyyy, mm] = selectedMonth.split('-');
+                          return new Date(Number(yyyy), Number(mm) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                        })()}
+                  </Badge>
+                </div>
+              </div>
+
+              {/* Cluster Filter Buttons */}
               <div className="flex flex-wrap items-center gap-2 p-2 rounded-lg border border-border bg-card shadow-xs">
                 <span className="text-xs font-bold text-muted-foreground px-2">Filter Cluster:</span>
                 <button
@@ -1480,8 +1767,28 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                   const summary = clusterSummaries.find(
                     (cs) => cs.clusterId.toLowerCase() === c.id.toLowerCase() || cs.clusterName.toLowerCase() === c.name.toLowerCase()
                   );
-                  const totalPhotos = summary?.totalPhotos || photos.filter((p) => p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()).length;
+                  
+                  // Filter cluster photos by selected month & date
+                  const clusterPhotos = photos.filter((p) => {
+                    const matchClust = p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase();
+                    if (!matchClust) return false;
+                    const pDate = p.date || (p.uploadedAt ? p.uploadedAt.slice(0, 10) : '');
+                    if (selectedMonth !== 'all' && !pDate.startsWith(selectedMonth)) return false;
+                    if (selectedDate !== 'all' && pDate !== selectedDate) return false;
+                    return true;
+                  });
+
+                  const totalPhotos = clusterPhotos.length;
                   const submittedCount = summary?.submittedDaysCount || 0;
+
+                  // Unique visit dates for this cluster in selected month
+                  const clusterVisitDates = Array.from(
+                    new Set(
+                      clusterPhotos
+                        .map((p) => p.date || (p.uploadedAt ? p.uploadedAt.slice(0, 10) : ''))
+                        .filter(Boolean)
+                    )
+                  ).sort();
 
                   return (
                     <button
@@ -1513,10 +1820,42 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                           <span>Submitted Days</span>
                           <span className="font-bold text-foreground">{submittedCount} / 8</span>
                         </div>
+
+                        {/* Visit Dates in Month */}
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="font-semibold text-foreground">Visits Recorded</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">
+                              {clusterVisitDates.length} date{clusterVisitDates.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                          {clusterVisitDates.length > 0 ? (
+                            <div className="flex flex-wrap gap-1">
+                              {clusterVisitDates.slice(0, 4).map((vd) => (
+                                <span
+                                  key={vd}
+                                  className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-foreground"
+                                >
+                                  <Calendar className="h-2.5 w-2.5 text-primary" />
+                                  {vd}
+                                </span>
+                              ))}
+                              {clusterVisitDates.length > 4 && (
+                                <span className="text-[10px] text-muted-foreground self-center">
+                                  +{clusterVisitDates.length - 4} more
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-[11px] italic text-muted-foreground">No photos recorded for this period</span>
+                          )}
+                        </div>
+
                         <div className="flex items-center justify-between">
                           <span>SPOC</span>
                           <span className="font-medium text-foreground">{c.spocName || 'Cluster Admin'}</span>
                         </div>
+
                         <div className="pt-2 border-t border-border flex items-center justify-between text-primary font-semibold">
                           <span>Open cluster days</span>
                           <ArrowLeft className="h-3.5 w-3.5 rotate-180" />
@@ -1688,6 +2027,73 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
       ) : (
         /* VIEW MODE 5: RAW MULTI-CLUSTER GALLERY FOR SUPER ADMIN */
         <div className="space-y-4">
+          {/* Category Filter Tabs for Gallery */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-2">
+            <div className="flex items-center gap-1 overflow-x-auto py-1">
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'all'
+                    ? 'bg-primary text-primary-foreground shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>All Photographs</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">{photos.length}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('session')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'session'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>📸 Session Activities</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => getPhotoType(p) === 'session').length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('homework')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'homework'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>📝 Homework Photos</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => getPhotoType(p) === 'homework').length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('feedback')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                  selectedCategory === 'feedback'
+                    ? 'bg-purple-600 text-white shadow-xs'
+                    : 'bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted'
+                }`}
+              >
+                <span>💬 Feedback Photos</span>
+                <span className="ml-1 rounded-full bg-black/20 px-1.5 py-0.2 text-[10px]">
+                  {photos.filter((p) => getPhotoType(p) === 'feedback').length}
+                </span>
+              </button>
+            </div>
+
+            <div className="text-xs text-muted-foreground">
+              Showing <span className="font-semibold text-foreground">{filteredPhotos.length}</span> photos
+            </div>
+          </div>
+
           {/* Filter Bar */}
           <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card p-3 shadow-xs">
             <div className="relative min-w-[200px] flex-1">
@@ -1700,7 +2106,58 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               />
             </div>
 
-            <div className="w-44">
+            {/* Month Filter */}
+            <div className="w-36">
+              <Select
+                value={selectedMonth}
+                onValueChange={(val) => {
+                  setSelectedMonth(val);
+                  setSelectedDate('all');
+                }}
+              >
+                <SelectTrigger className="h-9 text-xs">
+                  <Calendar className="mr-1.5 h-3.5 w-3.5 text-muted-foreground" />
+                  <SelectValue placeholder="All Months" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Months</SelectItem>
+                  {availableMonths.map((m) => {
+                    const [yyyy, mm] = m.split('-');
+                    const dateObj = new Date(Number(yyyy), Number(mm) - 1, 1);
+                    const label = dateObj.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+                    return (
+                      <SelectItem key={m} value={m}>
+                        {label}
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Visit Date Filter */}
+            {availableDates.length > 0 && (
+              <div className="w-36">
+                <Select
+                  value={selectedDate}
+                  onValueChange={(val) => setSelectedDate(val)}
+                >
+                  <SelectTrigger className="h-9 text-xs">
+                    <SelectValue placeholder="All Visit Dates" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Visit Dates</SelectItem>
+                    {availableDates.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            <div className="w-40">
               <Select
                 value={selectedCluster}
                 onValueChange={(val) => setSelectedCluster(val)}
@@ -1719,7 +2176,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               </Select>
             </div>
 
-            <div className="w-44">
+            <div className="w-40">
               <Select
                 value={selectedPanchayat}
                 onValueChange={(val) => {
@@ -1741,7 +2198,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
               </Select>
             </div>
 
-            <div className="w-44">
+            <div className="w-40">
               <Select
                 value={selectedVillage}
                 onValueChange={(val) => setSelectedVillage(val)}
@@ -1793,6 +2250,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
               {filteredPhotos.map((photo) => {
                 const isSelected = selectedPhotoIds.includes(photo.id);
+                const pType = getPhotoType(photo);
                 return (
                   <div
                     key={photo.id}
@@ -1813,9 +2271,25 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                       />
 
                       <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
-                        <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
-                          Day {photo.dayNumber}
-                        </Badge>
+                        <div className="flex flex-wrap items-center gap-1">
+                          <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20 text-[10px]">
+                            Day {photo.dayNumber}
+                          </Badge>
+                          <Badge
+                            variant="default"
+                            size="sm"
+                            className={`text-[10px] font-semibold text-white border-none ${
+                              pType === 'homework'
+                                ? 'bg-emerald-600'
+                                : pType === 'feedback'
+                                ? 'bg-purple-600'
+                                : 'bg-blue-600'
+                            }`}
+                          >
+                            {pType === 'homework' ? '📝 Homework' : pType === 'feedback' ? '💬 Feedback' : '📸 Session'}
+                          </Badge>
+                        </div>
+
                         <button
                           type="button"
                           onClick={(e) => handleToggleSelectPhoto(photo.id, e)}
@@ -1828,9 +2302,20 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                           <CheckCircle2 className="h-4 w-4" />
                         </button>
                       </div>
-
                     </div>
 
+                    {/* Photo Card Footer Details */}
+                    <div className="p-2.5 bg-card border-t border-border flex flex-col gap-1 text-[11px]">
+                      <div className="flex items-center justify-between font-semibold text-foreground truncate">
+                        <span className="truncate" title={photo.caption || photo.originalFilename}>
+                          {photo.caption?.replace(/^\[(SESSION|HOMEWORK|FEEDBACK)\]\s*/i, '') || photo.originalFilename}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between text-muted-foreground text-[10px]">
+                        <span>{photo.date || (photo.uploadedAt ? photo.uploadedAt.slice(0, 10) : 'Date recorded')}</span>
+                        <span className="truncate max-w-[110px]" title={photo.clusterName}>{photo.clusterName}</span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
@@ -1845,11 +2330,30 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           <div className="relative w-full max-w-5xl overflow-hidden rounded-lg border border-border bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-border p-3.5">
               <div>
-                <h3 className="text-sm font-bold text-foreground truncate max-w-lg">
-                  {previewPhoto.originalFilename || previewPhoto.caption || previewPhoto.sessionTitle}
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-foreground truncate max-w-lg">
+                    {previewPhoto.caption?.replace(/^\[(SESSION|HOMEWORK|FEEDBACK)\]\s*/i, '') || previewPhoto.originalFilename || previewPhoto.sessionTitle}
+                  </h3>
+                  <Badge
+                    variant="default"
+                    size="sm"
+                    className={`text-[10px] font-semibold text-white border-none ${
+                      getPhotoType(previewPhoto) === 'homework'
+                        ? 'bg-emerald-600'
+                        : getPhotoType(previewPhoto) === 'feedback'
+                        ? 'bg-purple-600'
+                        : 'bg-blue-600'
+                    }`}
+                  >
+                    {getPhotoType(previewPhoto) === 'homework'
+                      ? '📝 Homework'
+                      : getPhotoType(previewPhoto) === 'feedback'
+                      ? '💬 Feedback'
+                      : '📸 Session'}
+                  </Badge>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Day {previewPhoto.dayNumber} &middot; {previewPhoto.villageName || previewPhoto.panchayatName} &middot; {previewPhoto.clusterName}
+                  Day {previewPhoto.dayNumber} &middot; {previewPhoto.villageName || previewPhoto.panchayatName} &middot; {previewPhoto.clusterName} &middot; {previewPhoto.date || 'Recorded'}
                 </p>
               </div>
               <button
@@ -2009,6 +2513,133 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                       Browse Files
                     </Button>
                   </div>
+                </div>
+
+                {/* Photo Category Selection: Session Activities, Homework Submissions, Feedback & Review */}
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Photograph Category *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setUploadPhotoType('session')}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-center transition ${
+                        uploadPhotoType === 'session'
+                          ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="text-base mb-1">📸</span>
+                      <span className="text-xs font-semibold">Session Photos</span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5 font-normal">Classroom activity</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setUploadPhotoType('homework')}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-center transition ${
+                        uploadPhotoType === 'homework'
+                          ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="text-base mb-1">📝</span>
+                      <span className="text-xs font-semibold">Homework</span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5 font-normal">Student work/tasks</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setUploadPhotoType('feedback')}
+                      className={`flex flex-col items-center justify-center p-2.5 rounded-lg border text-center transition ${
+                        uploadPhotoType === 'feedback'
+                          ? 'border-primary bg-primary/10 text-primary font-bold shadow-xs'
+                          : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/40'
+                      }`}
+                    >
+                      <span className="text-base mb-1">💬</span>
+                      <span className="text-xs font-semibold">Feedback</span>
+                      <span className="text-[10px] text-muted-foreground mt-0.5 font-normal">Reviews &amp; notes</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Day Selection (if not locked into a specific day) */}
+                {activeDayNumber === null && (
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Program Day *
+                    </label>
+                    <Select
+                      value={String(uploadDay)}
+                      onValueChange={(val) => setUploadDay(Number(val))}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Program Day" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[1, 2, 3, 4, 5, 6, 7, 8].map((dayNum) => (
+                          <SelectItem key={dayNum} value={String(dayNum)}>
+                            Day {dayNum} — {academicSetupMap[dayNum] || `Session Day ${dayNum}`}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {/* Date & Location */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Session Date *
+                    </label>
+                    <Input
+                      type="date"
+                      value={uploadDate}
+                      onChange={(e) => setUploadDate(e.target.value)}
+                      className="h-9 text-xs"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      Panchayat
+                    </label>
+                    <Select
+                      value={uploadPanchayat}
+                      onValueChange={(val) => {
+                        setUploadPanchayat(val);
+                        const p = panchayats.find((item) => item.id === val || item.name === val);
+                        setUploadVillage(p?.villages[0]?.name || '');
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-xs">
+                        <SelectValue placeholder="Select Panchayat" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {panchayats.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-foreground">
+                    Caption / Notes (Optional)
+                  </label>
+                  <Input
+                    value={uploadCaption}
+                    onChange={(e) => setUploadCaption(e.target.value)}
+                    placeholder="e.g. Science experiment demonstration or homework check"
+                    className="h-9 text-xs"
+                  />
                 </div>
 
                 {uploadError && (

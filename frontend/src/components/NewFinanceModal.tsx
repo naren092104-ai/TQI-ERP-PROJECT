@@ -68,9 +68,9 @@ interface NewFinanceModalProps {
 export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
   isOpen,
   onClose,
-  clusterName = 'Dharmapuri',
-  collegeName = 'K.S.Rangasamy college of Technology',
-  spocName = 'Narendhar',
+  clusterName = 'Cluster',
+  collegeName = 'Partner Institution',
+  spocName = 'Coordinator / SPOC',
   financerName = 'TQI Finance Team',
   initialDraft = null,
   onSubmitFinance,

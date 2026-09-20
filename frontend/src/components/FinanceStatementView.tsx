@@ -54,11 +54,11 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   entries = [],
   drafts = [],
   activeDraftId,
-  clusterName = 'Dharmapuri',
-  collegeName = 'K.S.Rangasamy college of Technology',
-  spocName = 'Narendhar',
+  clusterName = 'Cluster',
+  collegeName = 'Partner Institution',
+  spocName = 'Coordinator / SPOC',
   financerName = 'TQI Finance Team',
-  sessionDay = 'Day 2',
+  sessionDay = 'Day 1',
   date = '2026-08-20',
   onSaveDraft,
   onDeleteDraft,
@@ -1153,11 +1153,11 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       )}
 
       {/* TOP CONTROL BAR (Print Hidden) */}
-      <div className="bg-white p-4 rounded-md border border-[#c4c6d3]/70 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
+      <div className="bg-white dark:bg-gray-900 p-4 rounded-md border border-[#c4c6d3]/70 dark:border-gray-800 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
         <div className="flex flex-wrap items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-[13px] font-bold text-[#002869] hover:bg-[#dae2ff]/40 cursor-pointer bg-[#f4f3fb] px-3.5 py-2 rounded-md border border-[#c4c6d3]/60 transition-colors"
+            className="flex items-center gap-1.5 text-[13px] font-bold text-[#002869] dark:text-blue-300 hover:bg-[#dae2ff]/40 dark:hover:bg-blue-950/60 cursor-pointer bg-[#f4f3fb] dark:bg-gray-800 px-3.5 py-2 rounded-md border border-[#c4c6d3]/60 dark:border-gray-700 transition-colors"
           >
             <span className="material-symbols-outlined text-[18px]">arrow_back</span>
             Back to Finance
@@ -1165,12 +1165,12 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
           {/* Select Statement Session */}
           <div className="flex items-center gap-2">
-            <span className="text-[12px] font-bold text-[#434652]">Session Sheet:</span>
+            <span className="text-[12px] font-bold text-[#434652] dark:text-gray-300">Session Sheet:</span>
             <Select
               value={selectedViewKey}
               onValueChange={(val) => setSelectedViewKey(val)}
             >
-              <SelectTrigger id="finance-session-sheet-select" className="w-56 h-8 text-xs font-bold text-[#002869] border-[#c4c6d3] bg-[#faf8ff]">
+              <SelectTrigger id="finance-session-sheet-select" className="w-56 h-8 text-xs font-bold text-[#002869] dark:text-blue-200 border-[#c4c6d3] dark:border-gray-700 bg-[#faf8ff] dark:bg-gray-800">
                 <SelectValue placeholder="Select Session Sheet" />
               </SelectTrigger>
               <SelectContent>
@@ -1195,7 +1195,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           {/* Submit for Approval (SPOC / Volunteer workflow) */}
           <button
             onClick={handleSubmitStatement}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] text-white rounded-md text-[12.5px] font-bold hover:bg-[#137333]/90 shadow-xs transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] hover:bg-[#0f5c29] text-white rounded-md text-[12.5px] font-bold shadow-xs transition-all cursor-pointer"
             title="Submit this statement for cluster review and approval"
           >
             <span className="material-symbols-outlined text-[17px]">send</span>
@@ -1205,7 +1205,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           {/* View Statement Modal Trigger */}
           <button
             onClick={() => setShowFullStatementModal(true)}
-            className="flex items-center gap-1.5 px-3 py-2 bg-[#002869] text-white rounded-md text-[12px] font-bold hover:bg-[#002869]/90 shadow-xs transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#002869] hover:bg-[#001f52] dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
             title="Open clean preview statement with all attached bills"
           >
             <span className="material-symbols-outlined text-[17px]">visibility</span>
@@ -1219,7 +1219,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                 setActiveGalleryIndex(0);
                 setShowAllBillsModal(true);
               }}
-              className="flex items-center gap-1.5 px-3 py-2 bg-[#faf8ff] border border-[#002869]/30 text-[#002869] rounded-md text-[12px] font-bold hover:bg-[#dae2ff] transition-all cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-[#faf8ff] dark:bg-gray-800 border border-[#002869]/30 dark:border-blue-500/30 text-[#002869] dark:text-blue-300 rounded-md text-[12px] font-bold hover:bg-[#dae2ff] dark:hover:bg-gray-700 transition-all cursor-pointer"
               title="View all attached bill receipts in a gallery"
             >
               <span className="material-symbols-outlined text-[17px]">photo_library</span>
@@ -1228,10 +1228,10 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           )}
 
           {/* Export Options: Excel, Word, PDF */}
-          <div className="flex items-center gap-1 bg-[#f4f3fb] p-1 rounded-md border border-[#c4c6d3]">
+          <div className="flex items-center gap-1 bg-[#f4f3fb] dark:bg-gray-800 p-1 rounded-md border border-[#c4c6d3] dark:border-gray-700">
             <button
               onClick={handleExportExcel}
-              className="flex items-center gap-1 px-2.5 py-1 text-[#137333] hover:bg-white rounded text-[11.5px] font-bold transition-all cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 text-[#137333] dark:text-emerald-400 hover:bg-white dark:hover:bg-gray-700 rounded text-[11.5px] font-bold transition-all cursor-pointer"
               title="Download Excel Sheet (.xlsx)"
             >
               <span className="material-symbols-outlined text-[16px]">table_view</span>
@@ -1240,7 +1240,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
             <button
               onClick={handleExportWord}
-              className="flex items-center gap-1 px-2.5 py-1 text-[#002869] hover:bg-white rounded text-[11.5px] font-bold transition-all cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 text-[#002869] dark:text-blue-300 hover:bg-white dark:hover:bg-gray-700 rounded text-[11.5px] font-bold transition-all cursor-pointer"
               title="Download Microsoft Word Document (.doc)"
             >
               <span className="material-symbols-outlined text-[16px]">description</span>
@@ -1250,7 +1250,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             <button
               onClick={handleExportPDF}
               disabled={isGeneratingPdf}
-              className="flex items-center gap-1 px-2.5 py-1 text-[#592600] hover:bg-white rounded text-[11.5px] font-bold transition-all cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1 px-2.5 py-1 text-[#592600] dark:text-amber-400 hover:bg-white dark:hover:bg-gray-700 rounded text-[11.5px] font-bold transition-all cursor-pointer disabled:opacity-50"
               title="Export as Official TQI PDF Statement"
             >
               <span className="material-symbols-outlined text-[16px]">
@@ -1264,19 +1264,19 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
       {/* DRAFT NOTIFICATION BANNER */}
       {statementMeta.isDraft && (
-        <div className="bg-[#fff7f2] border border-[#ffdbc8] rounded-md p-3.5 flex items-center justify-between gap-3 text-[13px] print:hidden shadow-xs">
-          <div className="flex items-center gap-2.5 text-[#592600]">
-            <div className="w-8 h-8 rounded-md bg-[#ffdbc8] text-[#592600] flex items-center justify-center">
+        <div className="bg-[#fff7f2] dark:bg-amber-950/30 border border-[#ffdbc8] dark:border-amber-800/60 rounded-md p-3.5 flex items-center justify-between gap-3 text-[13px] print:hidden shadow-xs">
+          <div className="flex items-center gap-2.5 text-[#592600] dark:text-amber-200">
+            <div className="w-8 h-8 rounded-md bg-[#ffdbc8] dark:bg-amber-900/60 text-[#592600] dark:text-amber-200 flex items-center justify-center">
               <span className="material-symbols-outlined text-[20px]">description</span>
             </div>
             <div>
               <div className="font-bold flex items-center gap-2">
                 <span>Official TQI Finance Sheet</span>
-                <span className="bg-[#ffdbc8] text-[#592600] text-[10.5px] px-2 py-0.2 rounded font-extrabold">
+                <span className="bg-[#ffdbc8] dark:bg-amber-900/60 text-[#592600] dark:text-amber-200 text-[10.5px] px-2 py-0.2 rounded font-extrabold">
                   Status: {statementMeta.status}
                 </span>
               </div>
-              <p className="text-[11.5px] text-[#762900] mt-0.5">
+              <p className="text-[11.5px] text-[#762900] dark:text-amber-300 mt-0.5">
                 Cluster audit statement preview. Click receipt buttons below to inspect verified bills.
               </p>
             </div>
@@ -1287,35 +1287,35 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* ========================================================================= */}
       {/* OFFICIAL TQI FINANCE SHEET DOCUMENT (PRINTABLE & UNBOXED HEADER) */}
       {/* ========================================================================= */}
-      <div id="printable-tqi-statement-doc" className="bg-white rounded-md border border-[#c4c6d3]/80 shadow-sm p-6 sm:p-12 space-y-8 print:p-0 print:border-none print:shadow-none">
+      <div id="printable-tqi-statement-doc" className="bg-white dark:bg-gray-900 rounded-md border border-[#c4c6d3]/80 dark:border-gray-800 shadow-sm p-6 sm:p-12 space-y-8 print:p-0 print:border-none print:shadow-none print:bg-white print:text-black">
         
         {/* 1. TQI OFFICIAL LOGO & TITLE HEADER */}
-        <div className="flex flex-col items-center justify-center text-center space-y-2.5 pb-4 border-b border-[#dae2ff]">
+        <div className="flex flex-col items-center justify-center text-center space-y-2.5 pb-4 border-b border-[#dae2ff] dark:border-gray-800">
           {/* Authentic TQI Circular Trust Logo */}
           <div className="flex items-center justify-center">
             <TqiLogo size={92} className="mx-auto" />
           </div>
 
           <div className="space-y-1 pt-1">
-            <h1 className="text-[22px] sm:text-[26px] font-extrabold text-[#000000] tracking-tight">
+            <h1 className="text-[22px] sm:text-[26px] font-extrabold text-[#000000] dark:text-white tracking-tight">
               Talent Quest for India
             </h1>
-            <div className="text-[14px] sm:text-[15px] font-bold text-[#434652]">
+            <div className="text-[14px] sm:text-[15px] font-bold text-[#434652] dark:text-gray-300">
               Academic year 2026-2027
             </div>
-            <div className="text-[14px] sm:text-[15px] font-extrabold text-[#002869] uppercase tracking-wider">
+            <div className="text-[14px] sm:text-[15px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider">
               Finance report
             </div>
-            <div className="text-[13.5px] sm:text-[14.5px] font-bold text-[#592600]">
+            <div className="text-[13.5px] sm:text-[14.5px] font-bold text-[#592600] dark:text-amber-400">
               {statementMeta.clusterName} Cluster
             </div>
           </div>
         </div>
 
         {/* 2. UNBOXED CLEAN METADATA SECTION */}
-        <div className="bg-[#faf8ff] rounded-md p-5 sm:p-6 border border-[#dae2ff]/80 text-[13px]">
-          <div className="flex items-center justify-between mb-3 border-b border-[#dae2ff] pb-2">
-            <span className="text-[11px] font-extrabold text-[#002869] uppercase tracking-wider flex items-center gap-1.5">
+        <div className="bg-[#faf8ff] dark:bg-gray-800/60 rounded-md p-5 sm:p-6 border border-[#dae2ff]/80 dark:border-gray-700 text-[13px]">
+          <div className="flex items-center justify-between mb-3 border-b border-[#dae2ff] dark:border-gray-700 pb-2">
+            <span className="text-[11px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">info</span>
               Session &amp; Cluster Details
             </span>
@@ -1323,8 +1323,8 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               <span
                 className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full ${
                   statementMeta.status === 'Approved'
-                    ? 'bg-[#e6f4ea] text-[#137333]'
-                    : 'bg-[#ffdbc8] text-[#592600]'
+                    ? 'bg-[#e6f4ea] dark:bg-emerald-950/60 text-[#137333] dark:text-emerald-400'
+                    : 'bg-[#ffdbc8] dark:bg-amber-950/60 text-[#592600] dark:text-amber-300'
                 }`}
               >
                 Status: {statementMeta.status}
@@ -1336,28 +1336,28 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-3.5 gap-x-8">
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   COLLEGE:
                 </span>
-                <span className="font-bold text-[#000000] text-[13.5px]">
+                <span className="font-bold text-[#000000] dark:text-gray-100 text-[13.5px]">
                   {statementMeta.collegeName}
                 </span>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   CLUSTER:
                 </span>
-                <span className="font-bold text-[#002869] text-[13.5px]">
+                <span className="font-bold text-[#002869] dark:text-blue-300 text-[13.5px]">
                   {statementMeta.clusterName}
                 </span>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   SESSION:
                 </span>
-                <span className="font-semibold text-[#000000] text-[13px]">
+                <span className="font-semibold text-[#000000] dark:text-gray-100 text-[13px]">
                   {statementMeta.sessionName}
                 </span>
               </div>
@@ -1365,28 +1365,28 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
             <div className="space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   DATE:
                 </span>
-                <span className="font-semibold text-[#000000] text-[13px]">
+                <span className="font-semibold text-[#000000] dark:text-gray-100 text-[13px]">
                   {statementMeta.date}
                 </span>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   SPOC:
                 </span>
-                <span className="font-semibold text-[#000000] text-[13px]">
+                <span className="font-semibold text-[#000000] dark:text-gray-100 text-[13px]">
                   {statementMeta.spocName}
                 </span>
               </div>
 
               <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] uppercase tracking-wide w-24 shrink-0">
+                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
                   FINANCER:
                 </span>
-                <span className="font-semibold text-[#000000] text-[13px]">
+                <span className="font-semibold text-[#000000] dark:text-gray-100 text-[13px]">
                   {statementMeta.financerName}
                 </span>
               </div>
@@ -1397,9 +1397,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
         {/* 3. EXPENSE DETAILS SECTION */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <h2 className="text-[14px] font-bold text-[#000000] uppercase tracking-wider flex items-center gap-2">
+            <h2 className="text-[14px] font-bold text-[#000000] dark:text-white uppercase tracking-wider flex items-center gap-2">
               <span>Expense Details</span>
-              <span className="text-[11px] font-semibold text-[#747783] lowercase font-normal">
+              <span className="text-[11px] font-semibold text-[#747783] dark:text-gray-400 lowercase font-normal">
                 ({tableItems.length} items logged)
               </span>
             </h2>
@@ -1410,33 +1410,33 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             {tableItems.map((item) => (
               <div
                 key={item.id}
-                className="p-3.5 rounded-xl border border-[#c4c6d3] bg-[#faf8ff]/50 space-y-2"
+                className="p-3.5 rounded-xl border border-[#c4c6d3] dark:border-gray-700 bg-[#faf8ff]/50 dark:bg-gray-800/50 space-y-2"
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-mono text-[#747783]">#{item.sNo}</span>
-                    <span className="inline-block px-2 py-0.5 rounded text-[10.5px] font-bold bg-[#dae2ff] text-[#002869]">
+                    <span className="text-[11px] font-mono text-[#747783] dark:text-gray-400">#{item.sNo}</span>
+                    <span className="inline-block px-2 py-0.5 rounded text-[10.5px] font-bold bg-[#dae2ff] dark:bg-blue-950/70 text-[#002869] dark:text-blue-300">
                       {item.category}
                     </span>
                   </div>
-                  <span className="font-mono text-xs font-bold text-[#002869]">
+                  <span className="font-mono text-xs font-bold text-[#002869] dark:text-blue-300">
                     ₹{item.total.toLocaleString()}
                   </span>
                 </div>
 
                 <div>
-                  <p className="text-xs font-bold text-[#1a1b21]">
+                  <p className="text-xs font-bold text-[#1a1b21] dark:text-gray-100">
                     {item.description}
                   </p>
                   {item.count && item.countAmount && (
-                    <p className="text-[11px] text-[#555555] mt-0.5 font-mono">
+                    <p className="text-[11px] text-[#555555] dark:text-gray-400 mt-0.5 font-mono">
                       Formula: {item.count} × {item.countAmount}
                     </p>
                   )}
                 </div>
 
-                <div className="flex items-center justify-between pt-1.5 border-t border-[#c4c6d3]/60 text-[11px]">
-                  <span className="text-[#555555] truncate max-w-[170px]">
+                <div className="flex items-center justify-between pt-1.5 border-t border-[#c4c6d3]/60 dark:border-gray-700 text-[11px]">
+                  <span className="text-[#555555] dark:text-gray-400 truncate max-w-[170px]">
                     {item.remarks || 'Expense item'}
                   </span>
 
@@ -1455,85 +1455,85 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                           itemId: item.id,
                         });
                       }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6f4ea] text-[#137333] border border-[#137333]/30 rounded text-[11px] font-bold cursor-pointer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6f4ea] dark:bg-emerald-950/60 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded text-[11px] font-bold cursor-pointer"
                     >
                       <span className="material-symbols-outlined text-[14px]">receipt_long</span>
                       <span>View Bill</span>
                     </button>
                   ) : (
-                    <span className="text-[#747783] text-[10.5px]">No receipt</span>
+                    <span className="text-[#747783] dark:text-gray-500 text-[10.5px]">No receipt</span>
                   )}
                 </div>
               </div>
             ))}
 
             {/* Mobile Category Totals Summary */}
-            <div className="p-3.5 rounded-xl border border-[#dae2ff] bg-[#faf8ff] space-y-1.5 text-xs">
-              <div className="text-[11px] font-bold text-[#002869] uppercase tracking-wider mb-2">Category Subtotals</div>
+            <div className="p-3.5 rounded-xl border border-[#dae2ff] dark:border-gray-700 bg-[#faf8ff] dark:bg-gray-800/80 space-y-1.5 text-xs">
+              <div className="text-[11px] font-bold text-[#002869] dark:text-blue-300 uppercase tracking-wider mb-2">Category Subtotals</div>
               {travelTotal > 0 && (
-                <div className="flex justify-between text-[#434652]">
+                <div className="flex justify-between text-[#434652] dark:text-gray-300">
                   <span>Travel Total:</span>
-                  <span className="font-mono font-bold text-[#002869]">₹{travelTotal.toLocaleString()}</span>
+                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{travelTotal.toLocaleString()}</span>
                 </div>
               )}
               {foodTotal > 0 && (
-                <div className="flex justify-between text-[#434652]">
+                <div className="flex justify-between text-[#434652] dark:text-gray-300">
                   <span>Food Total:</span>
-                  <span className="font-mono font-bold text-[#002869]">₹{foodTotal.toLocaleString()}</span>
+                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{foodTotal.toLocaleString()}</span>
                 </div>
               )}
               {stationeryTotal > 0 && (
-                <div className="flex justify-between text-[#434652]">
+                <div className="flex justify-between text-[#434652] dark:text-gray-300">
                   <span>Stationery Total:</span>
-                  <span className="font-mono font-bold text-[#002869]">₹{stationeryTotal.toLocaleString()}</span>
+                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{stationeryTotal.toLocaleString()}</span>
                 </div>
               )}
               {otherTotal > 0 && (
-                <div className="flex justify-between text-[#434652]">
+                <div className="flex justify-between text-[#434652] dark:text-gray-300">
                   <span>Other Total:</span>
-                  <span className="font-mono font-bold text-[#002869]">₹{otherTotal.toLocaleString()}</span>
+                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{otherTotal.toLocaleString()}</span>
                 </div>
               )}
-              <div className="flex justify-between pt-2 border-t border-[#dae2ff] font-bold text-sm text-[#001947]">
+              <div className="flex justify-between pt-2 border-t border-[#dae2ff] dark:border-gray-700 font-bold text-sm text-[#001947] dark:text-white">
                 <span>Grand Total:</span>
-                <span className="font-mono text-base text-[#002869]">₹{grandTotal.toLocaleString()}</span>
+                <span className="font-mono text-base text-[#002869] dark:text-blue-400">₹{grandTotal.toLocaleString()}</span>
               </div>
             </div>
           </div>
 
           {/* Main Expense Table (Desktop View) */}
-          <div className="hidden md:block border border-[#c4c6d3] overflow-x-auto rounded-md print:block">
+          <div className="hidden md:block border border-[#c4c6d3] dark:border-gray-700 overflow-x-auto rounded-md print:block">
             <table className="w-full text-left text-[12px] border-collapse min-w-[700px]">
-              <thead className="bg-[#faf8ff] border-b border-[#c4c6d3] font-bold text-[#000000]">
+              <thead className="bg-[#faf8ff] dark:bg-gray-800 border-b border-[#c4c6d3] dark:border-gray-700 font-bold text-[#000000] dark:text-gray-100">
                 <tr>
-                  <th className="p-2.5 border-r border-[#c4c6d3] w-12 text-center">S.No</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] w-24">Category</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3]">Description</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] text-center w-16">Count</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] text-center w-24">Count×Amount</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] text-right w-24">Total</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] text-center w-24">Bills</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-12 text-center">S.No</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-24">Category</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">Description</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-16">Count</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Count×Amount</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right w-24">Total</th>
+                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Bills</th>
                   <th className="p-2.5">Remarks</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[#c4c6d3]">
+              <tbody className="divide-y divide-[#c4c6d3] dark:divide-gray-700">
                 {tableItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-[#faf8ff]/80 transition-colors group">
-                    <td className="p-2.5 border-r border-[#c4c6d3] font-mono text-center">{item.sNo}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3]">
-                      <span className="font-semibold text-[#002869]">{item.category}</span>
+                  <tr key={item.id} className="hover:bg-[#faf8ff]/80 dark:hover:bg-gray-800/40 transition-colors group text-[#1a1b21] dark:text-gray-200">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-mono text-center text-gray-500 dark:text-gray-400">{item.sNo}</td>
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">
+                      <span className="font-semibold text-[#002869] dark:text-blue-300">{item.category}</span>
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] font-medium text-[#1a1b21]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-medium text-[#1a1b21] dark:text-gray-100">
                       {item.description}
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-center font-mono">{item.count}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-center font-mono">{item.countAmount}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono font-bold text-[#002869]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.count}</td>
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.countAmount}</td>
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
                       ₹{item.total.toLocaleString()}
                     </td>
                     
                     {/* BILLS COLUMN: Clickable Viewer & Thumbnail */}
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-center">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center">
                       {item.billUrl ? (
                         <button
                           onClick={() => {
@@ -1548,79 +1548,79 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                               itemId: item.id,
                             });
                           }}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] hover:bg-[#ceead6] text-[#137333] border border-[#137333]/30 rounded-md text-[11.5px] font-bold transition-all cursor-pointer shadow-2xs"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] hover:bg-[#ceead6] dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded-md text-[11.5px] font-bold transition-all cursor-pointer shadow-2xs"
                           title="Click to view full receipt / bill"
                         >
                           <span className="material-symbols-outlined text-[15px]">receipt_long</span>
                           <span>View</span>
                         </button>
                       ) : (
-                        <span className="text-[#747783] text-[11px] font-medium">—</span>
+                        <span className="text-[#747783] dark:text-gray-500 text-[11px] font-medium">—</span>
                       )}
                     </td>
 
-                    <td className="p-2.5 text-[#555555] text-[11.5px]">{item.remarks}</td>
+                    <td className="p-2.5 text-[#555555] dark:text-gray-400 text-[11.5px]">{item.remarks}</td>
                   </tr>
                 ))}
 
                 {/* Subtotals */}
                 {travelTotal > 0 && (
-                  <tr className="bg-[#faf8ff] font-medium text-[12px]">
-                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] text-right font-bold text-[#434652]">
+                  <tr className="bg-[#faf8ff] dark:bg-gray-800/70 font-medium text-[12px]">
+                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-bold text-[#434652] dark:text-gray-300">
                       Travel Total
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono font-bold text-[#002869]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
                       ₹{travelTotal.toLocaleString()}
                     </td>
-                    <td colSpan={2} className="p-2.5 bg-[#faf8ff]"></td>
+                    <td colSpan={2} className="p-2.5 bg-[#faf8ff] dark:bg-gray-800/70"></td>
                   </tr>
                 )}
 
                 {foodTotal > 0 && (
-                  <tr className="bg-[#faf8ff] font-medium text-[12px]">
-                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] text-right font-bold text-[#434652]">
+                  <tr className="bg-[#faf8ff] dark:bg-gray-800/70 font-medium text-[12px]">
+                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-bold text-[#434652] dark:text-gray-300">
                       Food Total
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono font-bold text-[#002869]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
                       ₹{foodTotal.toLocaleString()}
                     </td>
-                    <td colSpan={2} className="p-2.5 bg-[#faf8ff]"></td>
+                    <td colSpan={2} className="p-2.5 bg-[#faf8ff] dark:bg-gray-800/70"></td>
                   </tr>
                 )}
 
                 {stationeryTotal > 0 && (
-                  <tr className="bg-[#faf8ff] font-medium text-[12px]">
-                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] text-right font-bold text-[#434652]">
+                  <tr className="bg-[#faf8ff] dark:bg-gray-800/70 font-medium text-[12px]">
+                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-bold text-[#434652] dark:text-gray-300">
                       Stationery / Materials Total
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono font-bold text-[#002869]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
                       ₹{stationeryTotal.toLocaleString()}
                     </td>
-                    <td colSpan={2} className="p-2.5 bg-[#faf8ff]"></td>
+                    <td colSpan={2} className="p-2.5 bg-[#faf8ff] dark:bg-gray-800/70"></td>
                   </tr>
                 )}
 
                 {otherTotal > 0 && (
-                  <tr className="bg-[#faf8ff] font-medium text-[12px]">
-                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] text-right font-bold text-[#434652]">
+                  <tr className="bg-[#faf8ff] dark:bg-gray-800/70 font-medium text-[12px]">
+                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-bold text-[#434652] dark:text-gray-300">
                       Other Expenses Total
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono font-bold text-[#002869]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
                       ₹{otherTotal.toLocaleString()}
                     </td>
-                    <td colSpan={2} className="p-2.5 bg-[#faf8ff]"></td>
+                    <td colSpan={2} className="p-2.5 bg-[#faf8ff] dark:bg-gray-800/70"></td>
                   </tr>
                 )}
 
                 {/* Grand Total Strip */}
-                <tr className="bg-[#dae2ff] font-extrabold text-[#001947]">
-                  <td colSpan={5} className="p-3 border-r border-[#c4c6d3] text-right text-[13.5px] tracking-wide">
+                <tr className="bg-[#dae2ff] dark:bg-blue-950/60 font-extrabold text-[#001947] dark:text-blue-200">
+                  <td colSpan={5} className="p-3 border-r border-[#c4c6d3] dark:border-gray-700 text-right text-[13.5px] tracking-wide">
                     Grand Total
                   </td>
-                  <td className="p-3 border-r border-[#c4c6d3] text-right font-mono text-[15px]">
+                  <td className="p-3 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono text-[15px] font-bold text-[#001947] dark:text-blue-300">
                     ₹{grandTotal.toLocaleString()}
                   </td>
-                  <td colSpan={2} className="p-3 bg-[#dae2ff]"></td>
+                  <td colSpan={2} className="p-3 bg-[#dae2ff] dark:bg-blue-950/60"></td>
                 </tr>
               </tbody>
             </table>
@@ -1630,22 +1630,22 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
         {/* 4. FOOTER SIGN-OFF SECTION */}
         <div className="pt-8 sm:pt-14 grid grid-cols-2 gap-12 text-center text-[12px]">
           <div>
-            <div className="border-t border-[#000000] pt-2 font-bold text-[#000000]">
+            <div className="border-t border-[#000000] dark:border-gray-600 pt-2 font-bold text-[#000000] dark:text-gray-100">
               Coordinator
             </div>
-            <div className="text-[11px] text-[#747783] mt-0.5">SPOC: {statementMeta.spocName}</div>
+            <div className="text-[11px] text-[#747783] dark:text-gray-400 mt-0.5">SPOC: {statementMeta.spocName}</div>
           </div>
 
           <div>
-            <div className="border-t border-[#000000] pt-2 font-bold text-[#000000]">
+            <div className="border-t border-[#000000] dark:border-gray-600 pt-2 font-bold text-[#000000] dark:text-gray-100">
               Cluster Admin
             </div>
-            <div className="text-[11px] text-[#747783] mt-0.5">{statementMeta.financerName}</div>
+            <div className="text-[11px] text-[#747783] dark:text-gray-400 mt-0.5">{statementMeta.financerName}</div>
           </div>
         </div>
 
         {/* Audit Document Footer Note */}
-        <div className="text-center pt-2 text-[11px] text-[#747783] border-t border-[#dae2ff]/60">
+        <div className="text-center pt-2 text-[11px] text-[#747783] dark:text-gray-400 border-t border-[#dae2ff]/60 dark:border-gray-800">
           Talent Quest for India — Official Finance Statement &amp; Audit Document
         </div>
       </div>
@@ -2348,6 +2348,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* ========================================================================= */}
       {/* VIEW STATEMENT MODAL (POPUP VIEW STATEMENT) */}
       {/* ========================================================================= */}
+      {/* ========================================================================= */}
+      {/* VIEW STATEMENT MODAL (POPUP VIEW STATEMENT) */}
+      {/* ========================================================================= */}
       {showFullStatementModal && (
         <div
           onClick={() => setShowFullStatementModal(false)}
@@ -2355,9 +2358,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="bg-white rounded-md max-w-4xl w-full overflow-hidden shadow-sm flex flex-col max-h-[92vh] cursor-default border border-[#c4c6d3]"
+            className="bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 rounded-md max-w-4xl w-full overflow-hidden shadow-sm flex flex-col max-h-[92vh] cursor-default border border-[#c4c6d3] dark:border-gray-800"
           >
-            <div className="p-4 bg-[#002869] text-white flex items-center justify-between">
+            <div className="p-4 bg-[#002869] dark:bg-blue-950 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="material-symbols-outlined text-[20px]">receipt_long</span>
                 <h3 className="text-[16px] font-bold">Official TQI Finance Statement Preview</h3>
@@ -2365,14 +2368,14 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleExportExcel}
-                  className="px-2.5 py-1 bg-white20 hover:bg-white30 text-white rounded text-[11.5px] font-bold flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-[11.5px] font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[15px]">table_view</span>
                   Excel
                 </button>
                 <button
                   onClick={handleExportWord}
-                  className="px-2.5 py-1 bg-white20 hover:bg-white30 text-white rounded text-[11.5px] font-bold flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 bg-white/20 hover:bg-white/30 text-white rounded text-[11.5px] font-bold flex items-center gap-1 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[15px]">description</span>
                   Word
@@ -2399,91 +2402,91 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
             <div className="p-6 overflow-y-auto space-y-6">
               {/* Header */}
-              <div className="text-center space-y-1.5 pb-2 border-b border-[#dae2ff]">
+              <div className="text-center space-y-1.5 pb-2 border-b border-[#dae2ff] dark:border-gray-800">
                 <div className="flex items-center justify-center">
                   <TqiLogo size={75} className="mx-auto" />
                 </div>
-                <h2 className="text-[20px] font-extrabold text-[#000000] pt-1">
+                <h2 className="text-[20px] font-extrabold text-[#000000] dark:text-white pt-1">
                   Talent Quest for India
                 </h2>
-                <div className="text-[13px] font-bold text-[#434652]">
+                <div className="text-[13px] font-bold text-[#434652] dark:text-gray-300">
                   Academic year 2026-2027
                 </div>
-                <div className="text-[13px] font-extrabold text-[#002869] uppercase tracking-wider">
+                <div className="text-[13px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider">
                   Finance report
                 </div>
-                <div className="text-[12.5px] font-bold text-[#592600]">
+                <div className="text-[12.5px] font-bold text-[#592600] dark:text-amber-400">
                   {statementMeta.clusterName} Cluster
                 </div>
               </div>
 
               {/* Unboxed Metadata in Modal */}
-              <div className="bg-[#faf8ff] p-4 rounded-md border border-[#c4c6d3]/60 text-[12.5px] grid grid-cols-2 gap-3">
+              <div className="bg-[#faf8ff] dark:bg-gray-800/60 p-4 rounded-md border border-[#c4c6d3]/60 dark:border-gray-700 text-[12.5px] grid grid-cols-2 gap-3">
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">COLLEGE</span>
-                  <span className="font-bold text-[#000000]">{statementMeta.collegeName}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">COLLEGE</span>
+                  <span className="font-bold text-[#000000] dark:text-gray-100">{statementMeta.collegeName}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">DATE</span>
-                  <span className="font-semibold text-[#000000]">{statementMeta.date}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">DATE</span>
+                  <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.date}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">CLUSTER</span>
-                  <span className="font-bold text-[#002869]">{statementMeta.clusterName}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">CLUSTER</span>
+                  <span className="font-bold text-[#002869] dark:text-blue-300">{statementMeta.clusterName}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">SPOC</span>
-                  <span className="font-semibold text-[#000000]">{statementMeta.spocName}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">SPOC</span>
+                  <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.spocName}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">SESSION</span>
-                  <span className="font-semibold text-[#000000]">{statementMeta.sessionName} ({statementMeta.sessionDay})</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">SESSION</span>
+                  <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.sessionName} ({statementMeta.sessionDay})</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] font-bold uppercase text-[10.5px] block">FINANCER</span>
-                  <span className="font-semibold text-[#000000]">{statementMeta.financerName}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">FINANCER</span>
+                  <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.financerName}</span>
                 </div>
               </div>
 
               {/* Table */}
-              <table className="w-full text-left text-[12px] border-collapse border border-[#c4c6d3]">
-                <thead className="bg-[#faf8ff] font-bold text-[#000000] border-b border-[#c4c6d3]">
+              <table className="w-full text-left text-[12px] border-collapse border border-[#c4c6d3] dark:border-gray-700">
+                <thead className="bg-[#faf8ff] dark:bg-gray-800 font-bold text-[#000000] dark:text-gray-100 border-b border-[#c4c6d3] dark:border-gray-700">
                   <tr>
-                    <th className="p-2 border-r border-[#c4c6d3] w-10 text-center">S.No</th>
-                    <th className="p-2 border-r border-[#c4c6d3] w-20">Category</th>
-                    <th className="p-2 border-r border-[#c4c6d3]">Description</th>
-                    <th className="p-2 border-r border-[#c4c6d3] text-center w-14">Count</th>
-                    <th className="p-2 border-r border-[#c4c6d3] text-center w-20">Count×Amt</th>
-                    <th className="p-2 border-r border-[#c4c6d3] text-right w-20">Total</th>
-                    <th className="p-2 border-r border-[#c4c6d3] text-center w-16">Bills</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 w-10 text-center">S.No</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 w-20">Category</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700">Description</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-14">Count</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-20">Count×Amt</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-right w-20">Total</th>
+                    <th className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-16">Bills</th>
                     <th className="p-2">Remarks</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[#c4c6d3]">
+                <tbody className="divide-y divide-[#c4c6d3] dark:divide-gray-700">
                   {tableItems.map((item) => (
-                    <tr key={item.id}>
-                      <td className="p-2 border-r border-[#c4c6d3] text-center">{item.sNo}</td>
-                      <td className="p-2 border-r border-[#c4c6d3] font-bold text-[#002869]">{item.category}</td>
-                      <td className="p-2 border-r border-[#c4c6d3]">{item.description}</td>
-                      <td className="p-2 border-r border-[#c4c6d3] text-center">{item.count}</td>
-                      <td className="p-2 border-r border-[#c4c6d3] text-center">{item.countAmount}</td>
-                      <td className="p-2 border-r border-[#c4c6d3] text-right font-bold text-[#002869]">
+                    <tr key={item.id} className="text-[#1a1b21] dark:text-gray-200">
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center text-gray-500 dark:text-gray-400">{item.sNo}</td>
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 font-bold text-[#002869] dark:text-blue-300">{item.category}</td>
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700">{item.description}</td>
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center">{item.count}</td>
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center">{item.countAmount}</td>
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-bold text-[#002869] dark:text-blue-300">
                         ₹{item.total.toLocaleString()}
                       </td>
-                      <td className="p-2 border-r border-[#c4c6d3] text-center">
-                        {item.billUrl ? <span className="text-[#137333] font-bold text-[11px]">Attached</span> : '—'}
+                      <td className="p-2 border-r border-[#c4c6d3] dark:border-gray-700 text-center">
+                        {item.billUrl ? <span className="text-[#137333] dark:text-emerald-400 font-bold text-[11px]">Attached</span> : '—'}
                       </td>
-                      <td className="p-2 text-[#747783]">{item.remarks}</td>
+                      <td className="p-2 text-[#747783] dark:text-gray-400">{item.remarks}</td>
                     </tr>
                   ))}
-                  <tr className="bg-[#dae2ff] font-extrabold text-[#001947]">
-                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] text-right text-[13px]">
+                  <tr className="bg-[#dae2ff] dark:bg-blue-950/70 font-extrabold text-[#001947] dark:text-blue-200">
+                    <td colSpan={5} className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right text-[13px]">
                       Grand Total
                     </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] text-right font-mono text-[14px]">
+                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono text-[14px]">
                       ₹{grandTotal.toLocaleString()}
                     </td>
-                    <td colSpan={2} className="p-2.5 bg-[#dae2ff]"></td>
+                    <td colSpan={2} className="p-2.5 bg-[#dae2ff] dark:bg-blue-950/70"></td>
                   </tr>
                 </tbody>
               </table>
@@ -2491,20 +2494,20 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               {/* Signatures */}
               <div className="pt-8 grid grid-cols-2 gap-8 text-center text-[12px]">
                 <div>
-                  <div className="border-t border-[#000000] pt-1.5 font-bold">Coordinator</div>
-                  <div className="text-[11px] text-[#747783]">{statementMeta.spocName}</div>
+                  <div className="border-t border-[#000000] dark:border-gray-600 pt-1.5 font-bold text-[#000000] dark:text-gray-100">Coordinator</div>
+                  <div className="text-[11px] text-[#747783] dark:text-gray-400">{statementMeta.spocName}</div>
                 </div>
                 <div>
-                  <div className="border-t border-[#000000] pt-1.5 font-bold">Cluster Admin</div>
-                  <div className="text-[11px] text-[#747783]">{statementMeta.financerName}</div>
+                  <div className="border-t border-[#000000] dark:border-gray-600 pt-1.5 font-bold text-[#000000] dark:text-gray-100">Cluster Admin</div>
+                  <div className="text-[11px] text-[#747783] dark:text-gray-400">{statementMeta.financerName}</div>
                 </div>
               </div>
             </div>
 
-            <div className="p-4 bg-[#faf8ff] border-t border-[#c4c6d3] flex justify-end">
+            <div className="p-4 bg-[#faf8ff] dark:bg-gray-800 border-t border-[#c4c6d3] dark:border-gray-700 flex justify-end">
               <button
                 onClick={() => setShowFullStatementModal(false)}
-                className="px-5 py-2 bg-[#002869] text-white rounded-md text-[12.5px] font-bold cursor-pointer"
+                className="px-5 py-2 bg-[#002869] dark:bg-blue-600 hover:bg-[#002869]/90 text-white rounded-md text-[12.5px] font-bold cursor-pointer"
               >
                 Close Statement
               </button>

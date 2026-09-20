@@ -374,42 +374,42 @@
 }
 
 .dark {
-  --background: #0A0D14;
-  --foreground: #F6F7F9;
-  --card: #14181F;
-  --card-foreground: #F6F7F9;
-  --surface: #0F131B;
-  --surface-white: #14181F;
-  --surface-hover: #1A1F2A;
-  --surface-tint: #14182A;
-  --surface-tint-strong: #1A1F38;
+  --background: #0B1120;
+  --foreground: #F8FAFC;
+  --card: #151F32;
+  --card-foreground: #F8FAFC;
+  --surface: #0B1120;
+  --surface-white: #151F32;
+  --surface-hover: #1C2940;
+  --surface-tint: #151F32;
+  --surface-tint-strong: #1C2940;
 
-  --text: #F6F7F9;
-  --text-secondary: #C8CCD3;
-  --text-muted: #8E94A0;
-  --text-placeholder: #5F6573;
+  --text: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #94A3B8;
+  --text-placeholder: #64748B;
   --text-on-brand: #ffffff;
 
-  --border: #1F2530;
-  --border-strong: #2C313C;
-  --border-subtle: #1A1F2A;
+  --border: #263449;
+  --border-strong: #263449;
+  --border-subtle: #1C2940;
 
-  --primary: #5B5BEF;
+  --primary: #4F5BFF;
   --primary-foreground: #ffffff;
-  --brand: #5B5BEF;
-  --brand-dark: #757BB6;
-  --brand-light: #14182A;
-  --brand-xlight: #1A1F38;
-  --brand-ring: color-mix(in srgb, #5B5BEF 18%, transparent);
+  --brand: #4F5BFF;
+  --brand-dark: #3E49DE;
+  --brand-light: #151F32;
+  --brand-xlight: #1C2940;
+  --brand-ring: color-mix(in srgb, #4F5BFF 20%, transparent);
   --brand-teal: #22B8B8;
   --brand-teal-light: #002B2B;
-  --brand-orange: #FF7A33;
+  --brand-orange: #FF6B2C;
   --brand-orange-light: #3A1A08;
 
-  --success: #4CAF2A;
-  --success-bg: #0F2A0A;
-  --success-border: #17510A;
-  --success-fg: #B0DF6A;
+  --success: #35B94A;
+  --success-bg: #0F2A14;
+  --success-border: #1E4E24;
+  --success-fg: #6EE787;
   --warning: #FDB022;
   --warning-fg: #FEC84B;
   --warning-bg: #2A1A05;
@@ -417,15 +417,15 @@
   --error: #F97066;
   --error-bg: #2B0D0A;
   --error-border: #99291E;
-  --info: #5B5BEF;
-  --info-bg: #14182A;
-  --info-border: #1A1F38;
+  --info: #4F5BFF;
+  --info-bg: #151F32;
+  --info-border: #263449;
   --teal-bg: #002B2B;
   --teal-border: #004F4F;
-  --draft-bg: #1A1F2A;
-  --draft-text: #8E94A0;
-  --muted: #1A1F2A;
-  --muted-foreground: #8E94A0;
+  --draft-bg: #151F32;
+  --draft-text: #94A3B8;
+  --muted: #151F32;
+  --muted-foreground: #94A3B8;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
@@ -457,7 +457,7 @@
   .dark *,
   .dark ::after,
   .dark ::before {
-    border-color: var(--color-border, #1F2530);
+    border-color: var(--color-border, #263449);
   }
   button:not(:disabled),
   [role="button"]:not(:disabled) {
