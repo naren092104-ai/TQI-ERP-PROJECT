@@ -492,18 +492,29 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    if (rows[0].status !== 'Active') {
+    const user = rows[0];
+    const rawStatus = user.status;
+    const userStatus = String(rawStatus || '').trim().toLowerCase();
+
+    console.log(`[AUTH LOGIN] Attempt for: ${email} | Found ID: ${user.id} | Status: "${rawStatus}" -> parsed: "${userStatus}"`);
+
+    // Super Admin is never blocked by status. Other accounts only blocked if explicitly inactive.
+    const isSuperAdmin = user.role === 'Super Admin' || user.role === 'SUPER_ADMIN';
+    if (!isSuperAdmin && (userStatus === 'inactive' || userStatus === 'blocked' || userStatus === 'disabled')) {
+      console.warn(`[AUTH LOGIN] Blocked inactive user: ${email}`);
       res.status(403).json({ success: false, error: 'This user account is inactive.' });
       return;
     }
 
     if (password) {
-      if (!(await bcrypt.compare(password, rows[0].password_hash || ''))) {
+      const match = await bcrypt.compare(password, user.password_hash || '');
+      console.log(`[AUTH LOGIN] Password comparison for ${email}: ${match ? 'SUCCESS' : 'FAILED'}`);
+      if (!match) {
         res.status(401).json({ success: false, error: 'Invalid credentials.' });
         return;
       }
-      const { token, user } = createAuthToken(rows[0]);
-      res.json({ success: true, token, user, authenticationMethod: 'password', mustChangePassword: user.mustChangePassword });
+      const { token, user: serializedUser } = createAuthToken(user);
+      res.json({ success: true, token, user: serializedUser, authenticationMethod: 'password', mustChangePassword: serializedUser.mustChangePassword });
       return;
     }
 
@@ -518,8 +529,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     }
 
     await pool.query('UPDATE auth_otps SET used_at = NOW() WHERE id = ?', [otpRows[0].id]);
-    const { token, user } = createAuthToken(rows[0]);
-    res.json({ success: true, token, user, authenticationMethod: 'otp', mustChangePassword: user.mustChangePassword });
+    const { token, user: otpUser } = createAuthToken(rows[0]);
+    res.json({ success: true, token, user: otpUser, authenticationMethod: 'otp', mustChangePassword: otpUser.mustChangePassword });
   } catch (error) {
     console.error('Login failed:', error);
     res.status(500).json({ success: false, error: 'Unable to sign in. Please try again.' });
