@@ -24,6 +24,16 @@ const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET || 'replace-with-a-secret';
 const UPLOADS_DIR = path.join(PROJECT_ROOT, process.env.UPLOADS_DIR || 'storage/uploads');
+const DEFAULT_ACADEMIC_SESSION_NAMES = [
+  'Parents Meet',
+  'Know Your Locality',
+  'Books to Bytes',
+  'Sports',
+  'Science',
+  'Art Education',
+  'Constitution',
+  'Tinkering Session',
+] as const;
 
 app.use(cors({
   origin: true,
@@ -4503,7 +4513,13 @@ app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, r
       throw Object.assign(new Error('A source academic year is required for copy mode.'), { statusCode: 400 });
     }
 
-    const emptySetupRows = Array.from({ length: 8 }, (_, index) => [id, index + 1, normalizedName, null, null]);
+    const emptySetupRows = DEFAULT_ACADEMIC_SESSION_NAMES.map((sessionName, index) => [
+      id,
+      index + 1,
+      normalizedName,
+      sessionName,
+      null,
+    ]);
     await connection.query(
       'INSERT IGNORE INTO academic_setup (academic_year_id, day_number, academic_year, session_name, session_date) VALUES ?',
       [emptySetupRows],
