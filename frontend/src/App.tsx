@@ -1595,13 +1595,13 @@ export default function App() {
                   sessions={displaySessions}
                   students={displayStudents}
                   volunteers={displayVolunteers}
-                  authToken={currentUser.token}
+                  authToken={currentUser?.token ?? ''}
                 />
               )}
 
               {currentTab === 'academic-setup' && currentUserRole === 'Super Admin' && (
                 <AcademicSetupView
-                  authToken={currentUser.token}
+                  authToken={currentUser?.token ?? ''}
                   onSetupSaved={() => fetchBackendData(new AbortController().signal)}
                 />
               )}

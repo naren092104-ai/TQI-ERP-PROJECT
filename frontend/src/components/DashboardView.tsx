@@ -88,8 +88,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const isClusterAdmin = userRole === 'Cluster Admin';
 
   useEffect(() => {
+    if (!authToken) return;
+
     fetch(apiUrl('/api/academic-setup'), {
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      headers: {
+        Authorization: `Bearer ${authToken}`,
+      },
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
