@@ -58,11 +58,6 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
   const [isLoadingDistrictDirectory, setIsLoadingDistrictDirectory] = useState(false);
   const [districtDirectoryError, setDistrictDirectoryError] = useState('');
   const [reloadModalPanchayats, setReloadModalPanchayats] = useState(0);
-  const [directoryGroups, setDirectoryGroups] = useState<Array<{ clusterId: string; clusterName: string; district: string; names: string[]; error?: string }>>([]);
-  const [isLoadingAllDirectories, setIsLoadingAllDirectories] = useState(false);
-  const [directoryLoadError, setDirectoryLoadError] = useState('');
-  const [directorySearch, setDirectorySearch] = useState('');
-  const [directorySavingKey, setDirectorySavingKey] = useState('');
   const [deleteError, setDeleteError] = useState('');
 
   useEffect(() => {
@@ -234,61 +229,6 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
     }
   };
 
-  const loadAllDistrictDirectories = async () => {
-    if (!selectedAcademicYearId || !clusterOptions.length) return;
-    setIsLoadingAllDirectories(true);
-    setDirectoryLoadError('');
-    setDirectoryGroups([]);
-    const targets = isSuperAdmin
-      ? clusterOptions
-      : clusterOptions.filter((cluster) => cluster.id === currentClusterId);
-    const groups: Array<{ clusterId: string; clusterName: string; district: string; names: string[]; error?: string }> = [];
-    try {
-      for (let index = 0; index < targets.length; index += 4) {
-        const batch = targets.slice(index, index + 4);
-        const results = await Promise.all(batch.map(async (cluster) => {
-          try {
-            const response = await fetch(apiUrl(`/api/panchayats/directory?clusterId=${encodeURIComponent(cluster.id)}`), {
-              cache: 'no-store',
-              headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-            });
-            const data = await response.json().catch(() => null);
-            if (!response.ok || !data?.success || !Array.isArray(data.panchayats)) {
-              throw new Error(data?.error || `Unable to load ${cluster.district || cluster.name}.`);
-            }
-            return {
-              clusterId: cluster.id,
-              clusterName: cluster.name,
-              district: String(data.district || cluster.district || cluster.name),
-              names: data.panchayats.filter((name: unknown): name is string => typeof name === 'string' && Boolean(name.trim())),
-            };
-          } catch (error: any) {
-            return { clusterId: cluster.id, clusterName: cluster.name, district: cluster.district || cluster.name, names: [], error: error?.message || 'Unable to load district directory.' };
-          }
-        }));
-        groups.push(...results);
-      }
-      setDirectoryGroups(groups);
-      const failed = groups.filter((group) => group.error).length;
-      if (failed) setDirectoryLoadError(`${failed} of ${groups.length} district directories could not be loaded.`);
-    } finally {
-      setIsLoadingAllDirectories(false);
-    }
-  };
-
-  const addDirectoryPanchayat = async (clusterId: string, name: string) => {
-    const key = `${clusterId}:${normalizedPanchayatName(name)}`;
-    setDirectorySavingKey(key);
-    setDirectoryLoadError('');
-    try {
-      await onAddPanchayat({ name, clusterId });
-    } catch (error: any) {
-      setDirectoryLoadError(error?.message || `Unable to add ${name}.`);
-    } finally {
-      setDirectorySavingKey('');
-    }
-  };
-
   const removePanchayat = async (panchayat: Panchayat) => {
     if (!onDeletePanchayat) return;
     if (!window.confirm(`Delete ${panchayat.name}? Linked villages and operational records may prevent deletion.`)) return;
@@ -427,47 +367,9 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
         </section>
       )}
 
-      {isSuperAdmin && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-bold text-slate-800">All district Panchayat directories</h2>
-              <p className="mt-1 text-xs text-slate-500">Browse official Panchayats across configured districts without adding them. Add only the ones you choose.</p>
-            </div>
-            <button type="button" onClick={() => void loadAllDistrictDirectories()} disabled={isLoadingAllDirectories || !selectedAcademicYearId} className="rounded-lg bg-[#0B3D91] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">
-              {isLoadingAllDirectories ? 'Loading district directories…' : directoryGroups.length ? 'Refresh all directories' : 'Load all district directories'}
-            </button>
-          </div>
-          {directoryLoadError && <p role="alert" className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">{directoryLoadError}</p>}
-          {deleteError && <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{deleteError}</p>}
-          {directoryGroups.length > 0 && <input type="search" value={directorySearch} onChange={(event) => setDirectorySearch(event.target.value)} placeholder="Search all districts and Panchayats" className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-[#0B3D91] sm:max-w-sm" />}
-          {directoryGroups.length > 0 && <div className="mt-4 space-y-4">
-            {directoryGroups.map((group) => {
-              const matchingNames = group.names.filter((name) => !directorySearch.trim() || `${group.district} ${name}`.toLowerCase().includes(directorySearch.trim().toLowerCase()));
-              if (directorySearch.trim() && !matchingNames.length && !group.error) return null;
-              return <details key={group.clusterId} className="rounded-xl border border-slate-200" open={Boolean(directorySearch.trim())}>
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2.5 text-sm font-semibold text-slate-800">
-                  <span>{group.district} <span className="font-normal text-slate-500">· {group.clusterName}</span></span>
-                  <span className="text-xs font-normal text-slate-500">{group.error || `${group.names.length} Panchayats`}</span>
-                </summary>
-                {group.error ? <p className="px-3 pb-3 text-xs text-rose-700">{group.error}</p> : <div className="grid gap-2 border-t border-slate-100 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {matchingNames.map((name) => {
-                    const saved = panchayats.some((item) => item.clusterId === group.clusterId && normalizedPanchayatName(item.name) === normalizedPanchayatName(name));
-                    const key = `${group.clusterId}:${normalizedPanchayatName(name)}`;
-                    return <div key={key} className="flex items-center justify-between gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-2">
-                      <span className="truncate text-xs font-medium text-slate-700" title={name}>{name}</span>
-                      {saved ? <span className="shrink-0 text-[10px] font-semibold text-emerald-700">Added</span> : <button type="button" onClick={() => void addDirectoryPanchayat(group.clusterId, name)} disabled={Boolean(directorySavingKey)} className="shrink-0 rounded-md bg-white px-2 py-1 text-[10px] font-semibold text-[#0B3D91] ring-1 ring-slate-200 disabled:opacity-50">{directorySavingKey === key ? 'Adding…' : 'Add'}</button>}
-                    </div>;
-                  })}
-                </div>}
-              </details>;
-            })}
-          </div>}
-        </section>
-      )}
-
       {!isShowingClusterCards && <>
       {/* 3. Cardless Search & Filter Bar */}
+      {deleteError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{deleteError}</p>}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="relative w-full max-w-sm">
           <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
