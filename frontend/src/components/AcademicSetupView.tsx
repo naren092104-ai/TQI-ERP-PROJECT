@@ -64,7 +64,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   const [toast, setToast] = useState<ToastState | null>(null);
   const [setupRows, setSetupRows] = useState<Array<{ day_number: number; academic_year: string; session_name: string | null }>>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  const [drawerMode, setDrawerMode] = useState<'create' | 'edit'>('create');
+  const [drawerMode, setDrawerMode] = useState<'create' | 'edit' | 'day'>('create');
   const [isEditingDay, setIsEditingDay] = useState<number | null>(null);
   const [yearDraft, setYearDraft] = useState({
     startYear: '2026',
@@ -170,19 +170,16 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   };
 
   const openDayEditor = (dayNumber: number) => {
-    const activeYearName = selectedAcademicYearName;
-    const currentDay = currentDayEntries.find((day) => day.dayNumber === dayNumber);
-
-    const startYear = activeYearName.split('-')[0] || '2026';
-    const endYear = activeYearName.split('-')[1] || '2027';
-
-    setDrawerMode('edit');
+    setDrawerMode('day');
     setIsEditingDay(dayNumber);
     setYearDraft({
-      startYear,
-      endYear,
+      startYear: yearDraft.startYear,
+      endYear: yearDraft.endYear,
       isActive: Boolean(selectedAcademicYear?.isActive),
-      days: currentDayEntries.map((item) => ({ ...item })),
+      days: currentDayEntries.map((item) => ({
+        ...item,
+        sessionName: item.sessionName === 'Session not assigned' ? '' : item.sessionName,
+      })),
     });
     setIsDrawerOpen(true);
   };
@@ -193,13 +190,16 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   };
 
   const saveAcademicYear = async () => {
-    const normalizedYearName = `${yearDraft.startYear.trim()}-${yearDraft.endYear.trim()}`;
-    if (!yearDraft.startYear.trim() || !yearDraft.endYear.trim()) {
+    const isDayEdit = drawerMode === 'day';
+    const normalizedYearName = isDayEdit
+      ? selectedAcademicYearName
+      : `${yearDraft.startYear.trim()}-${yearDraft.endYear.trim()}`;
+    if (!isDayEdit && (!yearDraft.startYear.trim() || !yearDraft.endYear.trim())) {
       setErrorMessage('Academic year start and end years are required.');
       return;
     }
 
-    if (Number(yearDraft.startYear) >= Number(yearDraft.endYear)) {
+    if (!isDayEdit && Number(yearDraft.startYear) >= Number(yearDraft.endYear)) {
       setErrorMessage('The end year must be greater than the start year.');
       return;
     }
@@ -241,7 +241,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         }
 
         targetYearId = createData?.data?.id || targetYearId;
-      } else if (selectedAcademicYearId) {
+      } else if (drawerMode === 'edit' && selectedAcademicYearId) {
         const updateRes = await fetch(apiUrl(`/api/academic-years/${selectedAcademicYearId}`), {
           method: 'PUT',
           headers: {
@@ -262,34 +262,43 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         }
       }
 
-      const payloadDays = yearDraft.days.map((day, index) => ({
-        dayNumber: index + 1,
-        sessionName: (day.sessionName || '').trim(),
-        sessionDate: null,
-      }));
+      if (isDayEdit) {
+        const payloadDays = yearDraft.days.map((day, index) => ({
+          dayNumber: index + 1,
+          sessionName: (day.sessionName || '').trim(),
+          sessionDate: null,
+        }));
 
-      const saveRes = await fetch(apiUrl('/api/academic-setup'), {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
-        },
-        body: JSON.stringify({
-          academicYear: normalizedYearName,
-          days: payloadDays,
-        }),
-      });
+        const saveRes = await fetch(apiUrl('/api/academic-setup'), {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify({
+            academicYear: normalizedYearName,
+            days: payloadDays,
+          }),
+        });
 
-      const saveData = await saveRes.json().catch(() => null);
-      if (!saveRes.ok || !saveData?.success) {
-        throw new Error(saveData?.error || 'Unable to save session plan.');
+        const saveData = await saveRes.json().catch(() => null);
+        if (!saveRes.ok || !saveData?.success) {
+          throw new Error(saveData?.error || 'Unable to save session day.');
+        }
       }
 
       if (drawerMode === 'create' && targetYearId) {
         onSelectAcademicYear?.(targetYearId);
       }
 
-      setToast({ type: 'success', message: drawerMode === 'create' ? 'Academic year created successfully.' : 'Academic year updated successfully.' });
+      setToast({
+        type: 'success',
+        message: drawerMode === 'create'
+          ? 'Academic year created successfully.'
+          : isDayEdit
+            ? `Day ${String(isEditingDay).padStart(2, '0')} updated successfully.`
+            : 'Academic year updated successfully.',
+      });
       closeDrawer();
       onSetupSaved?.();
     } catch (error: any) {
@@ -447,9 +456,15 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
           <div className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-border bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Academic year</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  {drawerMode === 'day' ? `Session plan · ${selectedAcademicYearName}` : 'Academic year'}
+                </p>
                 <h3 className="mt-1 text-xl font-bold text-foreground">
-                  {drawerMode === 'create' ? 'Add Academic Year' : 'Edit Academic Year'}
+                  {drawerMode === 'create'
+                    ? 'Add Academic Year'
+                    : drawerMode === 'day'
+                      ? `Edit Day ${String(isEditingDay).padStart(2, '0')}`
+                      : 'Edit Academic Year'}
                 </h3>
               </div>
               <button type="button" onClick={closeDrawer} className="rounded-lg border border-border p-2 text-muted-foreground hover:text-foreground">
@@ -458,29 +473,31 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             </div>
 
             <div className="space-y-6 p-5">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Academic Year</label>
-                <div className="grid grid-cols-2 gap-3">
-                  <input
-                    type="number"
-                    min="2000"
-                    max="2100"
-                    value={yearDraft.startYear}
-                    onChange={(e) => setYearDraft((current) => ({ ...current, startYear: e.target.value }))}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0B3D91]"
-                  />
-                  <input
-                    type="number"
-                    min="2000"
-                    max="2100"
-                    value={yearDraft.endYear}
-                    onChange={(e) => setYearDraft((current) => ({ ...current, endYear: e.target.value }))}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0B3D91]"
-                  />
+              {drawerMode !== 'day' && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-foreground">Academic Year</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      type="number"
+                      min="2000"
+                      max="2100"
+                      value={yearDraft.startYear}
+                      onChange={(e) => setYearDraft((current) => ({ ...current, startYear: e.target.value }))}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0B3D91]"
+                    />
+                    <input
+                      type="number"
+                      min="2000"
+                      max="2100"
+                      value={yearDraft.endYear}
+                      onChange={(e) => setYearDraft((current) => ({ ...current, endYear: e.target.value }))}
+                      className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm outline-none focus:border-[#0B3D91]"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="space-y-3">
+              {drawerMode !== 'day' && <div className="space-y-3">
                 <label className="text-sm font-medium text-foreground">Status</label>
                 <div className="flex items-center gap-6">
                   <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
@@ -502,16 +519,16 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                     Inactive
                   </label>
                 </div>
-              </div>
+              </div>}
 
-              <div className="space-y-4">
+              {drawerMode === 'day' && <div className="space-y-4">
                 <div className="flex items-center justify-between">
-                  <h4 className="text-base font-bold text-foreground">Session Plan</h4>
-                  <span className="text-xs font-medium text-muted-foreground">{DAY_COUNT} Days</span>
+                  <h4 className="text-base font-bold text-foreground">{drawerMode === 'day' ? `Day ${String(isEditingDay).padStart(2, '0')} session` : 'Session Plan'}</h4>
+                  {drawerMode !== 'day' && <span className="text-xs font-medium text-muted-foreground">{DAY_COUNT} Days</span>}
                 </div>
 
                 <div className="space-y-3">
-                  {yearDraft.days.map((day) => (
+                  {yearDraft.days.filter((day) => drawerMode !== 'day' || day.dayNumber === isEditingDay).map((day) => (
                     <div key={day.dayNumber} className="grid grid-cols-[72px_1fr] items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-2.5">
                       <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#0B3D91]">Day {String(day.dayNumber).padStart(2, '0')}</span>
                       <input
@@ -524,7 +541,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                     </div>
                   ))}
                 </div>
-              </div>
+              </div>}
 
               <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
                 <button type="button" onClick={closeDrawer} className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-foreground">
@@ -536,7 +553,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   disabled={isSaving}
                   className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {isSaving ? 'Saving...' : 'Save Academic Year'}
+                  {isSaving ? 'Saving...' : drawerMode === 'day' ? 'Save Session Day' : drawerMode === 'create' ? 'Create Academic Year' : 'Save Academic Year'}
                 </button>
               </div>
             </div>

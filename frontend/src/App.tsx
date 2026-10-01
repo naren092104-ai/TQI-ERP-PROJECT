@@ -1712,20 +1712,10 @@ export default function App() {
               {currentTab === 'panchayat-detail' && (
                 <PanchayatDetailView
                   panchayat={currentPanchayat}
-                  panchayats={displayPanchayats}
+                  students={displayStudents}
                   onBack={() => setCurrentTab('panchayats')}
-                  onSelectPanchayat={(id) => setSelectedPanchayatId(id)}
-                  onSelectVillage={(pId, vId) => {
-                    setSelectedPanchayatId(pId);
-                    setInitialStudentFilters({ panchayatId: pId, villageId: vId });
-                    setCurrentTab('students');
-                  }}
                   onNavigate={handleNavigate}
-                  onUpdatePanchayat={handleUpdatePanchayat}
-                  onDeletePanchayat={handleDeletePanchayat}
                   onAddVillage={handleAddVillage}
-                  onUpdateVillage={handleUpdateVillage}
-                  onDeleteVillage={handleDeleteVillage}
                 />
               )}
 

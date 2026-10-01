@@ -36,7 +36,7 @@ function villageStudentsOf(panchayatId: string, villageName: string, all: Studen
 
 export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
   panchayat,
-  students,
+  students = [],
   onBack,
   onNavigate,
   onAddVillage,
