@@ -11,6 +11,7 @@ import {
 } from './ui/icons';
 import { apiUrl } from '../utils/api';
 import { AcademicYear } from '../types';
+import { AcademicSessionIllustration, ACADEMIC_SESSION_NAMES } from './AcademicSessionIllustration';
 
 interface AcademicSetupViewProps {
   userRole?: 'Super Admin' | 'Cluster Admin';
@@ -32,13 +33,23 @@ interface ToastState {
   message: string;
 }
 
-const DAY_COUNT = 8;
+const DAY_COUNT = ACADEMIC_SESSION_NAMES.length;
 const currentCalendarYear = new Date().getFullYear();
 const createDefaultDays = (): DayDraft[] =>
   Array.from({ length: DAY_COUNT }, (_, index) => ({
     dayNumber: index + 1,
-    sessionName: '',
+    sessionName: ACADEMIC_SESSION_NAMES[index],
   }));
+
+const resolveSessionName = (dayNumber: number, storedName?: string | null): string => {
+  const standardName = ACADEMIC_SESSION_NAMES[dayNumber - 1];
+  const normalized = String(storedName || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+  if (!standardName || !normalized) return standardName || '';
+  if (normalized === standardName.toLocaleLowerCase('en')) return standardName;
+  if (dayNumber === 1 && normalized === 'can do workshop') return standardName;
+  if (dayNumber === 2 && normalized === 'know ur locality') return standardName;
+  return String(storedName).trim();
+};
 
 const normalizeAcademicYearName = (value?: string): string => {
   const trimmed = (value || '').trim();
@@ -173,7 +184,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
       if (dayIndex >= 0 && dayIndex < DAY_COUNT) {
         base[dayIndex] = {
           dayNumber: dayIndex + 1,
-          sessionName: row.session_name && row.session_name.trim() ? row.session_name.trim() : 'Session not assigned',
+          sessionName: resolveSessionName(dayIndex + 1, row.session_name),
         };
       }
     });
@@ -618,42 +629,30 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             {currentDayEntries.map((day) => (
               <div
                 key={day.dayNumber}
-                className="group rounded-[18px] border border-slate-200 bg-white p-4 shadow-[0_8px_20px_rgba(15,23,42,0.04)] transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_16px_30px_rgba(15,23,42,0.08)]"
-                style={{
-                  background: `linear-gradient(135deg, ${[
-                    '#F7F9FF',
-                    '#FFF9F1',
-                    '#F5FBF8',
-                    '#F9F4FF',
-                    '#F6F8FF',
-                    '#FFF9F3',
-                    '#F5FBFF',
-                    '#FFF7F5',
-                  ][day.dayNumber - 1]} 0%, #FFFFFF 100%)`,
-                }}
+                className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_8px_20px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-1 hover:border-violet-300 hover:shadow-[0_16px_30px_rgba(15,23,42,0.12)]"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="inline-flex items-center rounded-full border border-[#0B3D91]/10 bg-[#0B3D91]/5 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0B3D91]">
+                <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
+                  <AcademicSessionIllustration dayNumber={day.dayNumber} />
+                  <span className="absolute left-3 top-3 rounded-full border border-white/70 bg-white/90 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#0B3D91] shadow-sm">
                     Day {String(day.dayNumber).padStart(2, '0')}
                   </span>
                 </div>
 
-                <div className="mt-5 min-h-[96px] flex items-center">
-                  <p className="text-xl font-bold text-slate-900 leading-snug">
-                    {day.sessionName || 'Session not assigned'}
-                  </p>
-                </div>
-
-                <div className="mt-4 flex items-center justify-end">
-                  <button
-                    type="button"
-                    onClick={() => openDayEditor(day.dayNumber)}
-                    disabled={!canManageAcademicYears || isSelectedYearReadOnly}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#0B3D91]/20 hover:text-[#0B3D91] disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Edit3 className="h-3.5 w-3.5" />
-                    {canManageAcademicYears ? 'View / Edit' : 'View'}
-                  </button>
+                <div className="flex min-h-[92px] flex-col justify-between gap-3 p-3.5">
+                  <h3 className="font-serif text-sm font-bold uppercase leading-snug tracking-wide text-slate-800">
+                    {day.sessionName || ACADEMIC_SESSION_NAMES[day.dayNumber - 1]}
+                  </h3>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => openDayEditor(day.dayNumber)}
+                      disabled={!canManageAcademicYears || isSelectedYearReadOnly}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#0B3D91]/20 hover:text-[#0B3D91] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Edit3 className="h-3.5 w-3.5" />
+                      {canManageAcademicYears ? 'View / Edit' : 'View'}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
