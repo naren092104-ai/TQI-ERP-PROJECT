@@ -462,7 +462,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
 
       {isDrawerOpen && (
         <div className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px]">
-          <div className="absolute right-0 top-0 h-full w-full max-w-xl overflow-y-auto border-l border-border bg-white shadow-2xl">
+          <div className="absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto border-l border-border bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
