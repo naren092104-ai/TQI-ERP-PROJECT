@@ -29,6 +29,7 @@ interface StatementItem {
 }
 
 interface FinanceStatementViewProps {
+  academicYear?: string;
   onBack: () => void;
   onNavigate: (tab: TabType, targetId?: string) => void;
   entries?: FinanceEntry[];
@@ -49,6 +50,7 @@ interface FinanceStatementViewProps {
 }
 
 export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
+  academicYear = '',
   onBack,
   onNavigate,
   entries = [],
@@ -941,7 +943,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       </head>
       <body>
         <div class="header-title">Talent Quest for India</div>
-        <div style="font-size: 15px; text-align: center; color: #434652; font-weight: bold; margin-bottom: 2px;">Academic year 2026-2027</div>
+        <div style="font-size: 15px; text-align: center; color: #434652; font-weight: bold; margin-bottom: 2px;">Academic year ${academicYear}</div>
         <div style="font-size: 15px; text-align: center; color: #002869; font-weight: bold; text-transform: uppercase; margin-bottom: 2px;">Finance report</div>
         <div class="header-sub">${statementMeta.clusterName} Cluster</div>
 
@@ -1301,7 +1303,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               Talent Quest for India
             </h1>
             <div className="text-[14px] sm:text-[15px] font-bold text-[#434652] dark:text-gray-300">
-              Academic year 2026-2027
+              Academic year {academicYear}
             </div>
             <div className="text-[14px] sm:text-[15px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider">
               Finance report
@@ -2410,7 +2412,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                   Talent Quest for India
                 </h2>
                 <div className="text-[13px] font-bold text-[#434652] dark:text-gray-300">
-                  Academic year 2026-2027
+                  Academic year {academicYear}
                 </div>
                 <div className="text-[13px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider">
                   Finance report

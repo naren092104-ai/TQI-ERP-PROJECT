@@ -254,9 +254,10 @@ const mapCluster = (row: any) => ({
   collegeDistrict: row.college_district || row.district || 'Tamil Nadu',
   state: row.state || 'Tamil Nadu',
   code: row.code || row.id.toUpperCase(),
-  activePanchayats: 0,
-  totalStudents: 0,
-  totalVolunteers: 0,
+  activePanchayats: Number(row.active_panchayats || 0),
+  villagesCount: Number(row.villages_count || 0),
+  totalStudents: Number(row.total_students || 0),
+  totalVolunteers: Number(row.total_volunteers || 0),
   adminId: row.admin_id || '',
   adminName: row.admin_name || '',
   adminEmail: row.admin_email || '',
@@ -283,6 +284,8 @@ const mapStudent = (row: any) => ({
   villageName: row.village_name || row.village_id,
   parentName: row.parent_name || 'Parent',
   phone: row.phone || '',
+  schoolName: row.school_name || '',
+  academicYearId: row.academic_year_id,
   status: row.status || 'active',
   avatarLetter: (row.name || 'S').charAt(0).toUpperCase(),
   avatarBg: '#0B3D91',
@@ -598,14 +601,26 @@ app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequ
   }
 });
 
-app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+app.get('/api/modules', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const [rows] = await pool.query<any[]>(
-      'SELECT id, name, code, description, is_active, academic_year, day_number, created_at FROM modules ORDER BY day_number ASC, code ASC, name ASC'
+      'SELECT id, name, code, description, is_active, academic_year, academic_year_id, day_number, created_at FROM modules WHERE academic_year_id = ? ORDER BY day_number ASC, code ASC, name ASC',
+      [year.id],
     );
-    const [resRows] = await pool.query<any[]>(
-      'SELECT id, module_id, file_path, file_url, original_filename, created_at FROM module_resources'
-    ).catch(() => [[]]);
+    const moduleIds = rows.map((row) => row.id);
+    let resRows: any[] = [];
+    if (moduleIds.length) {
+      const [resourceRows] = await pool.query<any[]>(
+        'SELECT id, module_id, file_path, file_url, original_filename, created_at FROM module_resources WHERE module_id IN (?)',
+        [moduleIds],
+      ).catch(() => [[]]);
+      resRows = resourceRows;
+    }
 
     const resourcesByModule: Record<string, any[]> = {};
     if (Array.isArray(resRows)) {
@@ -637,7 +652,8 @@ app.get('/api/modules', requireAuth, async (_req: AuthenticatedRequest, res: Res
         moduleNumber: row.code || row.id,
         moduleName: row.name,
         topic: row.name,
-        academicYear: row.academic_year || '2026-2027',
+        academicYear: row.academic_year || year.name,
+        academicYearId: row.academic_year_id,
         dayNumber: row.day_number || 1,
         dayLabel: `Day ${row.day_number || 1}`,
         description: row.description || '',
@@ -661,20 +677,29 @@ app.put('/api/modules/:id/academic-setup', requireAuth, async (req: Authenticate
     return;
   }
 
-  const academicYear = String(req.body.academicYear || '').trim();
+  const year = await resolveAcademicYear(req);
+  if (!year) {
+    res.status(404).json({ success: false, error: 'No academic year is available.' });
+    return;
+  }
+  if (isArchivedAcademicYear(year)) {
+    res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+    return;
+  }
+  const academicYear = String(req.body.academicYear || year.name).trim();
   const dayNumber = req.body.dayNumber === null || req.body.dayNumber === undefined || req.body.dayNumber === ''
     ? null
     : Number(req.body.dayNumber);
 
-  if (!/^\d{4}-\d{4}$/.test(academicYear) || (dayNumber !== null && (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8))) {
+  if (academicYear !== year.name || !/^\d{4}-\d{4}$/.test(academicYear) || (dayNumber !== null && (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8))) {
     res.status(400).json({ success: false, error: 'Academic year or programme day is invalid.' });
     return;
   }
 
   try {
     const [result] = await pool.query<any>(
-      'UPDATE modules SET academic_year = ?, day_number = ? WHERE id = ?',
-      [academicYear, dayNumber, req.params.id],
+      'UPDATE modules SET academic_year = ?, academic_year_id = ?, day_number = ? WHERE id = ? AND academic_year_id = ?',
+      [academicYear, year.id, dayNumber, req.params.id, year.id],
     );
     if (!result.affectedRows) {
       res.status(404).json({ success: false, error: 'Module not found.' });
@@ -687,13 +712,46 @@ app.put('/api/modules/:id/academic-setup', requireAuth, async (req: Authenticate
   }
 });
 
-app.get('/api/academic-setup', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+const resolveAcademicYear = async (req: Request) => {
+  const requested = String(
+    req.query.academicYearId || req.body?.academicYearId || req.get('x-academic-year-id') || '',
+  ).trim();
+  const [rows] = requested
+    ? await pool.query<any[]>('SELECT id, name, status, is_active, archived_at FROM academic_years WHERE id = ? OR name = ? LIMIT 1', [requested, requested])
+    : await pool.query<any[]>('SELECT id, name, status, is_active, archived_at FROM academic_years ORDER BY is_active DESC, start_date DESC LIMIT 1');
+  return rows[0] || null;
+};
+
+const isArchivedAcademicYear = (year: any) =>
+  String(year?.status || '').toUpperCase() === 'ARCHIVED' || Boolean(year?.archived_at);
+
+const resolveClusterForAcademicYear = async (req: AuthenticatedRequest, academicYearId: string, requestedClusterId?: string) => {
+  if (req.user.role !== 'Cluster Admin') return requestedClusterId && requestedClusterId !== 'all' ? requestedClusterId : null;
+  const [rows] = await pool.query<any[]>(
+    `SELECT id FROM clusters
+     WHERE academic_year_id = ? AND (id = ? OR source_cluster_id = ?)
+     ORDER BY (id = ?) DESC LIMIT 1`,
+    [academicYearId, req.user.clusterId, req.user.clusterId, req.user.clusterId],
+  );
+  return rows[0]?.id || req.user.clusterId;
+};
+
+app.get('/api/academic-setup', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     await ensureAcademicSetupTable();
-    const [rows] = await pool.query<any[]>('SELECT day_number, academic_year, session_name, session_date FROM academic_setup ORDER BY day_number ASC');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>(
+      'SELECT day_number, academic_year, academic_year_id, session_name, session_date FROM academic_setup WHERE academic_year_id = ? ORDER BY day_number ASC',
+      [year.id],
+    );
     res.json({ success: true, setup: rows.map((row: any) => ({
       day_number: row.day_number,
       academic_year: row.academic_year,
+      academic_year_id: row.academic_year_id,
       session_name: row.session_name,
       session_date: row.session_date ? new Date(row.session_date).toISOString().slice(0, 10) : null,
     })) });
@@ -709,25 +767,32 @@ app.put('/api/academic-setup', requireAuth, async (req: AuthenticatedRequest, re
     return;
   }
 
-  const academicYear = String(req.body.academicYear || '').trim();
+  const requestedAcademicYear = String(req.body.academicYear || '').trim();
   const days = Array.isArray(req.body.days) ? req.body.days : [];
-  if (!/^\d{4}-\d{4}$/.test(academicYear) ||
-      days.length < 1 || days.length > 8 ||
-      days.some((day: any) => !Number.isInteger(Number(day.dayNumber)) || Number(day.dayNumber) < 1 || Number(day.dayNumber) > 8)) {
+  const dayNumbers = days.map((day: any) => Number(day.dayNumber));
+  if ((requestedAcademicYear && !/^\d{4}-\d{4}$/.test(requestedAcademicYear)) ||
+      days.length !== 8 ||
+      new Set(dayNumbers).size !== 8 ||
+      dayNumbers.some((dayNumber: number) => !Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8)) {
     res.status(400).json({ success: false, error: 'Academic year or session days are invalid.' });
     return;
   }
 
+  let connection: any;
   try {
     await ensureAcademicSetupTable();
-    await pool.query('START TRANSACTION');
-    // First, clear any previously stored day numbers that are no longer in the
-    // submitted set (e.g. the Super Admin removed a day from the UI).
-    const submittedDayNumbers = days.map((day: any) => Number(day.dayNumber));
-    await pool.query(
-      'DELETE FROM academic_setup WHERE day_number NOT IN (?)',
-      [submittedDayNumbers],
-    );
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const academicYear = year.name;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
     for (const day of days) {
       // Accept dates in YYYY-MM-DD (HTML <input type="date">) or DD-MM-YY.
@@ -741,35 +806,43 @@ app.put('/api/academic-setup', requireAuth, async (req: AuthenticatedRequest, re
         } else if (ymd) {
           isoDate = `${ymd[1]}-${ymd[2]}-${ymd[3]}`;
         } else {
-          await pool.query('ROLLBACK');
+          await connection.rollback();
           res.status(400).json({ success: false, error: `Day ${day.dayNumber}: session date must be in DD-MM-YY format.` });
           return;
         }
       }
-      await pool.query(
-        'INSERT INTO academic_setup (day_number, academic_year, session_name, session_date) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE academic_year = VALUES(academic_year), session_name = VALUES(session_name), session_date = VALUES(session_date)',
-        [Number(day.dayNumber), academicYear, String(day.sessionName || '').trim() || null, isoDate],
+      await connection.query(
+        'INSERT INTO academic_setup (academic_year_id, day_number, academic_year, session_name, session_date) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE academic_year = VALUES(academic_year), session_name = VALUES(session_name), session_date = VALUES(session_date)',
+        [year.id, Number(day.dayNumber), academicYear, String(day.sessionName || '').trim() || null, isoDate],
       );
     }
-    await pool.query('COMMIT');
+    await connection.commit();
     res.json({ success: true });
   } catch (error) {
-    await pool.query('ROLLBACK').catch(() => undefined);
+    await connection?.rollback().catch(() => undefined);
     console.error('Failed to save academic setup:', error);
     res.status(503).json({ success: false, error: 'Unable to save academic setup.' });
+  } finally {
+    connection?.release();
   }
 });
 
 app.get('/api/session-photos', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     res.setHeader('Cache-Control', 'no-store');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all').toLowerCase();
-    let sql = 'SELECT * FROM session_photos WHERE 1=1';
-    const params: any[] = [];
+    let sql = 'SELECT * FROM session_photos WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(cluster);
@@ -785,15 +858,23 @@ app.get('/api/session-photos', requireAuth, async (req: AuthenticatedRequest, re
   }
 });
 
-app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array('photos', 20), async (req: AuthenticatedRequest & { files?: Express.Multer.File[] }, res: Response) => {
+app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array('photos', 20), async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const files = req.files || [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const files = (req.files || []) as Express.Multer.File[];
     if (!files.length) {
       res.status(400).json({ success: false, error: 'No photos were selected to upload.' });
       return;
     }
-
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri').toLowerCase();
+    const clusterId = String(await resolveClusterForAcademicYear(req, year.id, req.body.clusterId || '') || 'dharmapuri').toLowerCase();
     const sessionId = String(req.body.sessionId || `session-${Date.now()}`);
     const dayNumber = Number(req.body.dayNumber || 1);
     const uploadedBy = String(req.body.uploadedBy || req.user.name || 'Cluster Admin');
@@ -814,8 +895,8 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
       const originalName = file.originalname || 'photo.jpg';
 
       await pool.query(
-        'INSERT INTO session_photos (id, cluster_id, session_id, day_number, file_path, file_url, original_filename, mime_type, file_size, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-        [rowId, clusterId, sessionId, dayNumber, filePath, fileUrl, originalName, file.mimetype, file.size, uploaderName],
+        'INSERT INTO session_photos (id, cluster_id, session_id, academic_year_id, day_number, file_path, file_url, original_filename, mime_type, file_size, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+        [rowId, clusterId, sessionId, year.id, dayNumber, filePath, fileUrl, originalName, file.mimetype, file.size, uploaderName],
       );
 
       savedPhotos.push(mapSessionPhotoRow({
@@ -844,7 +925,12 @@ app.post('/api/session-photos/upload', requireAuth, photoUploadMiddleware.array(
 
 app.get('/api/session-photos/file/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? AND academic_year_id = ? LIMIT 1', [req.params.id, year.id]);
     if (!rows.length) {
       res.status(404).json({ success: false, error: 'Photo was not found.' });
       return;
@@ -866,7 +952,12 @@ app.get('/api/session-photos/file/:id', requireAuth, async (req: AuthenticatedRe
 
 app.get('/api/session-photos/:id/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? AND academic_year_id = ? LIMIT 1', [req.params.id, year.id]);
     if (!rows.length) {
       res.status(404).json({ success: false, error: 'Photo was not found.' });
       return;
@@ -888,16 +979,22 @@ app.get('/api/session-photos/:id/download', requireAuth, async (req: Authenticat
 
 app.get('/api/session-photos/download-zip', requireAuth, async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all').toLowerCase();
     const dayNumber = req.query.dayNumber ? Number(req.query.dayNumber) : null;
     const type = String(req.query.type || 'filtered');
 
-    let sql = 'SELECT * FROM session_photos WHERE 1=1';
-    const params: any[] = [];
+    let sql = 'SELECT * FROM session_photos WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(cluster);
@@ -923,7 +1020,7 @@ app.get('/api/session-photos/download-zip', requireAuth, async (req: Authenticat
     res.setHeader('Content-Disposition', `attachment; filename="${zipName}"`);
 
     const archive = archiver('zip', { zlib: { level: 9 } });
-    archive.on('error', (err) => next(err));
+    archive.on('error', (err: Error) => next(err));
     archive.pipe(res);
 
     files.forEach((row) => {
@@ -940,7 +1037,16 @@ app.get('/api/session-photos/download-zip', requireAuth, async (req: Authenticat
 
 app.delete('/api/session-photos/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? LIMIT 1', [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>('SELECT * FROM session_photos WHERE id = ? AND academic_year_id = ? LIMIT 1', [req.params.id, year.id]);
     if (!rows.length) {
       res.status(404).json({ success: false, error: 'Photo was not found.' });
       return;
@@ -951,7 +1057,7 @@ app.delete('/api/session-photos/:id', requireAuth, async (req: AuthenticatedRequ
       fs.unlinkSync(row.file_path);
     }
 
-    await pool.query('DELETE FROM session_photos WHERE id = ?', [req.params.id]);
+    await pool.query('DELETE FROM session_photos WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
     res.json({ success: true, message: 'Photo deleted successfully.' });
   } catch (error) {
     console.error('Failed to delete session photo:', error);
@@ -961,11 +1067,17 @@ app.delete('/api/session-photos/:id', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT * FROM approvals WHERE 1=1';
-    const params: any[] = [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    let sql = 'SELECT * FROM approvals WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (req.query.clusterId && req.query.clusterId !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(String(req.query.clusterId));
@@ -1005,7 +1117,12 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
     }
     const remarks = req.body.remarks ? String(req.body.remarks).trim() : null;
 
-    const [approvalRows] = await pool.query<any[]>('SELECT * FROM approvals WHERE id = ? LIMIT 1', [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [approvalRows] = await pool.query<any[]>('SELECT * FROM approvals WHERE id = ? AND academic_year_id = ? LIMIT 1', [req.params.id, year.id]);
     if (!approvalRows.length) {
       res.status(404).json({ success: false, error: 'Approval request not found.' });
       return;
@@ -1016,7 +1133,7 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
       return;
     }
 
-    await pool.query('UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ?', [status, req.params.id]);
+    await pool.query('UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ? AND academic_year_id = ?', [status, req.params.id, year.id]);
     const actionName = action === 'approve' ? 'APPROVE' : action === 'reject' ? 'REJECT' : 'REQUEST_RESUBMISSION';
     const recordId = approval.record_id || approval.id;
     await pool.query(
@@ -1036,11 +1153,24 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
 
 app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = "SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE c.status = 'Active'";
-    const params: any[] = [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const includeArchived = String(req.query.includeArchived || '').toLowerCase() === 'true';
+    let sql = `SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone,
+      (SELECT COUNT(*) FROM panchayats p WHERE p.cluster_id = c.id AND p.academic_year_id = c.academic_year_id) AS active_panchayats,
+      (SELECT COUNT(*) FROM villages v WHERE v.academic_year_id = c.academic_year_id AND v.panchayat_id IN (SELECT p2.id FROM panchayats p2 WHERE p2.cluster_id = c.id AND p2.academic_year_id = c.academic_year_id)) AS villages_count,
+      (SELECT COUNT(*) FROM students s WHERE s.cluster_id = c.id AND s.academic_year_id = c.academic_year_id) AS total_students,
+      (SELECT COUNT(*) FROM volunteers vol WHERE vol.cluster_id = c.id AND vol.academic_year_id = c.academic_year_id) AS total_volunteers
+      FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE ${includeArchived ? '1=1' : "c.status = 'Active'"}`;
+    const params: any[] = [year.id];
+    sql += ' AND c.academic_year_id = ?';
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND c.id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     }
 
     const [rows] = await pool.query<any[]>(sql, params);
@@ -1057,6 +1187,16 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     return;
   }
 
+  const year = await resolveAcademicYear(req);
+  if (!year) {
+    res.status(404).json({ success: false, error: 'No academic year is available.' });
+    return;
+  }
+  if (isArchivedAcademicYear(year)) {
+    res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+    return;
+  }
+
   const collegeName = String(req.body.collegeName || '').trim();
   const district = String(req.body.district || req.body.clusterDistrict || 'Tamil Nadu').trim();
   const collegeDistrict = String(req.body.collegeDistrict || district).trim();
@@ -1066,9 +1206,9 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const adminName = String(req.body.adminName || spocName).trim();
   const name = String(req.body.name || `${collegeName} (${district})`).trim();
   const cleanIdPart = `${district}-${collegeName}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const clusterId = String(req.body.id || cleanIdPart || `cluster-${Date.now()}`);
+  const clusterId = String(req.body.id ? `${req.body.id}-${year.id}` : `${cleanIdPart || `cluster-${Date.now()}`}-${year.id}`);
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
-  const temporaryPassword = String(req.body.temporaryPassword || 'TQI@Admin2026').trim();
+  const temporaryPassword = String(req.body.temporaryPassword || `TQI@Admin${randomInt(1000, 10000)}!`).trim();
 
   if (!collegeName || !district || !spocName || !spocMobile || !adminEmail) {
     res.status(400).json({ success: false, error: 'College name, district, SPOC name, SPOC mobile, and login email are required.' });
@@ -1099,33 +1239,35 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const normalizedPhone = `+91 ${finalMobile}`;
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  let connection: any;
   try {
-    await pool.query('START TRANSACTION');
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
     // Chicken-and-egg between clusters and users: each FK-references the other.
     //   clusters.admin_id   -> users.id   (fk_clusters_admin)
     //   users.cluster_id    -> clusters.id (fk_users_cluster)
     // Insert cluster first with admin_id = NULL, then user, then link the two.
-    await pool.query(
-      `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
-      [clusterId, name, district, collegeDistrict, code, collegeName, spocName, normalizedPhone],
+    await connection.query(
+      `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id) VALUES (?, ?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active', ?)`,
+      [clusterId, name, district, collegeDistrict, code, collegeName, spocName, normalizedPhone, year.id],
     ).catch(async () => {
       // Fallback in case college_district column doesn't exist yet
-      return pool.query(
-        `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active')`,
-        [clusterId, name, district, code, collegeName, spocName, normalizedPhone],
+      return connection.query(
+        `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active', ?)`,
+        [clusterId, name, district, code, collegeName, spocName, normalizedPhone, year.id],
       );
     });
-    await pool.query(
+    await connection.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'Cluster Admin', ?, ?, TRUE, 'Active')`,
       [adminId, adminName, adminEmail, passwordHash, clusterId, normalizedPhone],
     );
-    await pool.query(
+    await connection.query(
       `UPDATE clusters SET admin_id = ? WHERE id = ?`,
       [adminId, clusterId],
     );
 
     // Audit log
-    await pool.query(
+    await connection.query(
       'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [
         `aud-${randomUUID()}`,
@@ -1140,26 +1282,33 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       ],
     ).catch(() => undefined);
 
-    await pool.query('COMMIT');
+    await connection.commit();
+    connection.release();
+    connection = null;
 
-    // Asynchronously dispatch welcome / onboarding email with temporary password
-    sendOnboardingCredentialsEmail({
+    // Deliver the temporary password only after the account transaction commits.
+    const emailSent = await sendOnboardingCredentialsEmail({
       recipient: adminEmail,
       name: adminName,
       temporaryPassword,
       role: 'Cluster Admin',
       clusterName: name,
       projectRoot: PROJECT_ROOT,
-    }).catch((err) => console.error('[ONBOARDING EMAIL ERROR]:', err));
+    });
 
     res.status(201).json({
       success: true,
+      emailSent,
+      loginEmail: adminEmail,
       temporaryPassword,
       cluster: mapCluster({ id: clusterId, name, district, college_district: collegeDistrict, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: normalizedPhone, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: normalizedPhone, status: 'Active' }),
       user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'Cluster Admin', cluster_id: clusterId, phone: normalizedPhone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
-    await pool.query('ROLLBACK').catch(() => undefined);
+    if (connection) {
+      await connection.rollback().catch(() => undefined);
+      connection.release();
+    }
     console.error('[CREATE_CLUSTER ERROR]', error?.code, error?.message);
     const code = error?.code;
     let status = 503;
@@ -1180,15 +1329,21 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
 
 app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
     const user = req.user;
-    let sql = 'SELECT p.id, p.name, p.cluster_id, c.name AS cluster_name, COUNT(v.id) AS villages_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id LEFT JOIN clusters c ON c.id = p.cluster_id';
-    const params: any[] = [];
-    const where: string[] = [];
+    let sql = 'SELECT p.id, p.name, p.cluster_id, c.name AS cluster_name, COUNT(v.id) AS villages_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id AND v.academic_year_id = p.academic_year_id LEFT JOIN clusters c ON c.id = p.cluster_id';
+    const params: any[] = [year.id];
+    const where: string[] = ['p.academic_year_id = ?'];
 
     if (user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       where.push('p.cluster_id = ?');
-      params.push(user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       where.push('p.cluster_id = ?');
       params.push(cluster);
@@ -1204,8 +1359,8 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
     let villagesByPanchayat: Record<string, any[]> = {};
     if (panchayatIds.length > 0) {
       const [vRows] = await pool.query<any[]>(
-        'SELECT v.id, v.name, v.panchayat_id, COUNT(s.id) AS student_count FROM villages v LEFT JOIN students s ON s.village_id = v.id WHERE v.panchayat_id IN (?) GROUP BY v.id, v.name, v.panchayat_id ORDER BY v.name ASC',
-        [panchayatIds]
+        'SELECT v.id, v.name, v.panchayat_id, COUNT(s.id) AS student_count FROM villages v LEFT JOIN students s ON s.village_id = v.id AND s.academic_year_id = v.academic_year_id WHERE v.panchayat_id IN (?) AND v.academic_year_id = ? GROUP BY v.id, v.name, v.panchayat_id ORDER BY v.name ASC',
+        [panchayatIds, year.id]
       );
       vRows.forEach((v) => {
         if (!villagesByPanchayat[v.panchayat_id]) villagesByPanchayat[v.panchayat_id] = [];
@@ -1239,17 +1394,26 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
 
 app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || req.body.cluster || '');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || req.body.cluster || ''));
     if (!clusterId || clusterId === 'all') {
-      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE academic_year_id = ? ORDER BY created_at ASC LIMIT 1', [year.id]);
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
     }
-    const panchayatId = String(req.body.id || req.body.name || `panchayat-${Date.now()}`).trim().toLowerCase().replace(/\s+/g, '-');
+    const panchayatId = String(req.body.id ? `${req.body.id}-${year.id}` : `${req.body.name || `panchayat-${Date.now()}`}-${year.id}`).trim().toLowerCase().replace(/\s+/g, '-');
     const name = String(req.body.name || 'New Panchayat').trim();
 
     await pool.query(
-      'INSERT INTO panchayats (id, name, cluster_id, status) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), status = VALUES(status)',
-      [panchayatId, name, clusterId, 'Active']
+      'INSERT INTO panchayats (id, name, cluster_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), status = VALUES(status), academic_year_id = VALUES(academic_year_id)',
+      [panchayatId, name, clusterId, 'Active', year.id]
     );
 
     res.json({ success: true, panchayat: { id: panchayatId, name, clusterId, cluster: clusterId, villagesCount: 0, activeStudents: 0, volunteersCount: 0, status: 'On Track', villages: [] } });
@@ -1259,18 +1423,94 @@ app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 });
 
+app.get('/api/schools', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const params: any[] = [year.id];
+    let sql = 'SELECT sc.*, c.name AS cluster_name, p.name AS panchayat_name, v.name AS village_name FROM schools sc LEFT JOIN clusters c ON c.id = sc.cluster_id LEFT JOIN panchayats p ON p.id = sc.panchayat_id LEFT JOIN villages v ON v.id = sc.village_id WHERE sc.academic_year_id = ?';
+    if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
+      sql += ' AND sc.cluster_id = ?';
+      params.push(clusterId);
+    }
+    if (req.query.panchayatId) {
+      sql += ' AND sc.panchayat_id = ?';
+      params.push(String(req.query.panchayatId));
+    }
+    if (req.query.villageId) {
+      sql += ' AND sc.village_id = ?';
+      params.push(String(req.query.villageId));
+    }
+    sql += ' ORDER BY sc.name ASC';
+    const [rows] = await pool.query<any[]>(sql, params);
+    res.json({ success: true, schools: rows });
+  } catch (error) {
+    console.error('Failed to load schools:', error);
+    res.status(503).json({ success: false, error: 'Unable to load schools.' });
+  }
+});
+
+app.post('/api/schools', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const name = String(req.body.name || '').trim();
+    const villageId = String(req.body.villageId || '').trim();
+    if (!name || !villageId) {
+      res.status(400).json({ success: false, error: 'School name and village are required.' });
+      return;
+    }
+    const [villageRows] = await pool.query<any[]>(
+      'SELECT id, panchayat_id, cluster_id FROM villages WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [villageId, year.id],
+    );
+    if (!villageRows.length) {
+      res.status(404).json({ success: false, error: 'Village not found in the selected academic year.' });
+      return;
+    }
+    const village = villageRows[0];
+    const id = `school-${randomUUID()}`;
+    await pool.query(
+      'INSERT INTO schools (id, name, academic_year_id, cluster_id, panchayat_id, village_id) VALUES (?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE status = \'ACTIVE\'',
+      [id, name, year.id, village.cluster_id, village.panchayat_id, village.id],
+    );
+    const [schoolRows] = await pool.query<any[]>('SELECT * FROM schools WHERE academic_year_id = ? AND village_id = ? AND name = ? LIMIT 1', [year.id, villageId, name]);
+    res.status(201).json({ success: true, school: schoolRows[0] });
+  } catch (error: any) {
+    console.error('Failed to create school:', error);
+    res.status(error?.code === 'ER_DUP_ENTRY' ? 409 : 500).json({ success: false, error: error?.code === 'ER_DUP_ENTRY' ? 'This school already exists in the village.' : 'Unable to create school.' });
+  }
+});
+
 app.get('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
     const panchayatId = req.query.panchayatId ? String(req.query.panchayatId) : null;
     const villageId = req.query.villageId ? String(req.query.villageId) : null;
 
-    let sql = `SELECT s.id, s.name, s.code, s.gender, s.dob, s.standard, s.cluster_id, s.panchayat_id, s.village_id, s.parent_name, s.phone, s.status, p.name AS panchayat_name, v.name AS village_name FROM students s LEFT JOIN panchayats p ON p.id = s.panchayat_id LEFT JOIN villages v ON v.id = s.village_id WHERE 1=1`;
-    const params: any[] = [];
+    let sql = `SELECT s.id, s.name, s.code, s.gender, s.dob, s.standard, s.cluster_id, s.panchayat_id, s.village_id, s.parent_name, s.phone, s.status, s.school_name, s.academic_year_id, p.name AS panchayat_name, v.name AS village_name FROM students s LEFT JOIN panchayats p ON p.id = s.panchayat_id LEFT JOIN villages v ON v.id = s.village_id WHERE s.academic_year_id = ?`;
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND s.cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND s.cluster_id = ?';
       params.push(cluster);
@@ -1296,7 +1536,16 @@ app.get('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || ''));
     if (!clusterId || clusterId === 'all') {
       const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
@@ -1309,8 +1558,8 @@ app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Re
     const villageId = rawVillageId && rawVillageId !== 'all' ? rawVillageId : null;
 
     await pool.query(
-      `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status)`,
-      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'Active')]
+      `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status, school_name, academic_year_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), gender = VALUES(gender), dob = VALUES(dob), standard = VALUES(standard), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), parent_name = VALUES(parent_name), phone = VALUES(phone), status = VALUES(status), school_name = VALUES(school_name), academic_year_id = VALUES(academic_year_id)`,
+      [id, String(req.body.code || id), name, String(req.body.gender || 'female'), String(req.body.dob || '2014-01-01'), String(req.body.standard || '6th Standard'), clusterId, panchayatId, villageId, String(req.body.parentName || 'Parent'), String(req.body.phone || ''), String(req.body.status || 'Active'), String(req.body.schoolName || ''), year.id]
     );
 
     res.json({ success: true, student: { id, code: String(req.body.code || id), name, gender: req.body.gender || 'female', dob: req.body.dob || '2014-01-01', standard: req.body.standard || '6th Standard', clusterId, panchayatId: panchayatId || '', panchayatName: req.body.panchayatName || panchayatId || '', villageId: villageId || '', villageName: req.body.villageName || villageId || '', parentName: req.body.parentName || 'Parent', phone: req.body.phone || '', status: req.body.status || 'active' } });
@@ -1322,13 +1571,19 @@ app.post('/api/students', requireAuth, async (req: AuthenticatedRequest, res: Re
 
 app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.cluster_id, v.panchayat_id, p.name AS panchayat_name, v.role, v.status FROM volunteers v LEFT JOIN panchayats p ON p.id = v.panchayat_id WHERE 1=1`;
-    const params: any[] = [];
+    let sql = `SELECT v.id, v.name, v.email, v.phone, v.department, v.cluster_id, v.panchayat_id, v.village_id, v.academic_year_id, p.name AS panchayat_name, v.role, v.status FROM volunteers v LEFT JOIN panchayats p ON p.id = v.panchayat_id WHERE v.academic_year_id = ?`;
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND v.cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND v.cluster_id = ?';
       params.push(cluster);
@@ -1345,7 +1600,16 @@ app.get('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: R
 
 app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || ''));
     if (!clusterId || clusterId === 'all') {
       const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
@@ -1355,8 +1619,8 @@ app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: 
     const panchayatId = rawPanchayatId && rawPanchayatId !== 'all' ? rawPanchayatId : null;
 
     await pool.query(
-      'INSERT INTO volunteers (id, name, email, phone, cluster_id, panchayat_id, department, role, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), department = VALUES(department), role = VALUES(role), status = VALUES(status)',
-      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, panchayatId, String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active')]
+      'INSERT INTO volunteers (id, name, email, phone, cluster_id, panchayat_id, village_id, department, role, status, academic_year_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), email = VALUES(email), phone = VALUES(phone), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), department = VALUES(department), role = VALUES(role), status = VALUES(status), academic_year_id = VALUES(academic_year_id)',
+      [id, String(req.body.name || 'Volunteer').trim(), String(req.body.email || ''), String(req.body.phone || ''), clusterId, panchayatId, req.body.villageId || null, String(req.body.department || 'Community Program'), String(req.body.role || 'Mentor'), String(req.body.status || 'Active'), year.id]
     );
     res.json({ success: true, volunteer: { id, name: req.body.name || 'Volunteer', email: req.body.email || '', phone: req.body.phone || '', clusterId, panchayatId: panchayatId || '', department: req.body.department || 'Community Program', role: req.body.role || 'Mentor', status: req.body.status || 'Active' } });
   } catch (error) {
@@ -1368,12 +1632,17 @@ app.post('/api/volunteers', requireAuth, async (req: AuthenticatedRequest, res: 
 app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     await ensureAcademicSetupTable();
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
     // v2 sessions table dropped day_number; the per-day session is identified
     // by id = 'academic-session-<cluster_id>-<day_number>' (set by PUT /api/sessions/:id).
     let sql = `
       SELECT
-        CONCAT('academic-session-', c.id, '-', a.day_number) AS id,
+        CONCAT('academic-session-', c.id, '-', a.academic_year_id, '-', a.day_number) AS id,
         CONCAT('DAY-', a.day_number) AS code,
         a.academic_year,
         a.day_number,
@@ -1388,15 +1657,22 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
         COALESCE(s.session_status, 'Draft') AS session_status,
         NULL AS module_id
       FROM academic_setup a
-      CROSS JOIN clusters c
+      JOIN clusters c ON c.academic_year_id = a.academic_year_id
       LEFT JOIN sessions s
-        ON s.id = CONCAT('academic-session-', c.id, '-', a.day_number)
-      WHERE a.session_name IS NOT NULL AND TRIM(a.session_name) <> ''`;
-    const params: any[] = [];
+        ON s.academic_year_id = a.academic_year_id
+        AND s.cluster_id = c.id
+        AND (
+          s.id = CONCAT('academic-session-', c.id, '-', a.academic_year_id, '-', a.day_number)
+          OR s.id = CONCAT('academic-session-', c.id, '-', a.day_number)
+        )
+      WHERE a.academic_year_id = ? AND c.academic_year_id = ?
+        AND a.session_name IS NOT NULL AND TRIM(a.session_name) <> ''`;
+    const params: any[] = [year.id, year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND c.id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND c.id = ?';
       params.push(cluster);
@@ -1418,9 +1694,18 @@ app.get('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.post('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || ''));
     if (!clusterId || clusterId === 'all') {
-      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE academic_year_id = ? ORDER BY created_at ASC LIMIT 1', [year.id]);
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
     }
     const id = String(req.body.id || `session-${Date.now()}`).trim();
@@ -1433,8 +1718,8 @@ app.post('/api/sessions', requireAuth, async (req: AuthenticatedRequest, res: Re
     const volunteerId = rawVolunteerId && rawVolunteerId !== 'all' ? rawVolunteerId : null;
 
     await pool.query(
-      'INSERT INTO sessions (id, code, name, module_id, cluster_id, panchayat_id, village_id, volunteer_id, date, time, session_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), date = VALUES(date), time = VALUES(time), session_status = VALUES(session_status)',
-      [id, String(req.body.code || id), String(req.body.name || 'Session').trim(), String(req.body.moduleId || 'module-english'), clusterId, panchayatId, villageId, volunteerId, date, String(req.body.time || '09:00'), String(req.body.status || 'Draft')]
+      'INSERT INTO sessions (id, code, name, module_id, cluster_id, panchayat_id, village_id, volunteer_id, academic_year, academic_year_id, date, time, session_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE code = VALUES(code), name = VALUES(name), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), academic_year = VALUES(academic_year), academic_year_id = VALUES(academic_year_id), date = VALUES(date), time = VALUES(time), session_status = VALUES(session_status)',
+      [id, String(req.body.code || id), String(req.body.name || 'Session').trim(), String(req.body.moduleId || 'module-english'), clusterId, panchayatId, villageId, volunteerId, year.name, year.id, date, String(req.body.time || '09:00'), String(req.body.status || 'Draft')]
     );
 
     res.json({ success: true, session: { id, code: String(req.body.code || id), name: req.body.name || 'Session', clusterId, panchayatId: panchayatId || '', villageId: villageId || '', date, time: req.body.time || '09:00', status: req.body.status || 'Draft' } });
@@ -1475,21 +1760,33 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
   }
 
   try {
-    const id = `academic-session-${req.user.clusterId}-${dayNumber}`;
+    const year = await resolveAcademicYear(req);
+    if (!year || year.name !== academicYear) {
+      res.status(400).json({ success: false, error: 'The selected academic year does not match the schedule.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const id = `academic-session-${clusterId}-${year.id}-${dayNumber}`;
     // v2 sessions: only snake_case columns; title/academic_year/day_number/
     // session_name_snapshot/status were dropped. The session name lives in
     // academic_setup.session_name (joined on the read path).
     await pool.query(
-      `INSERT INTO sessions (id, name, cluster_id, panchayat_id, village_id, volunteer_id, date, session_status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), date = VALUES(date), session_status = VALUES(session_status)`,
+      `INSERT INTO sessions (id, name, cluster_id, panchayat_id, village_id, volunteer_id, academic_year, academic_year_id, date, session_status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), volunteer_id = VALUES(volunteer_id), academic_year = VALUES(academic_year), academic_year_id = VALUES(academic_year_id), date = VALUES(date), session_status = VALUES(session_status)`,
       [
         id,
         sessionName,
-        req.user.clusterId,
+        clusterId,
         req.body.panchayatId ? String(req.body.panchayatId) : null,
         req.body.villageId ? String(req.body.villageId) : null,
         req.body.volunteerId ? String(req.body.volunteerId) : null,
+        year.name,
+        year.id,
         date,
         status,
       ],
@@ -1503,13 +1800,19 @@ app.put('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res:
 
 app.get('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM attendance_sessions WHERE 1=1';
-    const params: any[] = [];
+    let sql = 'SELECT * FROM attendance_sessions WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(cluster);
@@ -1544,7 +1847,16 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       res.status(403).json({ success: false, error: 'Only Cluster Admin can submit attendance.' });
       return;
     }
-    const clusterId = req.user.clusterId;
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
     const sessionId = String(req.body.sessionId || '');
     // Phase 4: Check if session is editable
     if (sessionId) {
@@ -1565,8 +1877,8 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
     await pool.query('START TRANSACTION');
 
     await pool.query(
-      'INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, status, present_count, total_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), day_number = VALUES(day_number), status = VALUES(status), present_count = VALUES(present_count), total_count = VALUES(total_count)',
-      [id, String(req.body.sessionId || id), clusterId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), Number(req.body.dayNumber || 1), status, presentCount, totalCount]
+      'INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, academic_year_id, status, present_count, total_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), day_number = VALUES(day_number), academic_year_id = VALUES(academic_year_id), status = VALUES(status), present_count = VALUES(present_count), total_count = VALUES(total_count)',
+      [id, String(req.body.sessionId || id), clusterId, String(req.body.panchayatId || ''), String(req.body.villageId || ''), Number(req.body.dayNumber || 1), year.id, status, presentCount, totalCount]
     );
 
     if (Array.isArray(req.body.records)) {
@@ -1613,13 +1925,19 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
 
 app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM lesson_plans WHERE 1=1';
-    const params: any[] = [];
+    let sql = 'SELECT * FROM lesson_plans WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(cluster);
@@ -1695,7 +2013,16 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
 
 app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || 'dharmapuri');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || '')) || 'dharmapuri';
     const id = String(req.body.id || `lesson-${Date.now()}`).trim();
     // Phase 4: Check if session is editable
     const lpSessionId = String(req.body.sessionId || '');
@@ -1714,7 +2041,7 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
       dayNumber: req.body.dayNumber || 7,
       grades: req.body.grades || req.body.targetStandard || 'IX, XI',
       date: req.body.date || new Date().toISOString().split('T')[0],
-      academicYear: req.body.academicYear || '2025 – 2026',
+      academicYear: year.name,
       panchayatName: req.body.panchayatName || '',
       villageName: req.body.villageName || '',
       villagesList: req.body.villagesList || [],
@@ -1742,9 +2069,9 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
     }
 
     await pool.query(
-      `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, status, created_by) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), materials = VALUES(materials), duration = VALUES(duration), remarks = VALUES(remarks), teaching_method = VALUES(teaching_method), assessment_task = VALUES(assessment_task), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), volunteer_id = VALUES(volunteer_id), status = VALUES(status), created_by = VALUES(created_by)`,
+      `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, academic_year_id, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), materials = VALUES(materials), duration = VALUES(duration), remarks = VALUES(remarks), teaching_method = VALUES(teaching_method), assessment_task = VALUES(assessment_task), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), volunteer_id = VALUES(volunteer_id), academic_year_id = VALUES(academic_year_id), status = VALUES(status), created_by = VALUES(created_by)`,
       [
         id, String(req.body.sessionId || ''), finalModuleId, clusterId, String(req.body.panchayatId || ''), String(req.body.title || req.body.topic || 'Lesson Plan').trim(),
         req.body.topic ? String(req.body.topic) : null,
@@ -1759,6 +2086,7 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
         req.body.expectedOutcome || req.body.learningOutcomes ? (typeof req.body.expectedOutcome === 'string' ? req.body.expectedOutcome : JSON.stringify(req.body.expectedOutcome || req.body.learningOutcomes)) : null,
         req.body.dayNumber ? Number(req.body.dayNumber) : 7,
         req.body.volunteerId ? String(req.body.volunteerId) : null,
+        year.id,
         statusVal,
         String(req.user.id)
       ]
@@ -1773,13 +2101,19 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
 
 app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM finance_entries WHERE 1=1';
-    const params: any[] = [];
+    let sql = 'SELECT * FROM finance_entries WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     } else if (cluster !== 'all') {
       sql += ' AND cluster_id = ?';
       params.push(cluster);
@@ -1796,9 +2130,18 @@ app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Resp
 
 app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let clusterId = req.user.role === 'Cluster Admin' ? req.user.clusterId : String(req.body.clusterId || '');
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || ''));
     if (!clusterId || clusterId === 'all') {
-      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters ORDER BY created_at ASC LIMIT 1');
+      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE academic_year_id = ? ORDER BY created_at ASC LIMIT 1', [year.id]);
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
     }
     const id = String(req.body.id || `finance-${Date.now()}`).trim();
@@ -1815,8 +2158,8 @@ app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Res
     const date = String(req.body.date || new Date().toISOString().split('T')[0]);
 
     await pool.query(
-      'INSERT INTO finance_entries (id, cluster_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), created_by = VALUES(created_by), status = VALUES(status), bill_reference = VALUES(bill_reference)',
-      [id, clusterId, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), String(req.body.status || 'Draft'), String(req.body.billReference || '')]
+      'INSERT INTO finance_entries (id, cluster_id, session_id, academic_year_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), session_id = VALUES(session_id), academic_year_id = VALUES(academic_year_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), created_by = VALUES(created_by), status = VALUES(status), bill_reference = VALUES(bill_reference)',
+      [id, clusterId, req.body.sessionId || null, year.id, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), String(req.body.status || 'Draft'), String(req.body.billReference || '')]
     );
 
     res.json({ success: true, financeEntry: { id, clusterId, date, description: req.body.description || 'Finance Entry', category: req.body.category || 'General', amount, status: req.body.status || 'Draft', billReference: req.body.billReference || '' } });
@@ -2152,16 +2495,23 @@ app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, r
 
 // 3. GET /api/villages
 app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const targetClusterId = req.user.role !== 'Super Admin' ? req.user.clusterId : (req.query.cluster || null);
+  const year = await resolveAcademicYear(req);
+  if (!year) {
+    res.status(404).json({ success: false, error: 'No academic year is available.' });
+    return;
+  }
+  const targetClusterId = req.user.role !== 'Super Admin'
+    ? await resolveClusterForAcademicYear(req, year.id)
+    : (req.query.cluster || null);
   const targetPanchayatId = req.query.panchayat || null;
   
   let sql = `
     SELECT v.*, p.name as panchayat_name 
     FROM villages v
     LEFT JOIN panchayats p ON v.panchayat_id = p.id
-    WHERE 1=1
+    WHERE v.academic_year_id = ?
   `;
-  const params: any[] = [];
+  const params: any[] = [year.id];
   
   if (targetClusterId) {
     sql += ' AND v.cluster_id = ?';
@@ -2188,12 +2538,21 @@ app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Re
     return;
   }
   try {
-    const finalId = id || crypto.randomUUID();
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const finalId = id ? `${id}-${year.id}` : `village-${crypto.randomUUID()}`;
     const [result] = await pool.query<any>(
-      `INSERT INTO villages (id, name, panchayat_id, cluster_id) 
-       VALUES (?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id)`,
-      [finalId, name, panchayat_id, cluster_id]
+      `INSERT INTO villages (id, name, panchayat_id, cluster_id, academic_year_id)
+       VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id), academic_year_id = VALUES(academic_year_id)`,
+      [finalId, name, panchayat_id, cluster_id, year.id]
     );
     res.json({ success: true, data: { id: finalId } });
   } catch (error) {
@@ -2226,12 +2585,21 @@ app.delete('/api/panchayats/:id', requireAuth, async (req: AuthenticatedRequest,
 
 // 7. PUT /api/students/:id
 app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { name, gender, dob, standard, panchayat_id, panchayatId, village_id, villageId, parent_name, parentName, phone, status } = req.body;
+  const { name, gender, dob, standard, panchayat_id, panchayatId, village_id, villageId, parent_name, parentName, phone, status, schoolName } = req.body;
   const pId = panchayat_id !== undefined ? panchayat_id : panchayatId;
   const vId = village_id !== undefined ? village_id : villageId;
   const parName = parent_name !== undefined ? parent_name : parentName;
 
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const [result] = await pool.query<any>(
       `UPDATE students SET 
         name = COALESCE(?, name), 
@@ -2242,9 +2610,10 @@ app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res:
         village_id = COALESCE(?, village_id), 
         parent_name = COALESCE(?, parent_name), 
         phone = COALESCE(?, phone), 
-        status = COALESCE(?, status) 
-       WHERE id = ?`,
-      [name ?? null, gender ?? null, dob ?? null, standard ?? null, pId ?? null, vId ?? null, parName ?? null, phone ?? null, status ?? null, req.params.id]
+        status = COALESCE(?, status),
+        school_name = COALESCE(?, school_name)
+       WHERE id = ? AND academic_year_id = ?`,
+      [name ?? null, gender ?? null, dob ?? null, standard ?? null, pId ?? null, vId ?? null, parName ?? null, phone ?? null, status ?? null, schoolName ?? null, req.params.id, year.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
     res.json({ success: true, data: { id: req.params.id } });
@@ -2256,7 +2625,16 @@ app.put('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res:
 // 8. DELETE /api/students/:id
 app.delete('/api/students/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("UPDATE students SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const [result] = await pool.query<any>("UPDATE students SET status = 'Inactive' WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Student not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -2273,11 +2651,21 @@ app.post('/api/students/bulk', requireAuth, async (req: AuthenticatedRequest, re
   }
   let count = 0;
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const targetClusterId = await resolveClusterForAcademicYear(req, year.id, clusterId);
     for (const student of students) {
       const studentId = student.id || crypto.randomUUID();
       await pool.query(
-        'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), standard = VALUES(standard), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id)',
-        [studentId, clusterId, student.name, student.gender || 'male', student.dob || '2014-01-01', student.standard || '6th Standard', student.panchayatId || student.panchayat_id || null, student.villageId || student.village_id || null, student.parentName || student.parent_name || 'Parent', student.phone || '', 'Active']
+        'INSERT INTO students (id, cluster_id, name, gender, dob, standard, panchayat_id, village_id, parent_name, phone, status, school_name, academic_year_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), standard = VALUES(standard), panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), school_name = VALUES(school_name), academic_year_id = VALUES(academic_year_id)',
+        [studentId, targetClusterId, student.name, student.gender || 'male', student.dob || '2014-01-01', student.standard || '6th Standard', student.panchayatId || student.panchayat_id || null, student.villageId || student.village_id || null, student.parentName || student.parent_name || 'Parent', student.phone || '', 'Active', student.schoolName || '', year.id]
       );
       count++;
     }
@@ -2294,6 +2682,15 @@ app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, re
   const vId = village_id !== undefined ? village_id : villageId;
 
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const [result] = await pool.query<any>(
       `UPDATE volunteers SET 
         name = COALESCE(?, name), 
@@ -2304,8 +2701,8 @@ app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, re
         panchayat_id = COALESCE(?, panchayat_id), 
         village_id = COALESCE(?, village_id), 
         status = COALESCE(?, status) 
-       WHERE id = ?`,
-      [name ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, pId ?? null, vId ?? null, status ?? null, req.params.id]
+      WHERE id = ? AND academic_year_id = ?`,
+          [name ?? null, email ?? null, phone ?? null, department ?? null, role ?? null, pId ?? null, vId ?? null, status ?? null, req.params.id, year.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
     res.json({ success: true, data: { id: req.params.id } });
@@ -2317,7 +2714,16 @@ app.put('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, re
 // 11. DELETE /api/volunteers/:id
 app.delete('/api/volunteers/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("UPDATE volunteers SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const [result] = await pool.query<any>("UPDATE volunteers SET status = 'Inactive' WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Volunteer not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -2334,10 +2740,20 @@ app.post('/api/volunteers/bulk', requireAuth, async (req: AuthenticatedRequest, 
   }
   let count = 0;
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const targetClusterId = await resolveClusterForAcademicYear(req, year.id, clusterId);
     for (const vol of volunteers) {
       await pool.query(
-        'INSERT INTO volunteers (id, cluster_id, name, email, phone, department, role, panchayat_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [crypto.randomUUID(), clusterId, vol.name, vol.email, vol.phone, vol.department, vol.role, vol.panchayatId || null, 'Active']
+        'INSERT INTO volunteers (id, cluster_id, name, email, phone, department, role, panchayat_id, village_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [`volunteer-${crypto.randomUUID()}`, targetClusterId, vol.name, vol.email, vol.phone, vol.department, vol.role, vol.panchayatId || null, vol.villageId || null, 'Active', year.id]
       );
       count++;
     }
@@ -2350,12 +2766,21 @@ app.post('/api/volunteers/bulk', requireAuth, async (req: AuthenticatedRequest, 
 // 13. DELETE /api/sessions/:id
 app.delete('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     // v2: the legacy 'session_attendance' table never existed. The real
     // attendance tables (attendance_sessions / student_attendance /
     // volunteer_attendance) cascade-delete automatically via the FKs declared
     // in 206_attendance.sql. We just need to delete the session row; the
     // children follow.
-    const [result] = await pool.query<any>("DELETE FROM sessions WHERE id = ?", [req.params.id]);
+    const [result] = await pool.query<any>("DELETE FROM sessions WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Session not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -2366,7 +2791,16 @@ app.delete('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, r
 // 14. DELETE /api/lesson-plans/:id
 app.delete('/api/lesson-plans/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [result] = await pool.query<any>("DELETE FROM lesson_plans WHERE id = ?", [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const [result] = await pool.query<any>("DELETE FROM lesson_plans WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Lesson plan not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -2377,13 +2811,22 @@ app.delete('/api/lesson-plans/:id', requireAuth, async (req: AuthenticatedReques
 // --- 1. Date Change Requests ---
 app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const { sessionId, originalDate, requestedDate, reason } = req.body;
-    const clusterId = req.user.clusterId;
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
     const id = `dcr-${randomUUID()}`;
 
     await pool.query(
-      'INSERT INTO date_change_requests (id, session_id, cluster_id, original_date, requested_date, reason, status, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, sessionId, clusterId, originalDate, requestedDate, reason, 'Pending', req.user.id]
+      'INSERT INTO date_change_requests (id, session_id, cluster_id, academic_year_id, original_date, requested_date, reason, status, requested_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, sessionId, clusterId, year.id, originalDate, requestedDate, reason, 'Pending', req.user.id]
     );
 
     await pool.query(
@@ -2405,12 +2848,18 @@ app.post('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/date-change-requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT * FROM date_change_requests WHERE 1=1';
-    const params: any[] = [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    let sql = 'SELECT * FROM date_change_requests WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     }
 
     sql += ' ORDER BY created_at DESC';
@@ -2438,7 +2887,12 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
   }
 
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM date_change_requests WHERE id = ?', [req.params.id]);
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>('SELECT * FROM date_change_requests WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
     if (!rows.length) {
       res.status(404).json({ success: false, error: 'Request not found.' });
       return;
@@ -2448,12 +2902,12 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
     await pool.query('START TRANSACTION');
 
     await pool.query(
-      'UPDATE date_change_requests SET status = ?, reviewed_by = ?, review_remarks = ?, reviewed_at = NOW() WHERE id = ?',
-      [status, req.user.id, remarks, req.params.id]
+      'UPDATE date_change_requests SET status = ?, reviewed_by = ?, review_remarks = ?, reviewed_at = NOW() WHERE id = ? AND academic_year_id = ?',
+      [status, req.user.id, remarks, req.params.id, year.id]
     );
 
     if (status === 'Approved') {
-      await pool.query('UPDATE sessions SET date = ? WHERE id = ?', [request.requested_date, request.session_id]);
+      await pool.query('UPDATE sessions SET date = ? WHERE id = ? AND academic_year_id = ?', [request.requested_date, request.session_id, year.id]);
     }
 
     await pool.query(
@@ -2478,11 +2932,17 @@ app.put('/api/date-change-requests/:id/:action', requireAuth, async (req: Authen
 // --- 2. Session Reports ---
 app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT * FROM session_reports WHERE 1=1';
-    const params: any[] = [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    let sql = 'SELECT * FROM session_reports WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     }
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
@@ -2495,15 +2955,24 @@ app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, r
 
 app.post('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const { id, sessionId, clusterId, dayNumber, sessionSummary, studentCount, attendanceSummary, activities, issues, remarks, status } = req.body;
     const recordId = id || `report-${randomUUID()}`;
-    const cId = clusterId || req.user.clusterId;
+    const cId = await resolveClusterForAcademicYear(req, year.id, clusterId || '');
 
     await pool.query(
-      `INSERT INTO session_reports (id, session_id, cluster_id, day_number, session_summary, student_count, attendance_summary, activities, issues, remarks, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO session_reports (id, session_id, cluster_id, academic_year_id, day_number, session_summary, student_count, attendance_summary, activities, issues, remarks, status, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON DUPLICATE KEY UPDATE session_summary = VALUES(session_summary), student_count = VALUES(student_count), attendance_summary = VALUES(attendance_summary), activities = VALUES(activities), issues = VALUES(issues), remarks = VALUES(remarks), status = VALUES(status)`,
-      [recordId, sessionId, cId, dayNumber, sessionSummary, studentCount, attendanceSummary, typeof activities === 'string' ? activities : JSON.stringify(activities), issues, remarks, status || 'Draft', req.user.id]
+      [recordId, sessionId, cId, year.id, dayNumber, sessionSummary, studentCount, attendanceSummary, typeof activities === 'string' ? activities : JSON.stringify(activities), issues, remarks, status || 'Draft', req.user.id]
     );
 
     res.json({ success: true, data: { id: recordId } });
@@ -2526,23 +2995,32 @@ app.delete('/api/session-reports/:id', requireAuth, async (req: AuthenticatedReq
 // --- 3. Session Submissions ---
 app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const { sessionId, clusterId, dayNumber } = req.body;
-    const cId = clusterId || req.user.clusterId;
-    const recordId = `sub-${sessionId}`;
+    const cId = await resolveClusterForAcademicYear(req, year.id, clusterId || '');
+    const recordId = `sub-${year.id}-${sessionId}`;
 
-    const [attRows] = await pool.query<any[]>("SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND status != 'Draft'", [sessionId, dayNumber]);
+    const [attRows] = await pool.query<any[]>("SELECT id FROM attendance_sessions WHERE session_id = ? AND day_number = ? AND academic_year_id = ? AND status != 'Draft'", [sessionId, dayNumber, year.id]);
     const attendanceComplete = attRows.length > 0;
 
-    const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ?', [sessionId]);
+    const [lpRows] = await pool.query<any[]>('SELECT id FROM lesson_plans WHERE session_id = ? AND academic_year_id = ?', [sessionId, year.id]);
     const lessonPlanComplete = lpRows.length > 0;
 
-    const [photoRows] = await pool.query<any[]>('SELECT id FROM session_photos WHERE cluster_id = ? AND day_number = ?', [cId, dayNumber]);
+    const [photoRows] = await pool.query<any[]>('SELECT id FROM session_photos WHERE cluster_id = ? AND day_number = ? AND academic_year_id = ?', [cId, dayNumber, year.id]);
     const photosComplete = photoRows.length > 0;
 
-    const [repRows] = await pool.query<any[]>('SELECT id FROM session_reports WHERE session_id = ?', [sessionId]);
+    const [repRows] = await pool.query<any[]>('SELECT id FROM session_reports WHERE session_id = ? AND academic_year_id = ?', [sessionId, year.id]);
     const reportComplete = repRows.length > 0;
 
-    const [finRows] = await pool.query<any[]>('SELECT id FROM finance_entries WHERE cluster_id = ?', [cId]);
+    const [finRows] = await pool.query<any[]>('SELECT id FROM finance_entries WHERE cluster_id = ? AND academic_year_id = ?', [cId, year.id]);
     const financeComplete = finRows.length > 0;
 
     const allComplete = attendanceComplete && lessonPlanComplete && photosComplete && reportComplete && financeComplete;
@@ -2561,10 +3039,10 @@ app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedReque
     await pool.query('START TRANSACTION');
 
     await pool.query(
-      `INSERT INTO session_submissions (id, session_id, cluster_id, day_number, attendance_complete, lesson_plan_complete, photos_complete, report_complete, finance_complete, status, submitted_at, submitted_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
-       ON DUPLICATE KEY UPDATE attendance_complete=VALUES(attendance_complete), lesson_plan_complete=VALUES(lesson_plan_complete), photos_complete=VALUES(photos_complete), report_complete=VALUES(report_complete), finance_complete=VALUES(finance_complete), status=VALUES(status), submitted_at=VALUES(submitted_at), submitted_by=VALUES(submitted_by)`,
-      [recordId, sessionId, cId, dayNumber, attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, 'Submitted', req.user.id]
+      `INSERT INTO session_submissions (id, session_id, cluster_id, academic_year_id, day_number, attendance_complete, lesson_plan_complete, photos_complete, report_complete, finance_complete, status, submitted_at, submitted_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)
+       ON DUPLICATE KEY UPDATE academic_year_id=VALUES(academic_year_id), attendance_complete=VALUES(attendance_complete), lesson_plan_complete=VALUES(lesson_plan_complete), photos_complete=VALUES(photos_complete), report_complete=VALUES(report_complete), finance_complete=VALUES(finance_complete), status=VALUES(status), submitted_at=VALUES(submitted_at), submitted_by=VALUES(submitted_by)`,
+      [recordId, sessionId, cId, year.id, dayNumber, attendanceComplete, lessonPlanComplete, photosComplete, reportComplete, financeComplete, 'Submitted', req.user.id]
     );
 
     // v2 sessions: the column is session_status, not status.
@@ -2591,11 +3069,17 @@ app.post('/api/session-submissions', requireAuth, async (req: AuthenticatedReque
 
 app.get('/api/session-submissions', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    let sql = 'SELECT * FROM session_submissions WHERE 1=1';
-    const params: any[] = [];
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    let sql = 'SELECT * FROM session_submissions WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
     if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND cluster_id = ?';
-      params.push(req.user.clusterId);
+      params.push(clusterId);
     }
     sql += ' ORDER BY created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
@@ -2713,12 +3197,21 @@ app.put('/api/session-submissions/:id/resubmit', requireAuth, async (req: Authen
 // --- 4. Modules CRUD ---
 app.post('/api/modules', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
     const { moduleNumber, moduleName, topic, description, academicYear, dayNumber } = req.body;
     const id = `mod-${randomUUID()}`;
 
     await pool.query(
-      'INSERT INTO modules (id, code, name, description, is_active, academic_year, day_number) VALUES (?, ?, ?, ?, 1, ?, ?)',
-      [id, moduleNumber, moduleName || topic, description, academicYear, dayNumber]
+      'INSERT INTO modules (id, code, name, description, is_active, academic_year, academic_year_id, day_number) VALUES (?, ?, ?, ?, 1, ?, ?, ?)',
+      [id, moduleNumber, moduleName || topic, description, year.name, year.id, dayNumber]
     );
 
     await pool.query(
@@ -2735,10 +3228,19 @@ app.post('/api/modules', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 app.put('/api/modules/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { moduleNumber, moduleName, topic, description, academicYear, dayNumber } = req.body;
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const { moduleNumber, moduleName, topic, description, dayNumber } = req.body;
     await pool.query(
-      'UPDATE modules SET code = ?, name = ?, description = ?, academic_year = ?, day_number = ? WHERE id = ?',
-      [moduleNumber, moduleName || topic, description, academicYear, dayNumber, req.params.id]
+      'UPDATE modules SET code = ?, name = ?, description = ?, academic_year = ?, academic_year_id = ?, day_number = ? WHERE id = ? AND academic_year_id = ?',
+      [moduleNumber, moduleName || topic, description, year.name, year.id, dayNumber, req.params.id, year.id]
     );
 
     await pool.query(
@@ -2842,10 +3344,244 @@ const normalizeDateValue = (value: unknown, fallback: string): string => {
   return fallback;
 };
 
+const copyAcademicYearMasterData = async (
+  connection: any,
+  sourceYearId: string,
+  targetYearId: string,
+  targetYearName: string,
+  selections: Record<string, unknown>,
+  copiedFilePaths: string[],
+) => {
+  const enabled = (key: string) => selections[key] === true;
+  const clusterIds = new Map<string, string>();
+  const panchayatIds = new Map<string, string>();
+  const villageIds = new Map<string, string>();
+  const studentIds = new Map<string, string>();
+  const volunteerIds = new Map<string, string>();
+  const moduleIds = new Map<string, string>();
+  const sessionIds = new Map<string, string>();
+
+  if (enabled('clusters')) {
+    const [rows] = await connection.query('SELECT * FROM clusters WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const id = `cluster-${randomUUID()}`;
+      clusterIds.set(row.id, id);
+      await connection.query(
+        `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id, source_cluster_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
+        [id, row.name, row.district, row.college_district, row.state, row.code, row.college_name, row.spoc_name, row.spoc_mobile, row.status, targetYearId, row.source_cluster_id || row.id],
+      );
+    }
+  }
+
+  if (enabled('panchayatsVillages')) {
+    const [rows] = await connection.query('SELECT * FROM panchayats WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      const id = `panchayat-${randomUUID()}`;
+      panchayatIds.set(row.id, id);
+      await connection.query(
+        'INSERT INTO panchayats (id, name, cluster_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?)',
+        [id, row.name, clusterId, row.status, targetYearId],
+      );
+    }
+
+    const [villageRows] = await connection.query('SELECT * FROM villages WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of villageRows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      const panchayatId = panchayatIds.get(row.panchayat_id);
+      if (!clusterId || !panchayatId) continue;
+      const id = `village-${randomUUID()}`;
+      villageIds.set(row.id, id);
+      await connection.query(
+        'INSERT INTO villages (id, name, panchayat_id, cluster_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [id, row.name, panchayatId, clusterId, row.status, targetYearId],
+      );
+    }
+  }
+
+  if (enabled('students')) {
+    const [rows] = await connection.query('SELECT * FROM students WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      const panchayatId = panchayatIds.get(row.panchayat_id);
+      const villageId = villageIds.get(row.village_id);
+      if (!clusterId || !panchayatId || !villageId) continue;
+      const id = `student-${randomUUID()}`;
+      studentIds.set(row.id, id);
+      await connection.query(
+        `INSERT INTO students (id, code, name, gender, dob, standard, cluster_id, panchayat_id, village_id, parent_name, phone, status, school_name, academic_year_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, row.code, row.name, row.gender, row.dob, row.standard, clusterId, panchayatId, villageId, row.parent_name, row.phone, row.status, row.school_name, targetYearId],
+      );
+    }
+  }
+
+  if (enabled('volunteers')) {
+    const [rows] = await connection.query('SELECT * FROM volunteers WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      const id = `volunteer-${randomUUID()}`;
+      volunteerIds.set(row.id, id);
+      await connection.query(
+        `INSERT INTO volunteers (id, name, email, phone, cluster_id, panchayat_id, village_id, department, stream, passing_out_year, role, status, academic_year_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, row.name, row.email, row.phone, clusterId, panchayatIds.get(row.panchayat_id) || null, villageIds.get(row.village_id) || null, row.department, row.stream, row.passing_out_year, row.role, row.status, targetYearId],
+      );
+    }
+  }
+
+  if (enabled('schools')) {
+    const [rows] = await connection.query('SELECT * FROM schools WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      await connection.query(
+        'INSERT INTO schools (id, name, academic_year_id, cluster_id, panchayat_id, village_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [`school-${randomUUID()}`, row.name, targetYearId, clusterId, panchayatIds.get(row.panchayat_id) || null, villageIds.get(row.village_id) || null, row.status],
+      );
+    }
+  }
+
+  if (enabled('moduleLibrary')) {
+    const [rows] = await connection.query('SELECT * FROM modules WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const id = `module-${randomUUID()}`;
+      moduleIds.set(row.id, id);
+      await connection.query(
+        'INSERT INTO modules (id, code, name, description, academic_year, academic_year_id, day_number, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, row.code, row.name, row.description, targetYearName, targetYearId, row.day_number, row.is_active],
+      );
+      const [resources] = await connection.query('SELECT * FROM module_resources WHERE module_id = ?', [row.id]);
+      for (const resource of resources) {
+        await connection.query(
+          'INSERT INTO module_resources (id, module_id, original_filename, file_path, file_url) VALUES (?, ?, ?, ?, ?)',
+          [`resource-${randomUUID()}`, id, resource.original_filename, resource.file_path, resource.file_url],
+        );
+      }
+    }
+  }
+
+  const needsSessions = enabled('lessonPlans') || enabled('attendanceHistory') || enabled('sessionReports') || enabled('sessionPhotos') || enabled('financeRecords');
+  if (needsSessions) {
+    const [rows] = await connection.query('SELECT * FROM sessions WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      const id = `session-${randomUUID()}`;
+      sessionIds.set(row.id, id);
+      await connection.query(
+        `INSERT INTO sessions (id, code, name, module_id, cluster_id, panchayat_id, village_id, volunteer_id, academic_year, academic_year_id, day_number, session_date_fixed, session_date_fixed_at, session_date_fixed_by, date, time, session_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, row.code, row.name, moduleIds.get(row.module_id) || null, clusterId, panchayatIds.get(row.panchayat_id) || null, villageIds.get(row.village_id) || null, volunteerIds.get(row.volunteer_id) || null, targetYearName, targetYearId, row.day_number, row.session_date_fixed, row.session_date_fixed_at, row.session_date_fixed_by, row.date, row.time, row.session_status],
+      );
+    }
+  }
+
+  if (enabled('lessonPlans')) {
+    const [rows] = await connection.query('SELECT * FROM lesson_plans WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      await connection.query(
+        `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, volunteer_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, academic_year_id, status, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [`lesson-${randomUUID()}`, sessionIds.get(row.session_id) || null, moduleIds.get(row.module_id) || null, clusterId, panchayatIds.get(row.panchayat_id) || null, volunteerIds.get(row.volunteer_id) || null, row.title, row.topic, row.objective, row.activities, row.materials, row.duration, row.remarks, row.teaching_method, row.assessment_task, row.target_standard, row.learning_outcomes, row.day_number, targetYearId, row.status, row.created_by],
+      );
+    }
+  }
+
+  if (enabled('attendanceHistory')) {
+    const [rows] = await connection.query('SELECT * FROM attendance_sessions WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      const sessionId = sessionIds.get(row.session_id);
+      if (!clusterId || !sessionId) continue;
+      const attendanceId = `attendance-${randomUUID()}`;
+      await connection.query(
+        `INSERT INTO attendance_sessions (id, session_id, cluster_id, panchayat_id, village_id, day_number, academic_year_id, status, present_count, total_count, task_completed_count, not_marked_count, edit_reason, reviewed_by, reviewed_at, review_remarks)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [attendanceId, sessionId, clusterId, panchayatIds.get(row.panchayat_id) || null, villageIds.get(row.village_id) || null, row.day_number, targetYearId, row.status, row.present_count, row.total_count, row.task_completed_count, row.not_marked_count, row.edit_reason, row.reviewed_by, row.reviewed_at, row.review_remarks],
+      );
+      const [studentRows] = await connection.query('SELECT * FROM student_attendance WHERE attendance_session_id = ?', [row.id]);
+      for (const record of studentRows) {
+        const studentId = studentIds.get(record.student_id);
+        if (!studentId) continue;
+        await connection.query(
+          'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, task_status) VALUES (?, ?, ?, ?, ?)',
+          [`student-attendance-${randomUUID()}`, attendanceId, studentId, record.present, record.task_status],
+        );
+      }
+      const [volunteerRows] = await connection.query('SELECT * FROM volunteer_attendance WHERE attendance_session_id = ?', [row.id]);
+      for (const record of volunteerRows) {
+        const volunteerId = volunteerIds.get(record.volunteer_id);
+        if (!volunteerId) continue;
+        await connection.query(
+          'INSERT INTO volunteer_attendance (id, attendance_session_id, volunteer_id, present) VALUES (?, ?, ?, ?)',
+          [`volunteer-attendance-${randomUUID()}`, attendanceId, volunteerId, record.present],
+        );
+      }
+    }
+  }
+
+  if (enabled('sessionReports')) {
+    const [rows] = await connection.query('SELECT * FROM session_reports WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      const sessionId = sessionIds.get(row.session_id);
+      if (!clusterId || !sessionId) continue;
+      await connection.query(
+        'INSERT INTO session_reports (id, session_id, cluster_id, academic_year_id, day_number, session_summary, student_count, attendance_summary, activities, issues, remarks, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [`report-${randomUUID()}`, sessionId, clusterId, targetYearId, row.day_number, row.session_summary, row.student_count, row.attendance_summary, row.activities, row.issues, row.remarks, row.status, row.created_by],
+      );
+    }
+  }
+
+  if (enabled('financeRecords')) {
+    const [rows] = await connection.query('SELECT * FROM finance_entries WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId) continue;
+      await connection.query(
+        'INSERT INTO finance_entries (id, cluster_id, session_id, academic_year_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [`finance-${randomUUID()}`, clusterId, sessionIds.get(row.session_id) || null, targetYearId, row.date, row.description, row.category, row.amount, row.created_by, row.status, row.bill_reference],
+      );
+    }
+  }
+
+  if (enabled('sessionPhotos')) {
+    const [rows] = await connection.query('SELECT * FROM session_photos WHERE academic_year_id = ?', [sourceYearId]);
+    for (const row of rows) {
+      const clusterId = clusterIds.get(row.cluster_id);
+      if (!clusterId || !row.file_path || !fs.existsSync(row.file_path)) continue;
+      const id = `photo-${randomUUID()}`;
+      const copiedPath = path.join(path.dirname(row.file_path), `${id}-${path.basename(row.file_path)}`);
+      fs.copyFileSync(row.file_path, copiedPath);
+      copiedFilePaths.push(copiedPath);
+      await connection.query(
+        'INSERT INTO session_photos (id, cluster_id, session_id, academic_year_id, day_number, file_path, file_url, original_filename, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [id, clusterId, sessionIds.get(row.session_id) || null, targetYearId, row.day_number, copiedPath, null, row.original_filename, row.uploaded_by, row.uploaded_at],
+      );
+    }
+  }
+};
+
 // --- 5. Academic Years ---
 app.get('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const [rows] = await pool.query<any[]>('SELECT * FROM academic_years ORDER BY start_date DESC');
+    const [rows] = await pool.query<any[]>(`
+      SELECT ay.*,
+        (SELECT COUNT(*) FROM academic_setup s WHERE s.academic_year_id = ay.id) AS session_count,
+        (SELECT COUNT(*) FROM clusters c WHERE c.academic_year_id = ay.id) AS cluster_count,
+        ((SELECT COUNT(DISTINCT NULLIF(TRIM(st.school_name), '')) FROM students st WHERE st.academic_year_id = ay.id) +
+         (SELECT COUNT(*) FROM schools sc WHERE sc.academic_year_id = ay.id AND NOT EXISTS (SELECT 1 FROM students st WHERE st.academic_year_id = ay.id AND LOWER(TRIM(st.school_name)) = LOWER(TRIM(sc.name))))) AS school_count,
+        (SELECT COUNT(*) FROM students st WHERE st.academic_year_id = ay.id) AS student_count,
+        (SELECT COUNT(*) FROM volunteers v WHERE v.academic_year_id = ay.id) AS volunteer_count
+      FROM academic_years ay
+      ORDER BY ay.start_date DESC, ay.created_at DESC
+    `);
     res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Failed to fetch academic years:', error);
@@ -2853,81 +3589,248 @@ app.get('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, re
   }
 });
 
-app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name, startDate, endDate, isActive } = req.body;
+    const [rows] = await pool.query<any[]>(`
+      SELECT ay.*,
+        (SELECT COUNT(*) FROM academic_setup s WHERE s.academic_year_id = ay.id) AS session_count,
+        (SELECT COUNT(*) FROM clusters c WHERE c.academic_year_id = ay.id) AS cluster_count,
+        ((SELECT COUNT(DISTINCT NULLIF(TRIM(st.school_name), '')) FROM students st WHERE st.academic_year_id = ay.id) +
+         (SELECT COUNT(*) FROM schools sc WHERE sc.academic_year_id = ay.id AND NOT EXISTS (SELECT 1 FROM students st WHERE st.academic_year_id = ay.id AND LOWER(TRIM(st.school_name)) = LOWER(TRIM(sc.name))))) AS school_count,
+        (SELECT COUNT(*) FROM students st WHERE st.academic_year_id = ay.id) AS student_count,
+        (SELECT COUNT(*) FROM volunteers v WHERE v.academic_year_id = ay.id) AS volunteer_count
+      FROM academic_years ay WHERE ay.id = ? LIMIT 1
+    `, [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    res.json({ success: true, data: rows[0] });
+  } catch (error) {
+    console.error('Failed to fetch academic year:', error);
+    res.status(503).json({ success: false, error: 'Unable to load academic year.' });
+  }
+});
+
+app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can create academic years.' });
+    return;
+  }
+  let connection: any;
+  const copiedPhotoFiles: string[] = [];
+  try {
+    const { name, startDate, endDate } = req.body;
     const normalizedName = String(name || '').trim().replace(/[–—]/g, '-');
     const id = `ay-${randomUUID()}`;
-    const safeStartDate = normalizeDateValue(startDate, '2026-05-31');
-    const safeEndDate = normalizeDateValue(endDate, '2027-05-30');
+    const startYear = Number(normalizedName.split('-')[0]);
+    const endYear = Number(normalizedName.split('-')[1]);
+    const safeStartDate = normalizeDateValue(startDate, `${startYear}-05-31`);
+    const safeEndDate = normalizeDateValue(endDate, `${endYear}-05-30`);
+    const status = String(req.body.status || (req.body.isActive ? 'ACTIVE' : 'DRAFT')).toUpperCase();
 
-    if (!normalizedName) {
-      res.status(400).json({ success: false, error: 'Academic year name is required.' });
+    if (!/^\d{4}-\d{4}$/.test(normalizedName) || endYear <= startYear) {
+      res.status(400).json({ success: false, error: 'Academic year must use the format YYYY-YYYY with a later end year.' });
+      return;
+    }
+    if (!['ACTIVE', 'DRAFT'].includes(status)) {
+      res.status(400).json({ success: false, error: 'New academic years can only be ACTIVE or DRAFT.' });
       return;
     }
 
     const [existingRows] = await pool.query<any[]>('SELECT id FROM academic_years WHERE name = ? LIMIT 1', [normalizedName]);
     if (existingRows.length > 0) {
-      res.status(409).json({ success: false, error: 'An academic year with this name already exists.' });
+      res.status(409).json({ success: false, error: `Academic Year ${normalizedName} already exists.` });
       return;
     }
 
-    await pool.query('START TRANSACTION');
-    if (isActive) {
-      await pool.query('UPDATE academic_years SET is_active = 0');
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    if (status === 'ACTIVE') {
+      await connection.query("UPDATE academic_years SET is_active = 0, status = 'DRAFT' WHERE is_active = 1");
     }
 
-    await pool.query(
-      'INSERT INTO academic_years (id, name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?)',
-      [id, normalizedName, safeStartDate, safeEndDate, Boolean(isActive)]
+    await connection.query(
+      'INSERT INTO academic_years (id, name, start_date, end_date, is_active, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [id, normalizedName, safeStartDate, safeEndDate, status === 'ACTIVE', status, req.user.id],
     );
 
-    await pool.query('COMMIT');
-    res.json({ success: true, data: { id } });
+    const copyMode = String(req.body.copyMode || 'fresh');
+    const sourceYearId = String(req.body.copyFromYearId || '').trim();
+    const copySelections = req.body.copySelections || {};
+    if (copyMode === 'copy' && sourceYearId) {
+      const needsCluster = Boolean(copySelections.panchayatsVillages || copySelections.schools || copySelections.students || copySelections.volunteers || copySelections.lessonPlans || copySelections.attendanceHistory || copySelections.sessionReports || copySelections.sessionPhotos || copySelections.financeRecords);
+      const needsGeography = Boolean(copySelections.schools || copySelections.students || copySelections.volunteers || copySelections.lessonPlans || copySelections.attendanceHistory || copySelections.sessionReports || copySelections.sessionPhotos || copySelections.financeRecords);
+      if ((needsCluster && !copySelections.clusters) || (needsGeography && !copySelections.panchayatsVillages)) {
+        throw Object.assign(new Error('Include Clusters and Panchayats & Villages to copy dependent records.'), { statusCode: 400 });
+      }
+      if (copySelections.attendanceHistory && !copySelections.students) {
+        throw Object.assign(new Error('Include Students when copying attendance history.'), { statusCode: 400 });
+      }
+      const [sources] = await connection.query('SELECT id, name FROM academic_years WHERE id = ? LIMIT 1', [sourceYearId]);
+      if (!sources.length) {
+        throw Object.assign(new Error('Source academic year not found.'), { statusCode: 400 });
+      }
+      if (Boolean(copySelections.sessionPlan ?? true)) {
+        await connection.query(
+          `INSERT INTO academic_setup (academic_year_id, day_number, academic_year, session_name, session_date)
+           SELECT ?, day_number, ?, session_name, session_date FROM academic_setup WHERE academic_year_id = ?
+           ON DUPLICATE KEY UPDATE session_name = VALUES(session_name), session_date = VALUES(session_date), academic_year = VALUES(academic_year)`,
+          [id, normalizedName, sourceYearId],
+        );
+      }
+      await copyAcademicYearMasterData(connection, sourceYearId, id, normalizedName, copySelections, copiedPhotoFiles);
+    } else if (copyMode !== 'fresh') {
+      throw Object.assign(new Error('A source academic year is required for copy mode.'), { statusCode: 400 });
+    }
+
+    const emptySetupRows = Array.from({ length: 8 }, (_, index) => [id, index + 1, normalizedName, null, null]);
+    await connection.query(
+      'INSERT IGNORE INTO academic_setup (academic_year_id, day_number, academic_year, session_name, session_date) VALUES ?',
+      [emptySetupRows],
+    );
+
+    await connection.commit();
+    res.status(201).json({ success: true, data: { id, name: normalizedName, status } });
   } catch (error: any) {
-    await pool.query('ROLLBACK').catch(() => undefined);
+    await connection?.rollback().catch(() => undefined);
+    copiedPhotoFiles.forEach((filePath) => {
+      try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ }
+    });
     console.error('Failed to create academic year:', error);
     if (error?.code === 'ER_DUP_ENTRY' || String(error?.message || '').includes('Duplicate entry')) {
-      res.status(409).json({ success: false, error: 'An academic year with this name already exists.' });
+      res.status(409).json({ success: false, error: 'This academic year already exists.' });
       return;
     }
-    res.status(500).json({ success: false, error: 'Unable to create academic year.' });
+    res.status(error?.statusCode || 500).json({ success: false, error: error?.message || 'Unable to create academic year.' });
+  } finally {
+    connection?.release();
   }
 });
 
 app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can update academic years.' });
+    return;
+  }
+  let connection: any;
   try {
-    const { name, startDate, endDate, isActive } = req.body;
-    const safeStartDate = normalizeDateValue(startDate, '2026-05-31');
-    const safeEndDate = normalizeDateValue(endDate, '2027-05-30');
+    const [currentRows] = await pool.query<any[]>('SELECT id, status FROM academic_years WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!currentRows.length) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    if (String(currentRows[0].status).toUpperCase() === 'ARCHIVED') {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const name = String(req.body.name || '').trim().replace(/[–—]/g, '-');
+    const startYear = Number(name.split('-')[0]);
+    const endYear = Number(name.split('-')[1]);
+    if (!/^\d{4}-\d{4}$/.test(name) || endYear <= startYear) {
+      res.status(400).json({ success: false, error: 'Academic year must use the format YYYY-YYYY.' });
+      return;
+    }
+    const status = String(req.body.status || (req.body.isActive ? 'ACTIVE' : 'DRAFT')).toUpperCase();
+    if (!['ACTIVE', 'DRAFT'].includes(status)) {
+      res.status(400).json({ success: false, error: 'Use the archive action to archive a year.' });
+      return;
+    }
+    const safeStartDate = normalizeDateValue(req.body.startDate, `${startYear}-05-31`);
+    const safeEndDate = normalizeDateValue(req.body.endDate, `${endYear}-05-30`);
 
-    await pool.query('START TRANSACTION');
-    if (isActive) {
-      await pool.query('UPDATE academic_years SET is_active = 0');
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    if (status === 'ACTIVE') {
+      await connection.query("UPDATE academic_years SET is_active = 0, status = 'DRAFT' WHERE is_active = 1 AND id <> ?", [req.params.id]);
     }
 
-    await pool.query(
-      'UPDATE academic_years SET name = ?, start_date = ?, end_date = ?, is_active = ? WHERE id = ?',
-      [name, safeStartDate, safeEndDate, Boolean(isActive), req.params.id]
+    await connection.query(
+      'UPDATE academic_years SET name = ?, start_date = ?, end_date = ?, is_active = ?, status = ? WHERE id = ?',
+      [name, safeStartDate, safeEndDate, status === 'ACTIVE', status, req.params.id],
     );
+    await connection.commit();
+    res.json({ success: true });
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to update academic year:', error);
+    res.status(error?.code === 'ER_DUP_ENTRY' ? 409 : 500).json({ success: false, error: error?.code === 'ER_DUP_ENTRY' ? 'This academic year already exists.' : 'Unable to update academic year.' });
+  } finally {
+    connection?.release();
+  }
+});
 
-    await pool.query('COMMIT');
+app.post('/api/academic-years/:id/activate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can activate academic years.' });
+    return;
+  }
+  try {
+    const [rows] = await pool.query<any[]>('SELECT id, status FROM academic_years WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    if (String(rows[0].status).toUpperCase() === 'ARCHIVED') {
+      res.status(409).json({ success: false, error: 'Unarchive the academic year before activating it.' });
+      return;
+    }
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      await connection.query("UPDATE academic_years SET is_active = 0, status = 'DRAFT' WHERE is_active = 1");
+      await connection.query("UPDATE academic_years SET is_active = 1, status = 'ACTIVE' WHERE id = ?", [req.params.id]);
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
     res.json({ success: true });
   } catch (error) {
-    await pool.query('ROLLBACK').catch(() => undefined);
-    console.error('Failed to update academic year:', error);
-    res.status(500).json({ success: false, error: 'Unable to update.' });
+    console.error('Failed to activate academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to activate academic year.' });
+  }
+});
+
+app.post('/api/academic-years/:id/archive', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can archive academic years.' });
+    return;
+  }
+  try {
+    const [currentRows] = await pool.query<any[]>('SELECT is_active FROM academic_years WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!currentRows.length) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    if (Boolean(currentRows[0].is_active)) {
+      res.status(409).json({ success: false, error: 'Activate another academic year before archiving the current active year.' });
+      return;
+    }
+    const [otherActive] = await pool.query<any[]>("SELECT id FROM academic_years WHERE is_active = 1 AND id <> ? LIMIT 1", [req.params.id]);
+    const [result] = await pool.query<any>(
+      "UPDATE academic_years SET is_active = 0, status = 'ARCHIVED', archived_at = NOW() WHERE id = ?",
+      [req.params.id],
+    );
+    if (!result.affectedRows) {
+      res.status(404).json({ success: false, error: 'Academic year not found.' });
+      return;
+    }
+    if (!otherActive.length) {
+      res.json({ success: true, warning: 'No other active academic year remains.' });
+      return;
+    }
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to archive academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to archive academic year.' });
   }
 });
 
 app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  try {
-    await pool.query('DELETE FROM academic_years WHERE id = ?', [req.params.id]);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Failed to delete academic year:', error);
-    res.status(500).json({ success: false, error: 'Unable to delete.' });
-  }
+  res.status(405).json({ success: false, error: 'Academic years cannot be permanently deleted. Archive the year instead.' });
 });
 
 app.get('/api/health', async (_req, res) => {

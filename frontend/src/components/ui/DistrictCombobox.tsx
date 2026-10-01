@@ -24,6 +24,7 @@ export const DistrictCombobox: React.FC<DistrictComboboxProps> = ({
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -54,6 +55,31 @@ export const DistrictCombobox: React.FC<DistrictComboboxProps> = ({
   const handleSelect = (option: string) => {
     onChange(option);
     setIsOpen(false);
+    setActiveIndex(-1);
+  };
+
+  const handleTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex(-1);
+      setIsOpen(true);
+    }
+  };
+
+  const handleSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.min(index + 1, Math.max(filteredOptions.length - 1, 0)));
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      setActiveIndex((index) => Math.max(index - 1, 0));
+    } else if (event.key === 'Enter' && filteredOptions.length > 0) {
+      event.preventDefault();
+      handleSelect(filteredOptions[activeIndex] || filteredOptions[0]);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      setIsOpen(false);
+    }
   };
 
   const handleClear = (e: React.MouseEvent) => {
@@ -77,6 +103,9 @@ export const DistrictCombobox: React.FC<DistrictComboboxProps> = ({
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen((prev) => !prev)}
+        onKeyDown={handleTriggerKeyDown}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
         className={`w-full flex items-center justify-between rounded-lg border bg-white px-3 py-2 text-sm text-left transition-all ${
           isOpen
             ? 'border-brand-500 ring-2 ring-brand-500/20 dark:border-brand-400'
@@ -130,29 +159,42 @@ export const DistrictCombobox: React.FC<DistrictComboboxProps> = ({
               ref={inputRef}
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setActiveIndex(-1);
+              }}
+              onKeyDown={handleSearchKeyDown}
+              role="combobox"
+              aria-expanded="true"
+              aria-controls={`${id || 'district'}-options`}
               placeholder="Search district or city..."
               className="w-full rounded-md border border-gray-200 bg-gray-50 pl-8 pr-3 py-1.5 text-xs text-gray-900 placeholder:text-gray-400 focus:border-brand-500 focus:bg-white focus:outline-none focus:ring-1 focus:ring-brand-500/30 dark:border-gray-700 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
             />
           </div>
 
-          <div className="max-h-52 overflow-y-auto divide-y divide-gray-50 dark:divide-gray-700/50">
+          <div id={`${id || 'district'}-options`} role="listbox" aria-label={label || placeholder} className="max-h-52 overflow-y-auto divide-y divide-gray-50 dark:divide-gray-700/50">
             {filteredOptions.length === 0 ? (
               <div className="py-4 text-center text-xs text-gray-400 dark:text-gray-500">
                 No districts found for "{searchQuery}".
               </div>
             ) : (
-              filteredOptions.map((item) => {
+              filteredOptions.map((item, index) => {
                 const isSelected = item.toLowerCase() === value.toLowerCase();
+                const isActive = index === activeIndex;
                 return (
                   <button
                     key={item}
                     type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onMouseEnter={() => setActiveIndex(index)}
                     onClick={() => handleSelect(item)}
                     className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs rounded-md transition-colors ${
                       isSelected
                         ? 'bg-brand-50 text-brand-700 font-semibold dark:bg-brand-500/20 dark:text-brand-300'
-                        : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
+                        : isActive
+                          ? 'bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-white'
+                          : 'text-gray-700 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-300 dark:hover:bg-gray-700 dark:hover:text-white'
                     }`}
                   >
                     <span className="truncate">{item}</span>

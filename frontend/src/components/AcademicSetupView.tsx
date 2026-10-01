@@ -12,6 +12,7 @@ import { AcademicYear } from '../types';
 
 interface AcademicSetupViewProps {
   authToken?: string;
+  isYearsLoading?: boolean;
   academicYears?: AcademicYear[];
   selectedAcademicYearId?: string;
   onSelectAcademicYear?: (id: string) => void;
@@ -29,6 +30,7 @@ interface ToastState {
 }
 
 const DAY_COUNT = 8;
+const currentCalendarYear = new Date().getFullYear();
 const createDefaultDays = (): DayDraft[] =>
   Array.from({ length: DAY_COUNT }, (_, index) => ({
     dayNumber: index + 1,
@@ -42,8 +44,8 @@ const normalizeAcademicYearName = (value?: string): string => {
 };
 
 const buildAcademicYearDates = (startYear: string, endYear: string) => ({
-  startDate: `${String(startYear || '2026').trim()}-05-31`,
-  endDate: `${String(endYear || '2027').trim()}-05-30`,
+  startDate: `${String(startYear || currentCalendarYear).trim()}-05-31`,
+  endDate: `${String(endYear || currentCalendarYear + 1).trim()}-05-30`,
 });
 
 const formatAcademicYearLabel = (year?: string): string => {
@@ -53,6 +55,7 @@ const formatAcademicYearLabel = (year?: string): string => {
 
 export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   authToken,
+  isYearsLoading = false,
   academicYears = [],
   selectedAcademicYearId,
   onSelectAcademicYear,
@@ -62,13 +65,31 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
+  const [creationResult, setCreationResult] = useState<{ id: string; name: string } | null>(null);
   const [setupRows, setSetupRows] = useState<Array<{ day_number: number; academic_year: string; session_name: string | null }>>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit' | 'day'>('create');
   const [isEditingDay, setIsEditingDay] = useState<number | null>(null);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [copyMode, setCopyMode] = useState<'fresh' | 'copy'>('fresh');
+  const [copyFromYearId, setCopyFromYearId] = useState('');
+  const [copySelections, setCopySelections] = useState({
+    sessionPlan: true,
+    clusters: true,
+    panchayatsVillages: true,
+    schools: true,
+    students: true,
+    volunteers: true,
+    moduleLibrary: true,
+    lessonPlans: true,
+    attendanceHistory: false,
+    sessionReports: false,
+    sessionPhotos: false,
+    financeRecords: false,
+  });
   const [yearDraft, setYearDraft] = useState({
-    startYear: '2026',
-    endYear: '2027',
+    startYear: String(currentCalendarYear),
+    endYear: String(currentCalendarYear + 1),
     isActive: true,
     days: createDefaultDays(),
   });
@@ -82,6 +103,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   }, [academicYears, selectedAcademicYearId]);
 
   const selectedAcademicYearName = normalizeAcademicYearName(selectedAcademicYear?.name || '');
+  const isSelectedYearReadOnly = String(selectedAcademicYear?.status || '').toUpperCase() === 'ARCHIVED';
 
   useEffect(() => {
     if (!selectedAcademicYearId && academicYears.length) {
@@ -149,8 +171,8 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   const showYearDrawer = (mode: 'create' | 'edit', initialYear?: AcademicYear | null) => {
     const activeName = normalizeAcademicYearName(initialYear?.name || selectedAcademicYearName);
     const yearParts = activeName.split('-').map((part) => part.trim()).filter(Boolean);
-    const startYear = yearParts[0] || '2026';
-    const endYear = yearParts[1] || '2027';
+    const startYear = yearParts[0] || String(currentCalendarYear);
+    const endYear = yearParts[1] || String(currentCalendarYear + 1);
 
     const days = createDefaultDays().map((item, index) => {
       const matching = currentDayEntries[index];
@@ -159,10 +181,13 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     });
 
     setDrawerMode(mode);
+    setWizardStep(1);
+    setCopyMode('fresh');
+    setCopyFromYearId(academicYears.find((year) => year.id !== initialYear?.id)?.id || '');
     setYearDraft({
       startYear,
       endYear,
-      isActive: initialYear ? Boolean(initialYear.isActive) : true,
+      isActive: mode === 'create' ? false : Boolean(initialYear?.isActive),
       days,
     });
     setIsEditingDay(null);
@@ -184,6 +209,21 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     setIsDrawerOpen(true);
   };
 
+  const createNextAcademicYear = () => {
+    const [start] = selectedAcademicYearName.split('-').map((part) => Number(part));
+    const nextStart = Number.isFinite(start) ? start + 1 : new Date().getFullYear();
+    showYearDrawer('create');
+    setYearDraft((current) => ({
+      ...current,
+      startYear: String(nextStart),
+      endYear: String(nextStart + 1),
+      isActive: false,
+      days: createDefaultDays(),
+    }));
+    setCopyMode('copy');
+    setCopyFromYearId(selectedAcademicYear?.id || '');
+  };
+
   const closeDrawer = () => {
     setIsDrawerOpen(false);
     setIsEditingDay(null);
@@ -201,6 +241,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
 
     if (!isDayEdit && Number(yearDraft.startYear) >= Number(yearDraft.endYear)) {
       setErrorMessage('The end year must be greater than the start year.');
+      return;
+    }
+
+    if (!isDayEdit && yearDraft.isActive && (drawerMode === 'create' || !selectedAcademicYear?.isActive) && !window.confirm(`Set ${normalizedYearName} as the active academic year? The current active year will become a draft.`)) {
       return;
     }
 
@@ -229,6 +273,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             startDate,
             endDate,
             isActive: yearDraft.isActive,
+            status: yearDraft.isActive ? 'ACTIVE' : 'DRAFT',
+            copyMode,
+            copyFromYearId: copyMode === 'copy' ? copyFromYearId : undefined,
+            copySelections,
           }),
         });
 
@@ -297,7 +345,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
       }
 
       if (drawerMode === 'create' && targetYearId) {
-        onSelectAcademicYear?.(targetYearId);
+        setCreationResult({ id: targetYearId, name: normalizedYearName });
+        closeDrawer();
+        onSetupSaved?.();
+        return;
       }
 
       setToast({
@@ -325,28 +376,129 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     }));
   };
 
-  if (!academicYears.length && !isLoading) {
+  const archiveAcademicYear = async (year: AcademicYear) => {
+    if (!window.confirm(`Archive academic year ${year.name}? It will remain available for historical viewing.`)) return;
+    try {
+      const response = await fetch(apiUrl(`/api/academic-years/${year.id}/archive`), {
+        method: 'POST',
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to archive academic year.');
+      setToast({ type: 'success', message: `${year.name} archived.` });
+      onSetupSaved?.();
+    } catch (error: any) {
+      setToast({ type: 'error', message: error?.message || 'Unable to archive academic year.' });
+    }
+  };
+
+  const activateAcademicYear = async (year: AcademicYear) => {
+    if (!window.confirm(`Set ${year.name} as the active academic year? The current active year will become a draft.`)) return;
+    try {
+      const response = await fetch(apiUrl(`/api/academic-years/${year.id}/activate`), {
+        method: 'POST',
+        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to activate academic year.');
+      onSelectAcademicYear?.(year.id);
+      setToast({ type: 'success', message: `${year.name} is now active.` });
+      onSetupSaved?.();
+    } catch (error: any) {
+      setToast({ type: 'error', message: error?.message || 'Unable to activate academic year.' });
+    }
+  };
+
+  if (!academicYears.length) {
     return (
-      <div className="w-full rounded-3xl border border-dashed border-border bg-white/70 p-10 text-center shadow-sm">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#0B3D91]/10 text-[#0B3D91]">
-          <BookOpen className="h-5 w-5" />
+      <div className="w-full space-y-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Home › Academic Year</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground">Academic Year Management</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Create, manage and switch between academic years. Each academic year has its own independent data.</p>
         </div>
-        <h2 className="mt-5 text-xl font-bold text-foreground">No academic year yet</h2>
-        <p className="mt-2 text-sm text-muted-foreground">Create an academic year to set up the 8-day session plan.</p>
-        <button
-          type="button"
-          onClick={() => showYearDrawer('create')}
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-transform hover:-translate-y-0.5"
-        >
-          <Plus className="h-4 w-4" />
-          Add Academic Year
-        </button>
+        {isYearsLoading ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, index) => <div key={index} className="animate-pulse rounded-2xl border border-border bg-white p-5"><div className="h-5 w-28 rounded bg-slate-200" /><div className="mt-4 h-4 w-40 rounded bg-slate-100" /><div className="mt-5 h-16 rounded bg-slate-100" /></div>)}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-border bg-white p-10 text-center shadow-sm">
+            <BookOpen className="mx-auto h-8 w-8 text-[#0B3D91]" />
+            <h2 className="mt-4 text-xl font-bold text-foreground">No Academic Years Found</h2>
+            <p className="mt-2 text-sm text-muted-foreground">Create your first academic year to start managing TQI sessions.</p>
+            <button type="button" onClick={() => showYearDrawer('create')} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white">
+              <Plus className="h-4 w-4" /> Create Academic Year
+            </button>
+          </div>
+        )}
+        {isDrawerOpen && (
+          <div className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px]">
+            <div className="absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto border-l border-border bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-border px-5 py-4"><div><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Academic year</p><h3 className="mt-1 text-xl font-bold">Create Academic Year</h3></div><button type="button" onClick={closeDrawer} className="rounded-lg border border-border p-2"><X className="h-4 w-4" /></button></div>
+              <form className="space-y-5 p-5" onSubmit={(event) => { event.preventDefault(); void saveAcademicYear(); }}>
+                <label className="block space-y-2 text-sm font-medium">Academic Year<div className="grid grid-cols-2 gap-3"><input type="number" value={yearDraft.startYear} onChange={(event) => setYearDraft((current) => ({ ...current, startYear: event.target.value }))} className="rounded-lg border p-2" /><input type="number" value={yearDraft.endYear} onChange={(event) => setYearDraft((current) => ({ ...current, endYear: event.target.value }))} className="rounded-lg border p-2" /></div></label>
+                <div className="flex justify-end gap-2"><button type="button" onClick={closeDrawer} className="rounded-lg border px-3 py-2 text-sm">Cancel</button><button type="submit" disabled={isSaving} className="rounded-lg bg-[#0B3D91] px-3 py-2 text-sm font-semibold text-white">{isSaving ? 'Creating…' : 'Create Academic Year'}</button></div>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="w-full space-y-6">
+      <section className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Home › Academic Year</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Academic Year Management</h1>
+            <p className="mt-1 text-sm text-muted-foreground">Create, manage and switch between academic years. Each academic year has its own independent data.</p>
+          </div>
+          <button type="button" onClick={() => showYearDrawer('create')} className="inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm">
+            <Plus className="h-4 w-4" /> Create Academic Year
+          </button>
+        </div>
+
+        {academicYears.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-white p-8 text-center">
+            <h2 className="text-lg font-bold">No Academic Years Found</h2>
+            <p className="mt-1 text-sm text-muted-foreground">Create your first academic year to start managing TQI sessions.</p>
+            <button type="button" onClick={() => showYearDrawer('create')} className="mt-4 rounded-xl bg-[#0B3D91] px-4 py-2 text-sm font-semibold text-white">+ Create Academic Year</button>
+          </div>
+        ) : (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {academicYears.map((year) => {
+              const status = String(year.status || (year.isActive ? 'ACTIVE' : 'DRAFT')).toUpperCase();
+              const isSelected = year.id === selectedAcademicYearId;
+              const createdLabel = year.createdAt ? new Date(year.createdAt).toLocaleDateString() : 'Date unavailable';
+              const metricItems = [
+                ['Sessions', year.sessionCount], ['Clusters', year.clusterCount], ['Schools', year.schoolCount],
+                ['Students', year.studentCount], ['Volunteers', year.volunteerCount],
+              ];
+              return (
+                <article key={year.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-shadow hover:shadow-md ${isSelected ? 'border-[#0B3D91]/40 ring-1 ring-[#0B3D91]/10' : 'border-slate-200'}`}>
+                  <div className="flex items-start justify-between gap-2">
+                    <h2 className="text-lg font-bold text-[#0B3D91]">{year.name.replace('-', ' – ')}</h2>
+                    <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase ${status === 'ACTIVE' ? 'bg-emerald-100 text-emerald-800' : status === 'ARCHIVED' ? 'bg-slate-200 text-slate-700' : 'bg-amber-100 text-amber-800'}`}>{status}</span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Created {createdLabel}</p>
+                  <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+                    {metricItems.map(([label, value]) => <div key={label} className="flex justify-between gap-1"><span className="text-muted-foreground">{label}</span><strong>{Number(value || 0)}</strong></div>)}
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
+                    <button type="button" onClick={() => onSelectAcademicYear?.(year.id)} className="flex-1 rounded-lg border border-[#0B3D91]/15 bg-blue-50 px-3 py-2 text-xs font-semibold text-[#0B3D91]">{isSelected ? 'View Details' : 'View Details'}</button>
+                    {status !== 'ARCHIVED' && <button type="button" onClick={() => onSelectAcademicYear?.(year.id)} className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${isSelected ? 'bg-[#0B3D91] text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>{isSelected ? 'Open Year ✓' : 'Open Year'}</button>}
+                    {status === 'DRAFT' && <button type="button" onClick={() => void activateAcademicYear(year)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">Activate</button>}
+                    {status !== 'ARCHIVED' && <button type="button" title="Archive academic year" onClick={() => void archiveAcademicYear(year)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">···</button>}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
       <div className="flex flex-col gap-4 border-b border-border/60 pb-6 md:flex-row md:items-end md:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
@@ -359,25 +511,27 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Academic Year — {formatAcademicYearLabel(selectedAcademicYearName)}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">Manage the 8 session days for this academic year.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Manage the 8 session days for this academic year. Each day contains one session.</p>
+          {isSelectedYearReadOnly && <span className="mt-2 inline-flex rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-700">Read Only · Archived</span>}
         </div>
 
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={() => showYearDrawer('edit', selectedAcademicYear)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-white px-3.5 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#0B3D91]/40"
+            disabled={isSelectedYearReadOnly}
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-white px-3.5 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#0B3D91]/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Edit3 className="h-4 w-4 text-[#0B3D91]" />
             Edit Academic Year
           </button>
           <button
             type="button"
-            onClick={() => showYearDrawer('create')}
+            onClick={createNextAcademicYear}
             className="inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5"
           >
             <Plus className="h-4 w-4" />
-            Add Academic Year
+            Create Next Academic Year
           </button>
         </div>
       </div>
@@ -448,7 +602,8 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   <button
                     type="button"
                     onClick={() => openDayEditor(day.dayNumber)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#0B3D91]/20 hover:text-[#0B3D91]"
+                    disabled={isSelectedYearReadOnly}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#0B3D91]/20 hover:text-[#0B3D91] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Edit3 className="h-3.5 w-3.5" />
                     View / Edit
@@ -485,10 +640,33 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
               className="space-y-6 p-5"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (drawerMode === 'create' && wizardStep < 3) {
+                  if (wizardStep === 2 && copyMode === 'copy' && !copyFromYearId) {
+                    setErrorMessage('Select the source academic year to copy from.');
+                    return;
+                  }
+                  setErrorMessage(null);
+                  setWizardStep((step) => Math.min(3, step + 1));
+                  return;
+                }
                 void saveAcademicYear();
               }}
             >
-              {drawerMode !== 'day' && (
+              {drawerMode === 'create' && (
+                <div className="flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">
+                  {[['1', 'Basic details'], ['2', 'Copy data'], ['3', 'Review']].map(([step, label], index) => (
+                    <React.Fragment key={step}>
+                      <div className={`flex items-center gap-1.5 ${wizardStep === index + 1 ? 'text-[#0B3D91]' : ''}`}>
+                        <span className={`flex h-6 w-6 items-center justify-center rounded-full border ${wizardStep >= index + 1 ? 'border-[#0B3D91] bg-[#0B3D91] text-white' : 'border-slate-300'}`}>{step}</span>
+                        <span>{label}</span>
+                      </div>
+                      {index < 2 && <span className="h-px flex-1 bg-slate-200" />}
+                    </React.Fragment>
+                  ))}
+                </div>
+              )}
+
+              {drawerMode !== 'day' && (drawerMode !== 'create' || wizardStep === 1) && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Academic Year</label>
                   <div className="grid grid-cols-2 gap-3">
@@ -512,7 +690,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                 </div>
               )}
 
-              {drawerMode !== 'day' && <div className="space-y-3">
+              {drawerMode !== 'day' && (drawerMode !== 'create' || wizardStep === 1) && <div className="space-y-3">
                 <label className="text-sm font-medium text-foreground">Status</label>
                 <div className="flex items-center gap-6">
                   <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
@@ -531,10 +709,70 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                       checked={!yearDraft.isActive}
                       onChange={() => setYearDraft((current) => ({ ...current, isActive: false }))}
                     />
-                    Inactive
+                    Draft
                   </label>
                 </div>
               </div>}
+
+              {drawerMode === 'create' && wizardStep === 2 && (
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="text-base font-bold text-foreground">How do you want to create this academic year?</h4>
+                    <p className="mt-1 text-xs text-muted-foreground">Choose whether to start empty or copy selected data into an independent year.</p>
+                  </div>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+                    <input type="radio" name="copy-mode" checked={copyMode === 'fresh'} onChange={() => setCopyMode('fresh')} />
+                    <span><strong className="block text-sm">Start Fresh</strong><span className="text-xs text-muted-foreground">Create an empty academic year with its eight session days.</span></span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 p-3">
+                    <input type="radio" name="copy-mode" checked={copyMode === 'copy'} onChange={() => setCopyMode('copy')} />
+                    <span><strong className="block text-sm">Copy From Existing Academic Year</strong><span className="text-xs text-muted-foreground">Copy selected configuration and master data; the source remains unchanged.</span></span>
+                  </label>
+                  {copyMode === 'copy' && (
+                    <>
+                      <label className="block space-y-1 text-xs font-semibold">Copy From
+                        <select value={copyFromYearId} onChange={(event) => setCopyFromYearId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
+                          <option value="">Select source year</option>
+                          {academicYears.filter((year) => year.id !== selectedAcademicYearId).map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
+                        </select>
+                      </label>
+                      <div className="rounded-xl border border-slate-200 p-3">
+                        <h5 className="text-sm font-semibold">Select Data to Copy</h5>
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          {([
+                            ['sessionPlan', 'Session Plan (8 Days)'], ['clusters', 'Clusters'], ['panchayatsVillages', 'Panchayats & Villages'],
+                            ['schools', 'Schools'], ['students', 'Students'], ['volunteers', 'Volunteers'], ['moduleLibrary', 'Module Library'],
+                            ['lessonPlans', 'Lesson Plans'], ['attendanceHistory', 'Attendance History'], ['sessionReports', 'Session Reports'],
+                            ['sessionPhotos', 'Session Photos'], ['financeRecords', 'Finance Records'],
+                          ] as const).map(([key, label]) => (
+                            <label key={key} className="flex items-center gap-2 text-xs">
+                              <input type="checkbox" checked={copySelections[key]} onChange={(event) => setCopySelections((current) => ({ ...current, [key]: event.target.checked }))} />
+                              {label}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {drawerMode === 'create' && wizardStep === 3 && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-center">
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">{copyMode === 'copy' ? 'Source' : 'Setup'}</p>
+                    <p className="mt-1 font-bold">{copyMode === 'copy' ? academicYears.find((year) => year.id === copyFromYearId)?.name || 'Select a source' : 'Start Fresh'}</p>
+                    <p className="my-2 text-[#0B3D91]">↓</p>
+                    <p className="text-xs font-semibold uppercase text-muted-foreground">Target</p>
+                    <p className="mt-1 text-lg font-bold">{yearDraft.startYear}–{yearDraft.endYear}</p>
+                  </div>
+                  {copyMode === 'copy' && <div className="space-y-1 rounded-xl border border-slate-200 p-3 text-xs">
+                    <h5 className="mb-2 font-semibold">Selected data</h5>
+                    {Object.entries(copySelections).filter(([, selected]) => selected).map(([key]) => <p key={key} className="text-emerald-700">✓ {key.replace(/([A-Z])/g, ' $1')}</p>)}
+                    <p className="mt-2 text-amber-800">Copied data will belong to the new year. Changes in it will not affect the source year.</p>
+                  </div>}
+                </div>
+              )}
 
               {drawerMode === 'day' && <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -559,6 +797,11 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
               </div>}
 
               <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+                {drawerMode === 'create' && wizardStep > 1 && (
+                  <button type="button" onClick={() => setWizardStep((step) => Math.max(1, step - 1))} className="mr-auto rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-foreground">
+                    Back
+                  </button>
+                )}
                 <button type="button" onClick={closeDrawer} className="rounded-xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-foreground">
                   Cancel
                 </button>
@@ -567,10 +810,32 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   disabled={isSaving}
                   className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  {isSaving ? 'Saving...' : drawerMode === 'day' ? 'Save Session Day' : drawerMode === 'create' ? 'Create Academic Year' : 'Save Academic Year'}
+                  {isSaving
+                    ? 'Creating...'
+                    : drawerMode === 'day'
+                      ? 'Save Session Day'
+                      : drawerMode === 'create' && wizardStep < 3
+                        ? 'Continue'
+                        : drawerMode === 'create'
+                          ? 'Create Academic Year'
+                          : 'Save Academic Year'}
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {creationResult && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700"><CheckCircle2 className="h-6 w-6" /></div>
+            <h3 className="mt-4 text-center text-lg font-bold">Academic Year {creationResult.name} created</h3>
+            <p className="mt-2 text-center text-sm text-muted-foreground">{copyMode === 'copy' ? 'Selected data was copied into an independent year. The source was not changed.' : 'The new year is ready. Its session plan is initialized for eight days.'}</p>
+            <div className="mt-5 flex gap-2">
+              <button type="button" onClick={() => setCreationResult(null)} className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold">Stay on Current Year</button>
+              <button type="button" onClick={() => { onSelectAcademicYear?.(creationResult.id); setCreationResult(null); }} className="flex-1 rounded-xl bg-[#0B3D91] px-3 py-2.5 text-sm font-semibold text-white">Open Year</button>
+            </div>
           </div>
         </div>
       )}

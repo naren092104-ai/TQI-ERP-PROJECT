@@ -49,9 +49,15 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
     moduleName: '',
     topic: '',
     description: '',
-    academicYear: '2023-2024',
+    academicYear: currentAcademicYear,
     dayNumber: 1
   });
+
+  useEffect(() => {
+    if (!editingModule && currentAcademicYear) {
+      setFormData((current) => ({ ...current, academicYear: currentAcademicYear }));
+    }
+  }, [currentAcademicYear, editingModule]);
 
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all'>('all');
 

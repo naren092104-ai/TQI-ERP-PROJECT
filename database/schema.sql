@@ -159,6 +159,9 @@ CREATE TABLE IF NOT EXISTS `academic_years` (
   `start_date` DATE NULL,
   `end_date` DATE NULL,
   `is_active` BOOLEAN NOT NULL DEFAULT FALSE,
+  `status` VARCHAR(16) NOT NULL DEFAULT 'DRAFT',
+  `archived_at` DATETIME NULL,
+  `created_by` VARCHAR(64) NULL,
   `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY `uk_academic_years_name` (`name`),
@@ -167,11 +170,14 @@ CREATE TABLE IF NOT EXISTS `academic_years` (
 
 -- 8. Academic Setup Table
 CREATE TABLE IF NOT EXISTS `academic_setup` (
-  `day_number` INT PRIMARY KEY,
+  `academic_year_id` VARCHAR(64) NOT NULL,
+  `day_number` INT NOT NULL,
   `academic_year` VARCHAR(50) NOT NULL,
   `session_name` VARCHAR(255) NULL,
   `session_date` DATE NULL,
-  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`academic_year_id`, `day_number`),
+  INDEX `idx_academic_setup_year_name` (`academic_year`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 9. Modules Table

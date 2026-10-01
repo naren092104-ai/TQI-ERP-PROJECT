@@ -83,7 +83,7 @@ export async function sendOnboardingCredentialsEmail({
   clusterName?: string;
   projectRoot: string;
   loginUrl?: string;
-}): Promise<void> {
+}): Promise<boolean> {
   const smtpHost = process.env.SMTP_HOST || 'smtp.gmail.com';
   const smtpPort = Number(process.env.SMTP_PORT || 587);
   const smtpUser = (process.env.SMTP_USER || '').trim();
@@ -96,7 +96,7 @@ export async function sendOnboardingCredentialsEmail({
     console.log(`[ONBOARDING EMAIL NOT SENT] User: ${name} (${recipient})`);
     console.log(`[ONBOARDING EMAIL NOT SENT] Role: ${role} | Scope: ${clusterName || 'Central'}`);
     console.log(`========================================================\n`);
-    return;
+    return false;
   }
 
   const isGmail = smtpHost.includes('gmail') || smtpUser.endsWith('@gmail.com');
@@ -138,11 +138,13 @@ export async function sendOnboardingCredentialsEmail({
     console.log(`[SMTP] Sending onboarding email to ${recipient}...`);
     const info = await transporter.sendMail(mailOptions);
     console.log(`[SMTP] Onboarding email delivered to ${recipient} (Message ID: ${info.messageId})`);
+    return true;
   } catch (error: any) {
     console.error(`[SMTP ERROR] Failed to send onboarding email to ${recipient}:`, error.message);
     console.log(`\n========================================================`);
     console.log(`[FALLBACK ONBOARDING EMAIL] User: ${name} (${recipient})`);
     console.log(`========================================================\n`);
+    return false;
   }
 }
 

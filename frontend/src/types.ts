@@ -55,6 +55,8 @@ export interface Cluster {
   activePanchayats: number;
   totalStudents: number;
   totalVolunteers: number;
+  villagesCount?: number;
+  academicYearId?: string;
   adminId: string;
   adminName: string;
   adminEmail: string;
@@ -794,9 +796,17 @@ export interface AcademicYear {
   startDate: string;
   endDate: string;
   isActive: boolean;
+  status?: 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
+  is_active?: boolean | number;
+  sessionCount?: number;
+  clusterCount?: number;
+  schoolCount?: number;
+  studentCount?: number;
+  volunteerCount?: number;
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
+  archivedAt?: string | null;
 }
 
 export interface ClusterDayPhotoSummary {

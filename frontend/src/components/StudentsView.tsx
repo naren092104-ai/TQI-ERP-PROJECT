@@ -5,6 +5,7 @@ import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { EmptyState } from './ui/EmptyState';
+import { apiUrl } from '../utils/api';
 import {
   Select,
   SelectContent,
@@ -40,6 +41,7 @@ import {
 } from './ui/icons';
 
 interface StudentsViewProps {
+  authToken?: string;
   students: Student[];
   panchayats: Panchayat[];
   initialFilters?: { panchayatId?: string; villageId?: string };
@@ -79,6 +81,7 @@ interface ParsedStudentRow {
 const STANDARDS = ['5', '6', '7', '8', '9', '10', '11', '12'];
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
+  authToken,
   students,
   panchayats,
   initialFilters,
@@ -132,6 +135,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [newPanchayatName, setNewPanchayatName] = useState('');
   const [newVillageName, setNewVillageName] = useState('');
   const [newSchoolName, setNewSchoolName] = useState('');
+  const [registeredSchools, setRegisteredSchools] = useState<Array<{ id: string; name: string; village_id?: string; villageId?: string }>>([]);
   const [renameEntityName, setRenameEntityName] = useState('');
 
   // Bulk Import state
@@ -157,6 +161,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     if (!currentPanchayat || !selectedVillageId) return null;
     return currentPanchayat.villages.find((v) => v.id === selectedVillageId || v.name === selectedVillageId) || null;
   }, [currentPanchayat, selectedVillageId]);
+
+  useEffect(() => {
+    if (!currentPanchayat || !currentVillage) {
+      setRegisteredSchools([]);
+      return;
+    }
+    const controller = new AbortController();
+    fetch(apiUrl(`/api/schools?panchayatId=${encodeURIComponent(currentPanchayat.id)}&villageId=${encodeURIComponent(currentVillage.id)}`), {
+      signal: controller.signal,
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    })
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => setRegisteredSchools(Array.isArray(data?.schools) ? data.schools : []))
+      .catch((error) => { if (error?.name !== 'AbortError') setRegisteredSchools([]); });
+    return () => controller.abort();
+  }, [currentPanchayat, currentVillage, authToken]);
 
   // Handle initialFilters from outside (e.g. navigation query)
   useEffect(() => {
@@ -190,6 +210,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     );
 
     const schoolMap = new Map<string, { name: string; studentCount: number }>();
+    registeredSchools.forEach((school) => schoolMap.set(school.name, { name: school.name, studentCount: 0 }));
     villageStudents.forEach((st) => {
       const sch = st.schoolName?.trim();
       if (!sch) return;
@@ -202,7 +223,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     });
 
     return Array.from(schoolMap.values());
-  }, [students, currentPanchayat, currentVillage]);
+  }, [students, currentPanchayat, currentVillage, registeredSchools]);
 
   // Filtered Students when in 'students' view
   const currentStudents = useMemo(() => {
@@ -393,10 +414,25 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setActiveFormMode('none');
   };
 
-  const handleCreateSchool = (e: React.FormEvent) => {
+  const handleCreateSchool = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSchoolName.trim()) return;
-    setSelectedSchoolName(newSchoolName.trim());
+    if (!currentPanchayat || !currentVillage) return;
+    try {
+      const response = await fetch(apiUrl('/api/schools'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+        body: JSON.stringify({ name: newSchoolName.trim(), villageId: currentVillage.id }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to create school.');
+      const createdSchool = data.school;
+      setRegisteredSchools((current) => current.some((school) => school.id === createdSchool.id) ? current : [...current, createdSchool]);
+      setSelectedSchoolName(createdSchool.name);
+    } catch (error: any) {
+      alert(error?.message || 'Unable to create school.');
+      return;
+    }
     setDrillLevel('students');
     setNewSchoolName('');
     setActiveFormMode('none');

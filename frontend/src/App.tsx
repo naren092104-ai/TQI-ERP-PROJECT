@@ -162,7 +162,14 @@ export default function App() {
   const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
   const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
-  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState<string>('');
+  const [areAcademicYearsLoading, setAreAcademicYearsLoading] = useState(true);
+  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState<string>(() => {
+    try {
+      return localStorage.getItem('tqi_selected_academic_year_id') || '';
+    } catch {
+      return '';
+    }
+  });
   const [modules, setModules] = useState<TqiModule[]>([]);
 
   // Sync with API Backend
@@ -259,14 +266,39 @@ export default function App() {
 
       if (Array.isArray(sessionSubmissionsRes?.sessionSubmissions)) setSessionSubmissions(sessionSubmissionsRes.sessionSubmissions);
       else if (Array.isArray(sessionSubmissionsRes?.data)) setSessionSubmissions(sessionSubmissionsRes.data);
-      if (Array.isArray(academicYearsRes?.academicYears))           setAcademicYears(academicYearsRes.academicYears);
-      else if (Array.isArray(academicYearsRes?.data))               setAcademicYears(academicYearsRes.data);
+      const academicYearRows = Array.isArray(academicYearsRes?.academicYears)
+        ? academicYearsRes.academicYears
+        : Array.isArray(academicYearsRes?.data)
+          ? academicYearsRes.data
+          : null;
+      if (academicYearRows) {
+        setAcademicYears(academicYearRows.map((year: any) => ({
+          id: String(year.id),
+          name: String(year.name || ''),
+          startDate: year.start_date || year.startDate || '',
+          endDate: year.end_date || year.endDate || '',
+          isActive: Boolean(year.is_active ?? year.isActive),
+          is_active: year.is_active,
+          status: String(year.status || (year.is_active ? 'ACTIVE' : 'DRAFT')).toUpperCase(),
+          sessionCount: Number(year.session_count ?? year.sessionCount ?? 0),
+          clusterCount: Number(year.cluster_count ?? year.clusterCount ?? 0),
+          schoolCount: Number(year.school_count ?? year.schoolCount ?? 0),
+          studentCount: Number(year.student_count ?? year.studentCount ?? 0),
+          volunteerCount: Number(year.volunteer_count ?? year.volunteerCount ?? 0),
+          createdBy: year.created_by || year.createdBy,
+          createdAt: year.created_at || year.createdAt,
+          updatedAt: year.updated_at || year.updatedAt,
+          archivedAt: year.archived_at || null,
+        })));
+      }
+      setAreAcademicYearsLoading(false);
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
     } catch {
+      setAreAcademicYearsLoading(false);
       // Network error or abort — keep existing in-memory state.
     }
-  }, [currentUser?.token, currentUserRole, currentUserClusterId]);
+  }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
@@ -280,15 +312,41 @@ export default function App() {
 
     if (!selectedAcademicYearId) {
       const fallback = academicYears.find((year) => year.isActive || year.status === 'ACTIVE') || academicYears[0];
-      if (fallback) setSelectedAcademicYearId(fallback.id);
+      if (fallback) handleSelectAcademicYear(fallback.id);
       return;
     }
 
     const exists = academicYears.some((year) => year.id === selectedAcademicYearId);
     if (!exists) {
-      setSelectedAcademicYearId(academicYears[0].id);
+      handleSelectAcademicYear(academicYears[0].id);
     }
   }, [academicYears, selectedAcademicYearId]);
+
+  function handleSelectAcademicYear(yearId: string) {
+    if (yearId !== selectedAcademicYearId) {
+      setClusters([]);
+      setPanchayats([]);
+      setStudents([]);
+      setVolunteers([]);
+      setSessions([]);
+      setAttendanceSessions([]);
+      setFinanceEntries([]);
+      setFinanceDrafts([]);
+      setLessonPlans([]);
+      setApprovals([]);
+      setDateChangeRequests([]);
+      setSessionReports([]);
+      setSessionSubmissions([]);
+      setModules([]);
+    }
+    try {
+      if (yearId) localStorage.setItem('tqi_selected_academic_year_id', yearId);
+      else localStorage.removeItem('tqi_selected_academic_year_id');
+    } catch {
+      // Keep the in-memory selection if storage is unavailable.
+    }
+    setSelectedAcademicYearId(yearId);
+  }
 
   // Auth Handlers
   const handleLoginSuccess = (session: AuthSession) => {
@@ -501,7 +559,7 @@ export default function App() {
       const response = await fetch(apiUrl('/api/clusters'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
-        body: JSON.stringify(newC),
+        body: JSON.stringify({ ...newC, academicYearId: selectedAcademicYearId }),
       });
       const data = await response.json();
       if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to create cluster.');
@@ -512,10 +570,33 @@ export default function App() {
         const usersData = await usersResponse.json();
         if (Array.isArray(usersData?.users)) setUsers(usersData.users);
       }
-      return true;
+      return { emailSent: Boolean(data.emailSent) };
     } catch (error: any) {
       throw error;
     }
+  };
+
+  const handleUpdateCluster = async (clusterId: string, changes: Partial<Cluster>) => {
+    const response = await fetch(apiUrl(`/api/clusters/${encodeURIComponent(clusterId)}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+      body: JSON.stringify({ ...changes, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save cluster.');
+    await fetchBackendData(new AbortController().signal);
+    return true;
+  };
+
+  const handleArchiveCluster = async (clusterId: string, archived: boolean) => {
+    const response = await fetch(apiUrl(`/api/clusters/${encodeURIComponent(clusterId)}/archive`), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+      body: JSON.stringify({ archived, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update cluster archive status.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   // Delete Cluster Mutation
@@ -1223,7 +1304,7 @@ export default function App() {
 
     if (currentUser?.token) {
       try {
-        await fetch(`${API_BASE_URL}/api/lesson-plans`, {
+        await fetch(apiUrl('/api/lesson-plans'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1244,7 +1325,7 @@ export default function App() {
       const existing = lessonPlans.find(p => p.id === id);
       const merged = { ...(existing || {}), ...plan, id };
       try {
-        await fetch(`${API_BASE_URL}/api/lesson-plans`, {
+        await fetch(apiUrl('/api/lesson-plans'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1262,7 +1343,7 @@ export default function App() {
     setLessonPlans((prev) => prev.filter((p) => p.id !== id));
     if (currentUser?.token) {
       try {
-        await fetch(`${API_BASE_URL}/api/lesson-plans/${id}`, {
+        await fetch(apiUrl(`/api/lesson-plans/${id}`), {
           method: 'DELETE',
           headers: {
             Authorization: `Bearer ${currentUser.token}`,
@@ -1601,10 +1682,10 @@ export default function App() {
             id: year.id,
             name: year.name,
             is_active: Boolean(year.isActive || year.is_active),
-            status: year.isActive ? 'ACTIVE' : 'DRAFT',
+            status: year.status || (year.isActive || year.is_active ? 'ACTIVE' : 'DRAFT'),
           }))}
           selectedAcademicYearId={selectedAcademicYearId}
-          onSelectAcademicYear={(yearId) => setSelectedAcademicYearId(yearId)}
+          onSelectAcademicYear={handleSelectAcademicYear}
         />
       }
     >
@@ -1644,8 +1725,9 @@ export default function App() {
                 <AcademicSetupView
                   authToken={currentUser?.token ?? ''}
                   academicYears={academicYears}
+                  isYearsLoading={areAcademicYearsLoading}
                   selectedAcademicYearId={selectedAcademicYearId}
-                  onSelectAcademicYear={setSelectedAcademicYearId}
+                  onSelectAcademicYear={handleSelectAcademicYear}
                   onSetupSaved={() => fetchBackendData(new AbortController().signal)}
                 />
               )}
@@ -1671,10 +1753,16 @@ export default function App() {
               {currentTab === 'clusters' && (
                 <ClustersView
                   clusters={clusters}
+                  panchayats={panchayats}
+                  students={students}
+                  volunteers={volunteers}
+                  authToken={currentUser?.token ?? ''}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   userRole={currentUserRole}
                   onNavigate={handleNavigate}
                   onAddCluster={handleAddCluster}
-                  onDeleteCluster={handleDeleteCluster}
+                  onUpdateCluster={handleUpdateCluster}
+                  onArchiveCluster={handleArchiveCluster}
                 />
               )}
 
@@ -1734,6 +1822,7 @@ export default function App() {
 
               {currentTab === 'students' && (
                 <StudentsView
+                  authToken={currentUser?.token ?? ''}
                   students={displayStudents}
                   panchayats={displayPanchayats}
                   initialFilters={initialStudentFilters}
@@ -1795,7 +1884,7 @@ export default function App() {
                   volunteers={displayVolunteers}
                   currentUserRole={currentUserRole}
                   currentCluster={currentUserClusterId === 'all' ? (currentClusterObj?.name || 'All Clusters') : (currentClusterObj?.name || currentUserClusterId)}
-                  currentAcademicYear="2025 – 2026"
+                  currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   selectedLessonPlanId={selectedLessonPlanId}
                   onNavigate={handleNavigate}
                   onAddLessonPlan={handleAddLessonPlan}
@@ -1838,6 +1927,7 @@ export default function App() {
 
               {currentTab === 'finance-statement' && (
                 <FinanceStatementView
+                  academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   entries={displayFinance}
                   drafts={displayFinanceDrafts}
                   activeDraftId={activeFinanceDraftId}
@@ -1934,6 +2024,7 @@ export default function App() {
                 <ModuleLibraryView
                   modules={modules}
                   currentUserRole={currentUserRole}
+                  currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   onCreateModule={handleCreateModule}
                   onUpdateModule={handleUpdateModule}
                   onDeleteModule={handleDeleteModule}
