@@ -1151,6 +1151,25 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
   }
 });
 
+let tamilNaduCollegesCache: any[] | null = null;
+
+app.get('/api/colleges', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (!tamilNaduCollegesCache) {
+      const directoryPath = path.join(PROJECT_ROOT, 'frontend', 'src', 'data', 'tamilNaduColleges.json');
+      const sourceRows = JSON.parse(fs.readFileSync(directoryPath, 'utf8')) as any[];
+      // The local source JSON is pre-cleaned in place. Preserve its canonical
+      // spellings, stable IDs, districts, affiliations, and original casing.
+      tamilNaduCollegesCache = sourceRows;
+    }
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.json({ success: true, colleges: tamilNaduCollegesCache });
+  } catch (error: any) {
+    console.error('[COLLEGE DIRECTORY ERROR]', error?.message || error);
+    res.status(503).json({ success: false, error: 'Unable to load the Tamil Nadu college directory.' });
+  }
+});
+
 app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const year = await resolveAcademicYear(req);
@@ -1159,11 +1178,9 @@ app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Res
       return;
     }
     const includeArchived = String(req.query.includeArchived || '').toLowerCase() === 'true';
-    let sql = `SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone,
-      (SELECT COUNT(*) FROM panchayats p WHERE p.cluster_id = c.id AND p.academic_year_id = c.academic_year_id) AS active_panchayats,
-      (SELECT COUNT(*) FROM villages v WHERE v.academic_year_id = c.academic_year_id AND v.panchayat_id IN (SELECT p2.id FROM panchayats p2 WHERE p2.cluster_id = c.id AND p2.academic_year_id = c.academic_year_id)) AS villages_count,
-      (SELECT COUNT(*) FROM students s WHERE s.cluster_id = c.id AND s.academic_year_id = c.academic_year_id) AS total_students,
-      (SELECT COUNT(*) FROM volunteers vol WHERE vol.cluster_id = c.id AND vol.academic_year_id = c.academic_year_id) AS total_volunteers
+    // Keep this core query independent of optional operational count columns.
+    // Counts are joined into the UI from the already year-scoped people/location APIs.
+    let sql = `SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone
       FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE ${includeArchived ? '1=1' : "c.status = 'Active'"}`;
     const params: any[] = [year.id];
     sql += ' AND c.academic_year_id = ?';
@@ -1198,45 +1215,44 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   }
 
   const collegeName = String(req.body.collegeName || '').trim();
-  const district = String(req.body.district || req.body.clusterDistrict || 'Tamil Nadu').trim();
-  const collegeDistrict = String(req.body.collegeDistrict || district).trim();
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
+  const district = name;
+  const collegeDistrict = String(req.body.collegeDistrict || '').trim();
   const spocName = String(req.body.spocName || req.body.adminName || '').trim();
   const spocMobile = String(req.body.spocMobile || req.body.adminPhone || '').trim();
   const adminEmail = String(req.body.adminEmail || req.body.spocEmail || req.body.email || '').trim().toLowerCase();
   const adminName = String(req.body.adminName || spocName).trim();
-  const name = String(req.body.name || `${collegeName} (${district})`).trim();
   const cleanIdPart = `${district}-${collegeName}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  const clusterId = String(req.body.id ? `${req.body.id}-${year.id}` : `${cleanIdPart || `cluster-${Date.now()}`}-${year.id}`);
+  // Keep IDs inside clusters.id VARCHAR(64), even for long official college names.
+  const clusterId = `${(cleanIdPart || 'cluster').slice(0, 20)}-${randomUUID().slice(0, 8)}-${String(year.id).slice(-8)}`;
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
   const temporaryPassword = String(req.body.temporaryPassword || `TQI@Admin${randomInt(1000, 10000)}!`).trim();
 
-  if (!collegeName || !district || !spocName || !spocMobile || !adminEmail) {
-    res.status(400).json({ success: false, error: 'College name, district, SPOC name, SPOC mobile, and login email are required.' });
+  if (!collegeName || !district || !collegeDistrict || !spocName || !spocMobile || !adminEmail) {
+    res.status(400).json({ success: false, error: 'Cluster name/district, college, college location, SPOC name, mobile, and Gmail are required.' });
     return;
   }
 
-  // Validate 10-digit SPOC mobile
-  const digitsOnly = spocMobile.replace(/\D/g, '');
-  let finalMobile = digitsOnly;
-  if (digitsOnly.length === 12 && digitsOnly.startsWith('91')) {
-    finalMobile = digitsOnly.slice(2);
-  } else if (digitsOnly.length === 11 && digitsOnly.startsWith('0')) {
-    finalMobile = digitsOnly.slice(1);
-  }
-
-  if (finalMobile.length !== 10) {
+  // Cluster creation accepts exactly ten digits; do not silently normalize country codes or separators.
+  if (!/^\d{10}$/.test(spocMobile)) {
     res.status(400).json({ success: false, error: 'SPOC mobile number must be exactly 10 digits.' });
     return;
   }
 
-  // Validate email format
-  const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
-  if (!emailRegex.test(adminEmail)) {
-    res.status(400).json({ success: false, error: 'Please enter a valid SPOC email address.' });
+  // Cluster admin accounts must use a syntactically valid Gmail address.
+  const gmailRegex = /^[a-z0-9]+(?:\.[a-z0-9]+)*(?:\+[a-z0-9]+(?:\.[a-z0-9]+)*)?@gmail\.com$/i;
+  if (!gmailRegex.test(adminEmail)) {
+    res.status(400).json({ success: false, error: 'Please enter a valid Gmail address ending in @gmail.com.' });
     return;
   }
 
-  const normalizedPhone = `+91 ${finalMobile}`;
+  const [emailRows] = await pool.query<any[]>('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1', [adminEmail]);
+  if (emailRows.length) {
+    res.status(409).json({ success: false, error: 'This Gmail address is already registered to a TQI user. Enter a different Gmail address.' });
+    return;
+  }
+
+  const normalizedPhone = `+91 ${spocMobile}`;
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
   const passwordHash = await bcrypt.hash(temporaryPassword, 10);
   let connection: any;
@@ -1315,15 +1331,334 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     let message = 'Unable to create cluster.';
     if (code === 'ER_DUP_ENTRY') {
       status = 409;
-      message = 'A cluster with this ID or an admin with this email already exists in the system.';
+      const duplicateKey = String(error?.sqlMessage || error?.message || '').toLowerCase();
+      message = duplicateKey.includes('email')
+        ? 'This SPOC email already has an account. Use a different email address or edit the existing cluster.'
+        : 'A cluster with this name already exists for the selected academic year.';
     } else if (code === 'ER_NO_REFERENCED_ROW' || code === 'ER_NO_REFERENCED_ROW_2') {
       status = 400;
       message = 'Referenced cluster or admin is invalid. Please refresh and try again.';
     } else if (code === 'ER_BAD_NULL_ERROR') {
       status = 400;
       message = 'A required field is missing. Please check the form and try again.';
+    } else if (code === 'ER_DATA_TOO_LONG') {
+      status = 400;
+      message = 'One of the entered values is too long. Please shorten the cluster or college name.';
     }
     res.status(status).json({ success: false, error: message });
+  }
+});
+
+app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can resend cluster credentials.' });
+    return;
+  }
+  const year = await resolveAcademicYear(req);
+  if (!year) {
+    res.status(404).json({ success: false, error: 'No academic year is available.' });
+    return;
+  }
+  if (isArchivedAcademicYear(year)) {
+    res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+    return;
+  }
+
+  let connection: any;
+  let admin: any;
+  const temporaryPassword = `TQI@Admin${randomInt(1000, 10000)}!`;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query(
+      `SELECT c.id, c.name AS cluster_name, u.id AS user_id, u.name AS admin_name, u.email AS admin_email
+       FROM clusters c
+      INNER JOIN users u ON (u.id = c.admin_id OR u.cluster_id = c.id)
+       WHERE c.id = ? AND c.academic_year_id = ?
+       LIMIT 1 FOR UPDATE`,
+      [req.params.id, year.id],
+    );
+    if (!rows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Cluster admin account was not found in the selected academic year.' });
+      return;
+    }
+    admin = rows[0];
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+    await connection.query(
+      "UPDATE users SET password_hash = ?, must_change_password = TRUE, status = 'Active' WHERE id = ?",
+      [passwordHash, admin.user_id],
+    );
+    await connection.commit();
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to reset cluster credentials:', error);
+    res.status(503).json({ success: false, error: 'Unable to reset cluster credentials.' });
+    return;
+  } finally {
+    connection?.release();
+  }
+
+  const emailSent = await sendOnboardingCredentialsEmail({
+    recipient: admin.admin_email,
+    name: admin.admin_name,
+    temporaryPassword,
+    role: 'Cluster Admin',
+    clusterName: admin.cluster_name,
+    projectRoot: PROJECT_ROOT,
+  });
+  res.json({
+    success: true,
+    emailSent,
+    loginEmail: admin.admin_email,
+    temporaryPassword,
+    clusterName: admin.cluster_name,
+  });
+});
+
+app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+
+    const requestedClusterId = String(req.query.clusterId || '').trim();
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, requestedClusterId);
+    if (!clusterId || clusterId === 'all') {
+      res.status(400).json({ success: false, error: 'Select a cluster before loading its district directory.' });
+      return;
+    }
+
+    const [clusterRows] = await pool.query<any[]>(
+      'SELECT id, name, district FROM clusters WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [clusterId, year.id],
+    );
+    if (!clusterRows.length) {
+      res.status(404).json({ success: false, error: 'The selected cluster was not found in this academic year.' });
+      return;
+    }
+
+    const district = String(clusterRows[0].district || clusterRows[0].name || '').trim()
+      .replace(/\s+(district|cluster)$/i, '');
+    const requestedDistrictSlug = district.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const districtSlugAliases: Record<string, string> = {
+      kancheepuram: 'kanchipuram',
+      kanyakumari: 'kanniyakumari',
+      thoothukudi: 'tuticorin',
+    };
+    const districtSlug = districtSlugAliases[requestedDistrictSlug] || requestedDistrictSlug;
+    if (!districtSlug) {
+      res.status(422).json({ success: false, error: 'This cluster does not have a valid district name configured.' });
+      return;
+    }
+
+    const sourceUrl = `https://digitalpanchayat.org/india/tamil-nadu/${districtSlug}`;
+    const names = new Map<string, string>();
+    const nicDistrictSlugs: Record<string, string> = {
+      'the-nilgiris': 'nilgiris',
+      kanyakumari: 'kanniyakumari',
+      thoothukudi: 'thoothukudi',
+      tuticorin: 'thoothukudi',
+    };
+    const officialSourceUrl = `https://${nicDistrictSlugs[requestedDistrictSlug] || districtSlug}.nic.in/village-panchayats/`;
+    let officialNames = new Map<string, string>();
+
+    try {
+      const officialResponse = await fetch(officialSourceUrl, {
+        headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP district panchayat directory sync' },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (officialResponse.ok) {
+        const officialHtml = await officialResponse.text();
+        const postStart = officialHtml.search(/<div\b[^>]*id=["']post-\d+["'][^>]*>/i);
+        const mainEnd = postStart >= 0 ? officialHtml.indexOf('</main>', postStart) : -1;
+        const content = postStart >= 0
+          ? officialHtml.slice(postStart, mainEnd > postStart ? mainEnd : undefined)
+          : '';
+        const decodeText = (value: string) => value
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;|&#160;/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&quot;/gi, '"')
+          .replace(/&#(\d+);/g, (_entity, code: string) => String.fromCodePoint(Number(code)))
+          .replace(/&([a-z]+);/gi, (_entity, name: string) => ({ amp: '&', nbsp: ' ', quot: '"', apos: "'" }[name.toLowerCase()] || ' '))
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        const addOfficialName = (rawName: string) => {
+          const name = rawName
+            .replace(/^\s*\d{1,4}[.)]?\s+/, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (!name || name.length > 120 || /\b(block|village panchayat|sl\.?no|serial number)\b/i.test(name)) return;
+          officialNames.set(name.toLocaleLowerCase('en'), name);
+        };
+
+        let itemMatch: RegExpExecArray | null;
+        const listItemPattern = /<li\b[^>]*>([\s\S]*?)<\/li>/gi;
+        while ((itemMatch = listItemPattern.exec(content)) !== null) addOfficialName(decodeText(itemMatch[1]));
+
+        if (!officialNames.size) {
+          const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+          let rowMatch: RegExpExecArray | null;
+          while ((rowMatch = rowPattern.exec(content)) !== null) {
+            const cells = [...rowMatch[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)];
+            if (cells.length < 2) continue;
+            const label = decodeText(cells[1][1]);
+            if (!/\bblock\b/i.test(label)) addOfficialName(label);
+          }
+        }
+      }
+    } catch (officialError) {
+      console.warn(`Official district panchayat page unavailable for ${district}:`, officialError);
+    }
+
+    if (officialNames.size) {
+      res.json({
+        success: true,
+        district,
+        source: 'Government of Tamil Nadu district portal',
+        sourceUrl: officialSourceUrl,
+        panchayats: [...officialNames.values()].sort((left, right) => left.localeCompare(right)),
+      });
+      return;
+    }
+
+    let resolvedSourceUrl = sourceUrl;
+    let firstPageResponse = await fetch(resolvedSourceUrl, {
+      headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP district panchayat directory sync' },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (firstPageResponse.status === 404) {
+      const stateResponse = await fetch('https://digitalpanchayat.org/india/tamil-nadu', {
+        headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP district panchayat directory sync' },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (stateResponse.ok) {
+        const stateHtml = await stateResponse.text();
+        const candidatePattern = /<a\b[^>]*href=["']\/india\/tamil-nadu\/([^"'?#/]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+        const candidates = new Map<string, string>();
+        let candidateMatch: RegExpExecArray | null;
+        while ((candidateMatch = candidatePattern.exec(stateHtml)) !== null) {
+          const slug = candidateMatch[1].toLowerCase();
+          const label = candidateMatch[2]
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&nbsp;|&#160;/gi, ' ')
+            .replace(/&amp;/gi, '&')
+            .replace(/\s+/g, ' ')
+            .replace(/\s+\d[\d,]*\s+villages?\s*$/i, '')
+            .trim();
+          if (label && !['tamil nadu', 'india'].includes(label.toLowerCase())) candidates.set(slug, label);
+        }
+
+        const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+        const requestedNames = new Set([requestedDistrictSlug, districtSlug, normalizeName(district)]);
+        const exactCandidate = [...candidates].find(([slug, label]) =>
+          requestedNames.has(slug) || requestedNames.has(normalizeName(label)),
+        );
+
+        if (exactCandidate) {
+          resolvedSourceUrl = `https://digitalpanchayat.org/india/tamil-nadu/${exactCandidate[0]}`;
+        } else {
+          const editDistance = (left: string, right: string): number => {
+            const row = Array.from({ length: right.length + 1 }, (_, index) => index);
+            for (let i = 1; i <= left.length; i += 1) {
+              let previous = row[0];
+              row[0] = i;
+              for (let j = 1; j <= right.length; j += 1) {
+                const old = row[j];
+                row[j] = Math.min(row[j] + 1, row[j - 1] + 1, previous + (left[i - 1] === right[j - 1] ? 0 : 1));
+                previous = old;
+              }
+            }
+            return row[right.length];
+          };
+          const target = normalizeName(district);
+          const ranked = [...candidates].map(([slug, label]) => ({ slug, distance: editDistance(target, normalizeName(label)) }))
+            .sort((left, right) => left.distance - right.distance);
+          if (ranked[0]?.distance <= 2 && ranked[0].distance < (ranked[1]?.distance ?? Number.POSITIVE_INFINITY)) {
+            resolvedSourceUrl = `https://digitalpanchayat.org/india/tamil-nadu/${ranked[0].slug}`;
+          }
+        }
+      }
+
+      if (resolvedSourceUrl !== sourceUrl) {
+        firstPageResponse = await fetch(resolvedSourceUrl, {
+          headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP district panchayat directory sync' },
+          signal: AbortSignal.timeout(15000),
+        });
+      }
+    }
+    if (!firstPageResponse.ok) {
+      throw new Error(`District directory returned HTTP ${firstPageResponse.status}.`);
+    }
+    const firstPageHtml = await firstPageResponse.text();
+    const paginationPageNumbers = [...firstPageHtml.matchAll(/[?&]gp=(\d+)/g)].map((match) => Number(match[1]));
+    const reportedTotalMatch = firstPageHtml.match(/Showing\s+\d+\s*[–-]\s*\d+\s+of\s+([\d,]+)/i);
+    const reportedTotal = reportedTotalMatch ? Number(reportedTotalMatch[1].replace(/,/g, '')) : 0;
+    const pageCount = Math.max(1, ...paginationPageNumbers, Math.ceil(reportedTotal / 50));
+    if (pageCount > 300) {
+      throw new Error(`District directory reported an invalid page count (${pageCount}).`);
+    }
+
+    for (let page = 1; page <= pageCount; page += 1) {
+      let html = firstPageHtml;
+      if (page > 1) {
+        const directoryResponse = await fetch(`${resolvedSourceUrl}?gp=${page}`, {
+          headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP district panchayat directory sync' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!directoryResponse.ok) {
+          throw new Error(`District directory page ${page} returned HTTP ${directoryResponse.status}.`);
+        }
+        html = await directoryResponse.text();
+      }
+      const escapedDistrictPath = new RegExp(
+        `<a\\b[^>]*href=["']\\/india\\/tamil-nadu\\/${districtSlug}\\/[^"']+-gram-panchayat["'][^>]*>([\\s\\S]*?)<\\/a>`,
+        'gi',
+      );
+      const pageNames = new Map<string, string>();
+      let match: RegExpExecArray | null;
+      while ((match = escapedDistrictPath.exec(html)) !== null) {
+        const label = match[1]
+          .replace(/<[^>]*>/g, ' ')
+          .replace(/&nbsp;|&#160;/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/&#39;|&apos;/gi, "'")
+          .replace(/&quot;/gi, '"')
+          .replace(/&#(\d+);/g, (_entity, code: string) => String.fromCodePoint(Number(code)))
+          .replace(/\s+/g, ' ')
+          .replace(/\s*\d+\s+villages?\s*$/i, '')
+          .trim();
+        if (label) pageNames.set(label.toLocaleLowerCase('en'), label);
+      }
+
+      if (!pageNames.size) {
+        throw new Error(`District directory page ${page} contained no Panchayat names; refusing to return an incomplete list.`);
+      }
+      pageNames.forEach((name, key) => names.set(key, names.get(key) || name));
+    }
+
+    if (!names.size) {
+      res.status(502).json({ success: false, error: `No Gram Panchayat list was found for ${district}.` });
+      return;
+    }
+
+    // Keep the first official display spelling while deduplicating case-insensitively.
+    res.json({
+      success: true,
+      district,
+      source: 'LGD via Digital Panchayat',
+      sourceUrl: resolvedSourceUrl,
+      panchayats: [...names.values()].sort((left, right) => left.localeCompare(right)),
+    });
+  } catch (error: any) {
+    console.error('Failed to fetch district panchayat directory:', error);
+    res.status(502).json({ success: false, error: error?.name === 'TimeoutError' ? 'District directory request timed out.' : error?.message || 'Unable to fetch the district panchayat directory.' });
   }
 });
 
@@ -1336,7 +1671,7 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
     }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
     const user = req.user;
-    let sql = 'SELECT p.id, p.name, p.cluster_id, c.name AS cluster_name, COUNT(v.id) AS villages_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id AND v.academic_year_id = p.academic_year_id LEFT JOIN clusters c ON c.id = p.cluster_id';
+    let sql = 'SELECT p.id, p.name, p.cluster_id, p.academic_year_id, c.name AS cluster_name, COUNT(v.id) AS villages_count FROM panchayats p LEFT JOIN villages v ON v.panchayat_id = p.id AND v.academic_year_id = p.academic_year_id LEFT JOIN clusters c ON c.id = p.cluster_id';
     const params: any[] = [year.id];
     const where: string[] = ['p.academic_year_id = ?'];
 
@@ -1350,7 +1685,7 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
     }
 
     if (where.length) sql += ' WHERE ' + where.join(' AND ');
-    sql += ' GROUP BY p.id, p.name, p.cluster_id, c.name ORDER BY p.name ASC';
+    sql += ' GROUP BY p.id, p.name, p.cluster_id, p.academic_year_id, c.name ORDER BY p.name ASC';
 
     const [rows] = await pool.query<any[]>(sql, params);
     
@@ -1379,6 +1714,7 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
         name: row.name,
         cluster: row.cluster_name || row.cluster_id,
         clusterId: row.cluster_id,
+        academicYearId: row.academic_year_id,
         villagesCount: vList.length || Number(row.villages_count || 0),
         activeStudents: vList.reduce((sum, v) => sum + v.studentCount, 0),
         volunteersCount: 0,
@@ -1393,6 +1729,7 @@ app.get('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: R
 });
 
 app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let connection: any;
   try {
     const year = await resolveAcademicYear(req);
     if (!year) {
@@ -1403,23 +1740,167 @@ app.post('/api/panchayats', requireAuth, async (req: AuthenticatedRequest, res: 
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    let clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || req.body.cluster || ''));
-    if (!clusterId || clusterId === 'all') {
-      const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE academic_year_id = ? ORDER BY created_at ASC LIMIT 1', [year.id]);
-      clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
+    const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
+    if (!name) {
+      res.status(400).json({ success: false, error: 'Panchayat name is required.' });
+      return;
     }
-    const panchayatId = String(req.body.id ? `${req.body.id}-${year.id}` : `${req.body.name || `panchayat-${Date.now()}`}-${year.id}`).trim().toLowerCase().replace(/\s+/g, '-');
-    const name = String(req.body.name || 'New Panchayat').trim();
+    const requestedClusterId = String(req.body.clusterId || '').trim();
+    if (!requestedClusterId || requestedClusterId === 'all') {
+      res.status(400).json({ success: false, error: 'Select a cluster before creating a panchayat.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, requestedClusterId);
+    if (!clusterId || clusterId === 'all') {
+      res.status(400).json({ success: false, error: 'Select a valid cluster for this academic year.' });
+      return;
+    }
 
-    await pool.query(
-      'INSERT INTO panchayats (id, name, cluster_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), cluster_id = VALUES(cluster_id), status = VALUES(status), academic_year_id = VALUES(academic_year_id)',
-      [panchayatId, name, clusterId, 'Active', year.id]
+    const panchayatId = `pan-${randomUUID()}`;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [clusterRows] = await connection.query(
+      'SELECT id, name, district FROM clusters WHERE id = ? AND academic_year_id = ? LIMIT 1 FOR UPDATE',
+      [clusterId, year.id],
+    );
+    if (!clusterRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'The selected cluster was not found in this academic year.' });
+      return;
+    }
+    const [existingRows] = await connection.query(
+      'SELECT id FROM panchayats WHERE academic_year_id = ? AND cluster_id = ? AND LOWER(TRIM(name)) = LOWER(?) LIMIT 1 FOR UPDATE',
+      [year.id, clusterId, name],
+    );
+    if (existingRows.length) {
+      await connection.rollback();
+      res.status(409).json({ success: false, error: 'This Panchayat already exists in this Cluster for the selected Academic Year.' });
+      return;
+    }
+
+    await connection.query(
+      'INSERT INTO panchayats (id, name, cluster_id, status, academic_year_id) VALUES (?, ?, ?, ?, ?)',
+      [panchayatId, name, clusterId, 'Active', year.id],
+    );
+    await connection.commit();
+
+    res.status(201).json({ success: true, panchayat: {
+      id: panchayatId,
+      name,
+      academicYearId: year.id,
+      clusterId,
+      cluster: clusterRows[0].name,
+      district: clusterRows[0].district,
+      villagesCount: 0,
+      activeStudents: 0,
+      volunteersCount: 0,
+      status: 'On Track',
+      villages: [],
+    } });
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to create panchayat:', error);
+    if (error?.code === 'ER_DUP_ENTRY') {
+      res.status(409).json({ success: false, error: 'This Panchayat already exists in this Cluster for the selected Academic Year.' });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Unable to save panchayat.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.post('/api/panchayats/import', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let connection: any;
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+
+    const requestedClusterId = String(req.body?.clusterId || '').trim();
+    const rawNames = Array.isArray(req.body?.names) ? (req.body.names as unknown[]) : [];
+    if (!requestedClusterId || requestedClusterId === 'all') {
+      res.status(400).json({ success: false, error: 'Select a cluster before importing panchayats.' });
+      return;
+    }
+
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, requestedClusterId);
+    if (!clusterId || clusterId === 'all') {
+      res.status(400).json({ success: false, error: 'Select a valid cluster for this academic year.' });
+      return;
+    }
+
+    const names = Array.from(
+      new Set(
+        rawNames
+          .map((name: unknown) => String(name || '').trim().replace(/\s+/g, ' '))
+          .filter((name: string) => name.length > 1),
+      ),
     );
 
-    res.json({ success: true, panchayat: { id: panchayatId, name, clusterId, cluster: clusterId, villagesCount: 0, activeStudents: 0, volunteersCount: 0, status: 'On Track', villages: [] } });
-  } catch (error) {
-    console.error('Failed to create panchayat:', error);
-    res.status(500).json({ success: false, error: 'Unable to save panchayat.' });
+    if (!names.length) {
+      res.status(400).json({ success: false, error: 'No panchayat names were provided for import.' });
+      return;
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    const [clusterRows] = await connection.query(
+      'SELECT id, name, district FROM clusters WHERE id = ? AND academic_year_id = ? LIMIT 1 FOR UPDATE',
+      [clusterId, year.id],
+    );
+    if (!clusterRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'The selected cluster was not found in this academic year.' });
+      return;
+    }
+
+    const [existingRows] = await connection.query(
+      'SELECT id, name FROM panchayats WHERE academic_year_id = ? AND cluster_id = ? FOR UPDATE',
+      [year.id, clusterId],
+    );
+    const existingNames = new Set(existingRows.map((row: any) => String(row.name || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en')));
+    const panchayats = names
+      .filter((name) => !existingNames.has(name.toLocaleLowerCase('en')))
+      .map((name) => ({
+        id: `pan-${randomUUID()}`,
+        name,
+        clusterId,
+        cluster: clusterRows[0].name,
+        district: clusterRows[0].district,
+        academicYearId: year.id,
+        villagesCount: 0,
+        activeStudents: 0,
+        volunteersCount: 0,
+        status: 'On Track',
+        villages: [],
+      }));
+
+    if (panchayats.length) {
+      await connection.query(
+        'INSERT INTO panchayats (id, name, cluster_id, status, academic_year_id) VALUES ?',
+        [panchayats.map((panchayat: any) => [panchayat.id, panchayat.name, clusterId, 'Active', year.id])],
+      );
+    }
+
+    const importedNames = new Set(panchayats.map((panchayat: any) => panchayat.name.toLocaleLowerCase('en')));
+    const skipped = names.filter((name) => !importedNames.has(name.toLocaleLowerCase('en')));
+
+    await connection.commit();
+    res.status(201).json({ success: true, created: panchayats.length, skipped, panchayats });
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to bulk import panchayats:', error);
+    res.status(500).json({ success: false, error: 'Unable to import panchayats.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -2423,11 +2904,22 @@ app.post('/api/users/:id/reset-password', requireAuth, async (req: Authenticated
 // 1. PUT /api/clusters/:id
 app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can update clusters.' }); return; }
-  const { name, college_name, spoc_name, spoc_mobile, district, state } = req.body;
+  const year = await resolveAcademicYear(req);
+  if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
+  if (isArchivedAcademicYear(year)) { res.status(409).json({ success: false, error: 'Archived academic years are read-only.' }); return; }
+  const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
+  const collegeName = String(req.body.collegeName ?? req.body.college_name ?? '').trim();
+  const collegeDistrict = String(req.body.collegeDistrict ?? req.body.college_district ?? '').trim();
+  const spocName = String(req.body.spocName ?? req.body.spoc_name ?? '').trim();
+  const spocMobile = String(req.body.spocMobile ?? req.body.spoc_mobile ?? '').trim();
+  if (!name || !collegeName || !collegeDistrict) {
+    res.status(400).json({ success: false, error: 'Cluster name/district, college, and college location are required.' });
+    return;
+  }
   try {
     const [result] = await pool.query<any>(
-      'UPDATE clusters SET name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, state = ? WHERE id = ?',
-      [name, college_name, spoc_name, spoc_mobile, district, state, req.params.id]
+      'UPDATE clusters SET name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, college_district = ?, state = ? WHERE id = ? AND academic_year_id = ?',
+      [name, collegeName, spocName, spocMobile ? `+91 ${spocMobile.replace(/\D/g, '').slice(-10)}` : '', name, collegeDistrict, 'Tamil Nadu', req.params.id, year.id]
     );
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Cluster not found.' }); return; }
     await pool.query('INSERT INTO audit_logs (id, user_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?)', [crypto.randomUUID(), req.user.id, 'UPDATE_CLUSTER', 'CLUSTERS', req.params.id, JSON.stringify(req.body)]);
@@ -2440,29 +2932,40 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
 // 2. DELETE /api/clusters/:id
 app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can delete clusters.' }); return; }
+  const year = await resolveAcademicYear(req);
+  if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
+  if (isArchivedAcademicYear(year)) { res.status(409).json({ success: false, error: 'Archived academic years are read-only.' }); return; }
+  let connection: any;
   try {
-    await pool.query('START TRANSACTION');
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [clusterRows] = await connection.query('SELECT id, name FROM clusters WHERE id = ? AND academic_year_id = ? LIMIT 1 FOR UPDATE', [req.params.id, year.id]);
+    if (!clusterRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Cluster not found in the selected academic year.' });
+      return;
+    }
 
     // 1. Break bidirectional FK link between clusters and users
-    await pool.query('UPDATE clusters SET admin_id = NULL WHERE id = ?', [req.params.id]);
+    await connection.query('UPDATE clusters SET admin_id = NULL WHERE id = ?', [req.params.id]);
 
     // 2. Remove notifications and unbind audit logs for users belonging to this cluster
-    await pool.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
-    await pool.query('UPDATE audit_logs SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
+    await connection.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
+    await connection.query('UPDATE audit_logs SET user_id = NULL WHERE user_id IN (SELECT id FROM users WHERE cluster_id = ?)', [req.params.id]);
 
     // 3. Delete cluster users (e.g. Cluster Admin)
-    await pool.query('DELETE FROM users WHERE cluster_id = ?', [req.params.id]);
+    await connection.query('DELETE FROM users WHERE cluster_id = ?', [req.params.id]);
 
     // 4. Delete cluster from clusters table
-    const [result] = await pool.query<any>('DELETE FROM clusters WHERE id = ?', [req.params.id]);
+    const [result] = await connection.query('DELETE FROM clusters WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
     if (!result.affectedRows) {
-      await pool.query('ROLLBACK');
+      await connection.rollback();
       res.status(404).json({ success: false, error: 'Cluster not found.' });
       return;
     }
 
     // 5. Record audit log
-    await pool.query('INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)', [
+    await connection.query('INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)', [
       crypto.randomUUID(),
       req.user.id,
       req.user.name,
@@ -2473,27 +2976,177 @@ app.delete('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, r
       `Permanently deleted cluster ${req.params.id} and associated cluster admin accounts.`
     ]);
 
-    await pool.query('COMMIT');
+    await connection.commit();
     res.json({ success: true });
   } catch (error: any) {
-    await pool.query('ROLLBACK').catch(() => undefined);
+    await connection?.rollback().catch(() => undefined);
     console.error('Failed to delete cluster:', error);
     // If foreign key constraint blocks hard deletion due to operational records (sessions, attendance, etc.)
     if (error?.code === 'ER_ROW_IS_REFERENCED_2' || error?.code === 'ER_ROW_IS_REFERENCED') {
       try {
-        await pool.query("UPDATE clusters SET status = 'Inactive' WHERE id = ?", [req.params.id]);
+        const [result] = await pool.query<any>("UPDATE clusters SET status = 'Inactive' WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
         await pool.query("UPDATE users SET status = 'Inactive' WHERE cluster_id = ?", [req.params.id]);
-        res.json({ success: true, message: 'Cluster deactivated due to linked historical sessions/students.' });
+        if (!result.affectedRows) {
+          res.status(404).json({ success: false, error: 'Cluster not found in the selected academic year.' });
+          return;
+        }
+        res.json({ success: true, deactivated: true, message: 'Cluster deactivated because it has linked historical records.' });
         return;
       } catch (innerErr) {
         // pass
       }
     }
     res.status(503).json({ success: false, error: 'Failed to delete cluster.' });
+  } finally {
+    connection?.release();
   }
 });
 
 // 3. GET /api/villages
+app.get('/api/villages/directory', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+
+    const panchayatId = String(req.query.panchayatId || '').trim();
+    if (!panchayatId) {
+      res.status(400).json({ success: false, error: 'Select a panchayat first.' });
+      return;
+    }
+
+    const [rows] = await pool.query<any[]>(
+      `SELECT p.id, p.name, p.cluster_id, c.district, c.name AS cluster_name
+       FROM panchayats p
+       JOIN clusters c ON c.id = p.cluster_id
+       WHERE p.id = ? AND p.academic_year_id = ? LIMIT 1`,
+      [panchayatId, year.id],
+    );
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Panchayat not found in the selected academic year.' });
+      return;
+    }
+
+    const panchayat = rows[0];
+    if (req.user.role === 'Cluster Admin') {
+      const allowedClusterId = await resolveClusterForAcademicYear(req, year.id);
+      if (panchayat.cluster_id !== allowedClusterId) {
+        res.status(403).json({ success: false, error: 'This panchayat is outside your assigned cluster.' });
+        return;
+      }
+    }
+
+    const district = String(panchayat.district || '').trim();
+    const districtSlug = district.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const panchayatSlug = String(panchayat.name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    if (!districtSlug || !panchayatSlug) {
+      res.status(422).json({ success: false, error: 'The panchayat district/name is not configured correctly.' });
+      return;
+    }
+
+    let sourceUrl = `https://digitalpanchayat.org/india/tamil-nadu/${districtSlug}/${panchayatSlug}-gram-panchayat`;
+    let directoryResponse = await fetch(sourceUrl, {
+      headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP panchayat village directory lookup' },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    if (directoryResponse.status === 404) {
+      const normalizeSlug = (value: string) => value.normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+      const targetName = normalizeSlug(panchayat.name);
+      const searchTerms = [...new Set([panchayat.name, panchayatSlug, panchayatSlug.replace(/i$/, '')])];
+      let canonicalPath: string | null = null;
+
+      for (const term of searchTerms) {
+        const searchResponse = await fetch(`https://digitalpanchayat.org/api/search?q=${encodeURIComponent(term)}`, {
+          headers: { Accept: 'application/json', 'User-Agent': 'TQI-ERP panchayat village directory lookup' },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (!searchResponse.ok) continue;
+        const searchData = await searchResponse.json().catch(() => null);
+        const candidates = Array.isArray(searchData?.results) ? searchData.results : [];
+        const candidate = candidates.find((result: any) => {
+          if (result?.entityType !== 'gram_panchayat' || result?.districtSlug !== districtSlug) return false;
+          const candidateName = normalizeSlug(String(result.name || ''));
+          return candidateName === targetName || candidateName.replace(/i$/, '') === targetName.replace(/i$/, '');
+        });
+        if (candidate?.url) {
+          canonicalPath = String(candidate.url);
+          break;
+        }
+        if (candidate?.slug) {
+          canonicalPath = `/india/tamil-nadu/${districtSlug}/${String(candidate.slug)}`;
+          break;
+        }
+      }
+
+      if (canonicalPath) {
+        sourceUrl = new URL(canonicalPath, 'https://digitalpanchayat.org').toString();
+        directoryResponse = await fetch(sourceUrl, {
+          headers: { Accept: 'text/html', 'User-Agent': 'TQI-ERP panchayat village directory lookup' },
+          signal: AbortSignal.timeout(15000),
+        });
+      }
+    }
+
+    if (!directoryResponse.ok) {
+      res.status(directoryResponse.status === 404 ? 404 : 502).json({
+        success: false,
+        error: directoryResponse.status === 404
+          ? `No online village mapping was found for ${panchayat.name} in ${district}.`
+          : 'The village directory source is temporarily unavailable.',
+      });
+      return;
+    }
+
+    const html = await directoryResponse.text();
+    const villages = new Map<string, string>();
+    const linkPattern = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let match: RegExpExecArray | null;
+    while ((match = linkPattern.exec(html)) !== null) {
+      let url: URL;
+      try { url = new URL(match[1], sourceUrl); } catch { continue; }
+      const pathParts = url.pathname.split('/').filter(Boolean);
+      if (pathParts.length !== 4 || pathParts[0] !== 'india' || pathParts[1] !== 'tamil-nadu' || pathParts[2] !== districtSlug) continue;
+      if (pathParts[3].endsWith('-gram-panchayat')) continue;
+
+      const villageName = match[2]
+        .replace(/<[^>]*>/g, ' ')
+        .replace(/&nbsp;|&#160;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&#39;|&apos;/gi, "'")
+        .replace(/&quot;/gi, '"')
+        .replace(/&#(\d+);/g, (_entity, code: string) => String.fromCodePoint(Number(code)))
+        .replace(/\s+/g, ' ')
+        .replace(/\s+Village$/i, '')
+        .trim();
+      if (villageName) villages.set(villageName.toLocaleLowerCase('en'), villageName);
+    }
+
+    if (!villages.size) {
+      res.status(502).json({ success: false, error: `No village names were listed for ${panchayat.name}.` });
+      return;
+    }
+
+    res.json({
+      success: true,
+      panchayatId,
+      panchayatName: panchayat.name,
+      district,
+      source: 'LGD via Digital Panchayat',
+      sourceUrl,
+      villages: [...villages.values()].sort((left, right) => left.localeCompare(right)),
+    });
+  } catch (error: any) {
+    console.error('Failed to fetch panchayat village directory:', error);
+    res.status(502).json({ success: false, error: error?.name === 'TimeoutError' ? 'Village directory request timed out.' : 'Unable to load this panchayat village list.' });
+  }
+});
+
 app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const year = await resolveAcademicYear(req);
   if (!year) {
@@ -2532,8 +3185,10 @@ app.get('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Res
 
 // 4. POST /api/villages
 app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  const { id, name, panchayat_id, cluster_id } = req.body;
-  if (!name || !panchayat_id || !cluster_id) {
+  const name = String(req.body?.name || '').trim().replace(/\s+/g, ' ');
+  const panchayatId = String(req.body?.panchayat_id || '').trim();
+  const requestedClusterId = String(req.body?.cluster_id || '').trim();
+  if (!name || !panchayatId || !requestedClusterId) {
     res.status(400).json({ success: false, error: 'Missing required fields.' });
     return;
   }
@@ -2547,39 +3202,198 @@ app.post('/api/villages', requireAuth, async (req: AuthenticatedRequest, res: Re
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    const finalId = id ? `${id}-${year.id}` : `village-${crypto.randomUUID()}`;
-    const [result] = await pool.query<any>(
-      `INSERT INTO villages (id, name, panchayat_id, cluster_id, academic_year_id)
-       VALUES (?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE name = VALUES(name), panchayat_id = VALUES(panchayat_id), cluster_id = VALUES(cluster_id), academic_year_id = VALUES(academic_year_id)`,
-      [finalId, name, panchayat_id, cluster_id, year.id]
+    const [panchayatRows] = await pool.query<any[]>(
+      'SELECT id, cluster_id FROM panchayats WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [panchayatId, year.id],
     );
-    res.json({ success: true, data: { id: finalId } });
-  } catch (error) {
+    if (!panchayatRows.length) {
+      res.status(404).json({ success: false, error: 'Panchayat not found in the selected academic year.' });
+      return;
+    }
+    const clusterId = String(panchayatRows[0].cluster_id);
+    if (requestedClusterId !== clusterId) {
+      res.status(400).json({ success: false, error: 'Village cluster must match its parent panchayat.' });
+      return;
+    }
+    if (req.user.role === 'Cluster Admin') {
+      const allowedClusterId = await resolveClusterForAcademicYear(req, year.id);
+      if (clusterId !== allowedClusterId) {
+        res.status(403).json({ success: false, error: 'This panchayat is outside your assigned cluster.' });
+        return;
+      }
+    }
+
+    const [existingRows] = await pool.query<any[]>(
+      'SELECT id FROM villages WHERE panchayat_id = ? AND academic_year_id = ? AND LOWER(TRIM(name)) = LOWER(?) LIMIT 1',
+      [panchayatId, year.id, name],
+    );
+    if (existingRows.length) {
+      res.status(409).json({ success: false, error: 'This village is already added to this panchayat.' });
+      return;
+    }
+
+    const finalId = `village-${crypto.randomUUID()}`;
+    await pool.query(
+      'INSERT INTO villages (id, name, panchayat_id, cluster_id, academic_year_id) VALUES (?, ?, ?, ?, ?)',
+      [finalId, name, panchayatId, clusterId, year.id],
+    );
+    res.status(201).json({ success: true, data: { id: finalId, name, panchayatId, clusterId, academicYearId: year.id } });
+  } catch (error: any) {
+    if (error?.code === 'ER_DUP_ENTRY') {
+      res.status(409).json({ success: false, error: 'This village is already added to this panchayat.' });
+      return;
+    }
+    console.error('Failed to create village:', error);
     res.status(503).json({ success: false, error: 'Failed to upsert village.' });
   }
 });
 
 // 5. DELETE /api/villages/:id
 app.delete('/api/villages/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let connection: any;
   try {
-    const [result] = await pool.query<any>("DELETE FROM villages WHERE id = ?", [req.params.id]);
-    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Village not found.' }); return; }
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [villageRows] = await connection.query(
+      'SELECT id, cluster_id, panchayat_id FROM villages WHERE id = ? AND academic_year_id = ? LIMIT 1 FOR UPDATE',
+      [req.params.id, year.id],
+    );
+    if (!villageRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Village not found in the selected academic year.' });
+      return;
+    }
+    const village = villageRows[0];
+    if (req.query.panchayatId && String(req.query.panchayatId) !== String(village.panchayat_id)) {
+      await connection.rollback();
+      res.status(400).json({ success: false, error: 'Village does not belong to the selected panchayat.' });
+      return;
+    }
+    if (req.user.role === 'Cluster Admin') {
+      const allowedClusterId = await resolveClusterForAcademicYear(req, year.id);
+      if (String(village.cluster_id) !== String(allowedClusterId)) {
+        await connection.rollback();
+        res.status(403).json({ success: false, error: 'This village is outside your assigned cluster.' });
+        return;
+      }
+    }
+
+    const [dependencyRows] = await connection.query(
+      `SELECT
+        (SELECT COUNT(*) FROM students WHERE village_id = ? AND academic_year_id = ?) AS students,
+        (SELECT COUNT(*) FROM volunteers WHERE village_id = ? AND academic_year_id = ?) AS volunteers,
+        (SELECT COUNT(*) FROM sessions WHERE village_id = ? AND academic_year_id = ?) AS sessions,
+        (SELECT COUNT(*) FROM schools WHERE village_id = ? AND academic_year_id = ?) AS schools,
+        (SELECT COUNT(*) FROM attendance_sessions WHERE village_id = ? AND academic_year_id = ?) AS attendance`,
+      [req.params.id, year.id, req.params.id, year.id, req.params.id, year.id, req.params.id, year.id, req.params.id, year.id],
+    );
+    const dependencies = Object.entries(dependencyRows[0] || {}).filter(([, count]) => Number(count) > 0).map(([name]) => name);
+    if (dependencies.length) {
+      await connection.rollback();
+      res.status(409).json({ success: false, error: `Cannot delete this village because it has linked ${dependencies.join(', ')} records.` });
+      return;
+    }
+
+    await connection.query('DELETE FROM villages WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
+    await connection.commit();
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to delete village:', error);
     res.status(503).json({ success: false, error: 'Failed to delete village.' });
+  } finally {
+    connection?.release();
   }
 });
 
 // 6. DELETE /api/panchayats/:id
 app.delete('/api/panchayats/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let connection: any;
   try {
-    await pool.query("DELETE FROM villages WHERE panchayat_id = ?", [req.params.id]);
-    const [result] = await pool.query<any>("DELETE FROM panchayats WHERE id = ?", [req.params.id]);
-    if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Panchayat not found.' }); return; }
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [panchayatRows] = await connection.query(
+      'SELECT id, cluster_id FROM panchayats WHERE id = ? AND academic_year_id = ? LIMIT 1 FOR UPDATE',
+      [req.params.id, year.id],
+    );
+    if (!panchayatRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Panchayat not found in the selected academic year.' });
+      return;
+    }
+    if (req.user.role === 'Cluster Admin') {
+      const allowedClusterId = await resolveClusterForAcademicYear(req, year.id);
+      if (String(panchayatRows[0].cluster_id) !== String(allowedClusterId)) {
+        await connection.rollback();
+        res.status(403).json({ success: false, error: 'This panchayat is outside your assigned cluster.' });
+        return;
+      }
+    }
+
+    const [dependencyRows] = await connection.query(
+      `SELECT
+        (SELECT COUNT(*) FROM students WHERE panchayat_id = ? AND academic_year_id = ?) AS students,
+        (SELECT COUNT(*) FROM volunteers WHERE panchayat_id = ? AND academic_year_id = ?) AS volunteers,
+        (SELECT COUNT(*) FROM sessions WHERE panchayat_id = ? AND academic_year_id = ?) AS sessions,
+        (SELECT COUNT(*) FROM schools WHERE panchayat_id = ? AND academic_year_id = ?) AS schools,
+        (SELECT COUNT(*) FROM lesson_plans WHERE panchayat_id = ? AND academic_year_id = ?) AS lesson_plans,
+        (SELECT COUNT(*) FROM attendance_sessions WHERE panchayat_id = ? AND academic_year_id = ?) AS attendance`,
+      [req.params.id, year.id, req.params.id, year.id, req.params.id, year.id, req.params.id, year.id, req.params.id, year.id, req.params.id, year.id],
+    );
+    const dependencies = Object.entries(dependencyRows[0] || {}).filter(([, count]) => Number(count) > 0).map(([name]) => name);
+    if (dependencies.length) {
+      await connection.rollback();
+      res.status(409).json({ success: false, error: `Cannot delete this panchayat because it has linked ${dependencies.join(', ')} records.` });
+      return;
+    }
+
+    const [villageDependencyRows] = await connection.query(
+      `SELECT COUNT(*) AS count FROM villages v
+       WHERE v.panchayat_id = ? AND v.academic_year_id = ? AND (
+         EXISTS (SELECT 1 FROM students s WHERE s.village_id = v.id AND s.academic_year_id = v.academic_year_id) OR
+         EXISTS (SELECT 1 FROM volunteers vol WHERE vol.village_id = v.id AND vol.academic_year_id = v.academic_year_id) OR
+         EXISTS (SELECT 1 FROM sessions se WHERE se.village_id = v.id AND se.academic_year_id = v.academic_year_id) OR
+         EXISTS (SELECT 1 FROM schools sc WHERE sc.village_id = v.id AND sc.academic_year_id = v.academic_year_id) OR
+         EXISTS (SELECT 1 FROM attendance_sessions att WHERE att.village_id = v.id AND att.academic_year_id = v.academic_year_id)
+       )`,
+      [req.params.id, year.id],
+    );
+    if (Number(villageDependencyRows[0]?.count || 0) > 0) {
+      await connection.rollback();
+      res.status(409).json({ success: false, error: 'Cannot delete this panchayat because one or more villages have linked operational records.' });
+      return;
+    }
+
+    await connection.query('DELETE FROM villages WHERE panchayat_id = ? AND academic_year_id = ?', [req.params.id, year.id]);
+    await connection.query('DELETE FROM panchayats WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
+    await connection.commit();
     res.json({ success: true });
-  } catch (error) {
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to delete panchayat:', error);
     res.status(503).json({ success: false, error: 'Failed to delete panchayat.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -3351,9 +4165,10 @@ const copyAcademicYearMasterData = async (
   targetYearName: string,
   selections: Record<string, unknown>,
   copiedFilePaths: string[],
+  scopedClusterIds?: Map<string, string>,
 ) => {
   const enabled = (key: string) => selections[key] === true;
-  const clusterIds = new Map<string, string>();
+  const clusterIds = scopedClusterIds || new Map<string, string>();
   const panchayatIds = new Map<string, string>();
   const villageIds = new Map<string, string>();
   const studentIds = new Map<string, string>();
@@ -3364,6 +4179,10 @@ const copyAcademicYearMasterData = async (
   if (enabled('clusters')) {
     const [rows] = await connection.query('SELECT * FROM clusters WHERE academic_year_id = ?', [sourceYearId]);
     for (const row of rows) {
+      if (scopedClusterIds) {
+        if (!clusterIds.has(row.id)) continue;
+        continue;
+      }
       const id = `cluster-${randomUUID()}`;
       clusterIds.set(row.id, id);
       await connection.query(
@@ -3760,6 +4579,137 @@ app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest
   }
 });
 
+app.post('/api/academic-years/:id/copy-data', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  const isClusterAdmin = req.user.role === 'Cluster Admin';
+  if (!isClusterAdmin && req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only an authorized admin can copy academic year data.' });
+    return;
+  }
+  let connection: any;
+  const copiedPhotoFiles: string[] = [];
+  try {
+    const targetYearId = String(req.params.id || '').trim();
+    const sourceYearId = String(req.body.copyFromYearId || '').trim();
+    const copySelections = { ...(req.body.copySelections || {}) } as Record<string, unknown>;
+    const scopedClusterIds = new Map<string, string>();
+    if (!sourceYearId || sourceYearId === targetYearId) {
+      res.status(400).json({ success: false, error: 'Choose a different source academic year.' });
+      return;
+    }
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [years] = await connection.query(
+      'SELECT id, name, start_date, status, is_active FROM academic_years WHERE id IN (?, ?) FOR UPDATE',
+      [targetYearId, sourceYearId],
+    );
+    const targetYear = years.find((year: any) => year.id === targetYearId);
+    const sourceYear = years.find((year: any) => year.id === sourceYearId);
+    if (!targetYear || !sourceYear) {
+      throw Object.assign(new Error('Source or target academic year was not found.'), { statusCode: 404 });
+    }
+    if (isClusterAdmin) {
+      if (String(targetYear.status).toUpperCase() !== 'ACTIVE' || !Boolean(targetYear.is_active)) {
+        throw Object.assign(new Error('Cluster Admin can copy data only into the active academic year.'), { statusCode: 409 });
+      }
+      if (!req.user.clusterId || req.user.clusterId === 'all') {
+        throw Object.assign(new Error('Your account is not assigned to a cluster.'), { statusCode: 403 });
+      }
+      const sourceStartDate = new Date(sourceYear.start_date).getTime();
+      const targetStartDate = new Date(targetYear.start_date).getTime();
+      if (!Number.isFinite(sourceStartDate) || !Number.isFinite(targetStartDate) || sourceStartDate >= targetStartDate) {
+        throw Object.assign(new Error('Choose an earlier academic year as the copy source.'), { statusCode: 400 });
+      }
+
+      const [targetClusters] = await connection.query(
+        `SELECT id, source_cluster_id FROM clusters
+         WHERE academic_year_id = ? AND (id = ? OR source_cluster_id = ?)
+         ORDER BY (id = ?) DESC LIMIT 1 FOR UPDATE`,
+        [targetYearId, req.user.clusterId, req.user.clusterId, req.user.clusterId],
+      );
+      if (!targetClusters.length) {
+        throw Object.assign(new Error('Your cluster is not configured for the active academic year.'), { statusCode: 403 });
+      }
+      const targetCluster = targetClusters[0];
+      const sourceClusterKey = String(targetCluster.source_cluster_id || targetCluster.id);
+      const [sourceClusters] = await connection.query(
+        `SELECT id FROM clusters
+         WHERE academic_year_id = ? AND (id = ? OR source_cluster_id = ?)
+         ORDER BY (id = ?) DESC LIMIT 1`,
+        [sourceYearId, sourceClusterKey, sourceClusterKey, sourceClusterKey],
+      );
+      if (!sourceClusters.length) {
+        throw Object.assign(new Error('The previous academic year has no matching cluster to copy.'), { statusCode: 404 });
+      }
+      scopedClusterIds.set(String(sourceClusters[0].id), String(targetCluster.id));
+
+      const clusterScopedTables = [
+        'panchayats', 'villages', 'students', 'volunteers', 'schools', 'sessions',
+        'attendance_sessions', 'lesson_plans', 'session_photos', 'session_reports', 'finance_entries',
+      ];
+      for (const table of clusterScopedTables) {
+        const [rows] = await connection.query(
+          `SELECT COUNT(*) AS count FROM ${table} WHERE academic_year_id = ? AND cluster_id = ?`,
+          [targetYearId, targetCluster.id],
+        );
+        if (Number(rows[0]?.count || 0) > 0) {
+          throw Object.assign(new Error('Your cluster already has data in the active year. Copying is available only before cluster data is created.'), { statusCode: 409 });
+        }
+      }
+
+      // Cluster Admins may copy only cluster-scoped records, not global year setup or module configuration.
+      copySelections.sessionPlan = false;
+      copySelections.moduleLibrary = false;
+      copySelections.clusters = true;
+    } else {
+      if (String(targetYear.status).toUpperCase() !== 'DRAFT' || Boolean(targetYear.is_active)) {
+        throw Object.assign(new Error('Data can only be copied into an inactive draft academic year.'), { statusCode: 409 });
+      }
+
+      const yearDataTables = [
+        'clusters', 'panchayats', 'villages', 'students', 'volunteers', 'schools', 'modules', 'sessions',
+        'attendance_sessions', 'lesson_plans', 'session_photos', 'session_reports', 'finance_entries',
+        'approvals', 'date_change_requests', 'session_submissions',
+      ];
+      for (const table of yearDataTables) {
+        const [rows] = await connection.query(`SELECT COUNT(*) AS count FROM ${table} WHERE academic_year_id = ?`, [targetYearId]);
+        if (Number(rows[0]?.count || 0) > 0) {
+          throw Object.assign(new Error('This academic year already has data. Copying is only available for an empty year.'), { statusCode: 409 });
+        }
+      }
+    }
+
+    const needsCluster = Boolean(copySelections.panchayatsVillages || copySelections.schools || copySelections.students || copySelections.volunteers || copySelections.lessonPlans || copySelections.attendanceHistory || copySelections.sessionReports || copySelections.sessionPhotos || copySelections.financeRecords);
+    const needsGeography = Boolean(copySelections.schools || copySelections.students || copySelections.volunteers || copySelections.lessonPlans || copySelections.attendanceHistory || copySelections.sessionReports || copySelections.sessionPhotos || copySelections.financeRecords);
+    if ((needsCluster && !copySelections.clusters) || (needsGeography && !copySelections.panchayatsVillages)) {
+      throw Object.assign(new Error('Include Clusters and Panchayats & Villages to copy dependent records.'), { statusCode: 400 });
+    }
+    if (copySelections.attendanceHistory && !copySelections.students) {
+      throw Object.assign(new Error('Include Students when copying attendance history.'), { statusCode: 400 });
+    }
+    if (Boolean(copySelections.sessionPlan)) {
+      await connection.query(
+        `INSERT INTO academic_setup (academic_year_id, day_number, academic_year, session_name, session_date)
+         SELECT ?, day_number, ?, session_name, session_date FROM academic_setup WHERE academic_year_id = ?
+         ON DUPLICATE KEY UPDATE session_name = VALUES(session_name), session_date = VALUES(session_date), academic_year = VALUES(academic_year)`,
+        [targetYearId, targetYear.name, sourceYearId],
+      );
+    }
+    await copyAcademicYearMasterData(connection, sourceYearId, targetYearId, targetYear.name, copySelections, copiedPhotoFiles, isClusterAdmin ? scopedClusterIds : undefined);
+    await connection.commit();
+    res.json({ success: true });
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    copiedPhotoFiles.forEach((filePath) => {
+      try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ }
+    });
+    console.error('Failed to copy academic year data:', error);
+    res.status(error?.statusCode || 500).json({ success: false, error: error?.message || 'Unable to copy academic year data.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.post('/api/academic-years/:id/activate', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') {
     res.status(403).json({ success: false, error: 'Only Super Admin can activate academic years.' });
@@ -3772,7 +4722,7 @@ app.post('/api/academic-years/:id/activate', requireAuth, async (req: Authentica
       return;
     }
     if (String(rows[0].status).toUpperCase() === 'ARCHIVED') {
-      res.status(409).json({ success: false, error: 'Unarchive the academic year before activating it.' });
+      res.status(409).json({ success: false, error: 'Archived academic years cannot be activated.' });
       return;
     }
     const connection = await pool.getConnection();
@@ -3794,43 +4744,77 @@ app.post('/api/academic-years/:id/activate', requireAuth, async (req: Authentica
   }
 });
 
-app.post('/api/academic-years/:id/archive', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') {
-    res.status(403).json({ success: false, error: 'Only Super Admin can archive academic years.' });
+    res.status(403).json({ success: false, error: 'Only Super Admin can delete academic years.' });
     return;
   }
+  let connection: any;
+  let photoPaths: string[] = [];
   try {
-    const [currentRows] = await pool.query<any[]>('SELECT is_active FROM academic_years WHERE id = ? LIMIT 1', [req.params.id]);
-    if (!currentRows.length) {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [years] = await connection.query('SELECT id, name, is_active FROM academic_years WHERE id = ? FOR UPDATE', [req.params.id]);
+    if (!years.length) {
+      await connection.rollback();
       res.status(404).json({ success: false, error: 'Academic year not found.' });
       return;
     }
-    if (Boolean(currentRows[0].is_active)) {
-      res.status(409).json({ success: false, error: 'Activate another academic year before archiving the current active year.' });
-      return;
+    let replacementYearId: string | null = null;
+    if (Boolean(years[0].is_active)) {
+      const [replacementYears] = await connection.query(
+        `SELECT id FROM academic_years
+         WHERE id <> ? AND UPPER(COALESCE(status, 'DRAFT')) <> 'ARCHIVED'
+         ORDER BY is_active DESC, start_date DESC, created_at DESC
+         LIMIT 1 FOR UPDATE`,
+        [req.params.id],
+      );
+      replacementYearId = replacementYears[0]?.id || null;
     }
-    const [otherActive] = await pool.query<any[]>("SELECT id FROM academic_years WHERE is_active = 1 AND id <> ? LIMIT 1", [req.params.id]);
-    const [result] = await pool.query<any>(
-      "UPDATE academic_years SET is_active = 0, status = 'ARCHIVED', archived_at = NOW() WHERE id = ?",
-      [req.params.id],
-    );
-    if (!result.affectedRows) {
-      res.status(404).json({ success: false, error: 'Academic year not found.' });
-      return;
-    }
-    if (!otherActive.length) {
-      res.json({ success: true, warning: 'No other active academic year remains.' });
-      return;
-    }
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Failed to archive academic year:', error);
-    res.status(500).json({ success: false, error: 'Unable to archive academic year.' });
-  }
-});
 
-app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  res.status(405).json({ success: false, error: 'Academic years cannot be permanently deleted. Archive the year instead.' });
+    const yearId = req.params.id;
+    const [photos] = await connection.query('SELECT file_path FROM session_photos WHERE academic_year_id = ?', [yearId]);
+    photoPaths = photos.map((photo: any) => String(photo.file_path || '')).filter(Boolean);
+
+    await connection.query('DELETE FROM attendance_sessions WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM lesson_plans WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM session_photos WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM session_reports WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM finance_entries WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM approvals WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM date_change_requests WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM session_submissions WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM sessions WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM schools WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM modules WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM students WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM volunteers WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM villages WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM panchayats WHERE academic_year_id = ?', [yearId]);
+    await connection.query('UPDATE users SET cluster_id = NULL WHERE cluster_id IN (SELECT id FROM clusters WHERE academic_year_id = ?)', [yearId]);
+    await connection.query('DELETE FROM clusters WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM academic_setup WHERE academic_year_id = ?', [yearId]);
+    await connection.query('DELETE FROM academic_years WHERE id = ?', [yearId]);
+    if (replacementYearId) {
+      await connection.query("UPDATE academic_years SET is_active = 0, status = 'DRAFT' WHERE is_active = 1");
+      await connection.query("UPDATE academic_years SET is_active = 1, status = 'ACTIVE' WHERE id = ?", [replacementYearId]);
+    }
+    await connection.commit();
+
+    for (const filePath of photoPaths) {
+      const [references] = await pool.query<any[]>('SELECT id FROM session_photos WHERE file_path = ? LIMIT 1', [filePath]);
+      if (!references.length) {
+        try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ }
+      }
+    }
+    res.json({ success: true, data: { id: yearId, name: years[0].name } });
+  } catch (error: any) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to delete academic year:', error);
+    res.status(500).json({ success: false, error: 'Unable to delete academic year and its associated data.' });
+  } finally {
+    connection?.release();
+  }
 });
 
 app.get('/api/health', async (_req, res) => {

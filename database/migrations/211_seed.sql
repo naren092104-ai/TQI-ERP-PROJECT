@@ -1,8 +1,7 @@
 -- TQI-ERP v2: seed Super Admin and Default Foundation data
--- Runs as part of database/migrations runner during backend startup.
-
+-- Create a default Super Admin only for an empty users table and never overwrite live credentials.
 INSERT INTO `users` (`id`, `name`, `email`, `password_hash`, `role`, `cluster_id`, `phone`, `must_change_password`, `status`)
-VALUES (
+SELECT
   'usr-super-admin',
   'Super Admin',
   'admin@tqi.org',
@@ -12,16 +11,12 @@ VALUES (
   '+91 90000 00000',
   FALSE,
   'Active'
-)
+WHERE NOT EXISTS (SELECT 1 FROM `users` LIMIT 1)
 ON DUPLICATE KEY UPDATE
   `password_hash` = VALUES(`password_hash`),
   `name` = VALUES(`name`),
   `role` = VALUES(`role`),
   `status` = 'Active';
-
-INSERT INTO `academic_years` (`id`, `name`, `start_date`, `end_date`, `is_active`)
-VALUES ('ay-2025-2026', '2025-2026', '2025-06-01', '2026-05-31', TRUE)
-ON DUPLICATE KEY UPDATE `name` = VALUES(`name`);
 
 INSERT INTO `modules` (`id`, `name`, `code`, `description`, `is_active`)
 VALUES

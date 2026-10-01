@@ -102,7 +102,6 @@ export default function App() {
       // Stale localStorage from older builds may have stored tabs that no
       // longer exist (e.g. 'attendance-draft'). Normalize them back to
       // 'dashboard' so the user doesn't land on a blank pane.
-      if (savedTab === 'academic-setup' && role !== 'Super Admin') return 'dashboard';
       if (!KNOWN_TABS.has(savedTab)) return 'dashboard';
       return savedTab;
     } catch {
@@ -570,10 +569,34 @@ export default function App() {
         const usersData = await usersResponse.json();
         if (Array.isArray(usersData?.users)) setUsers(usersData.users);
       }
-      return { emailSent: Boolean(data.emailSent) };
+      return {
+        emailSent: Boolean(data.emailSent),
+        temporaryPassword: String(data.temporaryPassword || ''),
+        loginEmail: String(data.loginEmail || newC.adminEmail || ''),
+        clusterName: String(data.cluster?.name || newC.name || ''),
+      };
     } catch (error: any) {
       throw error;
     }
+  };
+
+  const handleResendClusterCredentials = async (clusterId: string) => {
+    const response = await fetch(apiUrl(`/api/clusters/${encodeURIComponent(clusterId)}/resend-credentials`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '',
+      },
+      body: JSON.stringify({ academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to reset cluster credentials.');
+    return {
+      emailSent: Boolean(data.emailSent),
+      temporaryPassword: String(data.temporaryPassword || ''),
+      loginEmail: String(data.loginEmail || ''),
+      clusterName: String(data.clusterName || ''),
+    };
   };
 
   const handleUpdateCluster = async (clusterId: string, changes: Partial<Cluster>) => {
@@ -606,9 +629,13 @@ export default function App() {
         method: 'DELETE',
         headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
       });
+      const result = await res.json().catch(() => null);
       if (!res.ok) {
-        const errorData = await res.json().catch(() => null);
-        throw new Error(errorData?.error || 'Failed to delete cluster.');
+        throw new Error(result?.error || 'Failed to delete cluster.');
+      }
+      if (result?.deactivated) {
+        await fetchBackendData(new AbortController().signal);
+        return;
       }
       setClusters((prev) => prev.filter((c) => c.id !== clusterId));
       setUsers((prev) => prev.filter((u) => u.clusterId !== clusterId));
@@ -718,110 +745,78 @@ export default function App() {
   };
 
   // Panchayat mutations
-  const handleAddPanchayat = async (newPanchayat: {
-    name: string;
-    cluster: string;
-    status: 'On Track' | 'Correction Required' | 'Action Needed';
-    initialVillages: string[];
-  }) => {
-    const newId = newPanchayat.name.toLowerCase().replace(/\s+/g, '-');
-    const villagesList = newPanchayat.initialVillages.map((vName, idx) => ({
-      id: `v-${Date.now()}-${idx}`,
-      name: vName,
-      studentCount: 0,
-    }));
+  const handleAddPanchayat = async (newPanchayat: { name: string; clusterId: string }): Promise<Panchayat> => {
+    if (!currentUser?.token) throw new Error('Sign in again before saving a panchayat.');
+    if (!selectedAcademicYearId) throw new Error('Select an academic year before saving a panchayat.');
+    const response = await fetch(apiUrl('/api/panchayats'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser.token}`,
+      },
+      body: JSON.stringify({
+        name: newPanchayat.name,
+        clusterId: newPanchayat.clusterId,
+        academicYearId: selectedAcademicYearId,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data?.panchayat?.id) {
+      throw new Error(data?.error || 'Unable to save panchayat.');
+    }
 
+    const saved = data.panchayat;
     const created: Panchayat = {
-      id: newId,
-      name: newPanchayat.name,
-      cluster: newPanchayat.cluster || 'Dharmapuri',
-      status: newPanchayat.status || 'On Track',
-      villagesCount: villagesList.length,
+      id: String(saved.id),
+      name: String(saved.name),
+      cluster: String(saved.cluster || ''),
+      clusterId: String(saved.clusterId),
+      academicYearId: String(saved.academicYearId || selectedAcademicYearId),
+      villagesCount: 0,
       activeStudents: 0,
       volunteersCount: 0,
-      villages: villagesList,
+      status: 'On Track',
+      villages: [],
     };
-
-    setPanchayats((prev) => [created, ...prev]);
-
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl('/api/panchayats'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentUser.token}`,
-          },
-          body: JSON.stringify({
-            id: newId,
-            name: newPanchayat.name,
-            clusterId: currentUserClusterId,
-          }),
-        });
-
-        // Also create initial villages
-        for (const v of villagesList) {
-          await fetch(apiUrl('/api/villages'), {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${currentUser.token}`,
-            },
-            body: JSON.stringify({
-              id: v.id,
-              name: v.name,
-              panchayat_id: newId,
-              cluster_id: currentUserClusterId,
-            }),
-          });
-        }
-      } catch (err) {
-        console.error('Failed to persist panchayat to backend:', err);
-      }
-    }
+    setPanchayats((previous) => [created, ...previous.filter((item) => item.id !== created.id)]);
+    return created;
   };
 
   const handleAddVillage = async (panchayatId: string, villageName: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before saving a village.');
+    if (!selectedAcademicYearId) throw new Error('Select an academic year before saving a village.');
+    const parentPanchayat = panchayats.find((panchayat) => panchayat.id === panchayatId);
+    if (!parentPanchayat?.clusterId) throw new Error('Could not resolve the panchayat cluster.');
+
     const newVillageId = `v-${Date.now()}`;
-    const newVillage = {
-      id: newVillageId,
+    const response = await fetch(apiUrl('/api/villages'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser.token}`,
+      },
+      body: JSON.stringify({
+        id: newVillageId,
+        name: villageName,
+        panchayat_id: panchayatId,
+        cluster_id: parentPanchayat.clusterId,
+        academicYearId: selectedAcademicYearId,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save village.');
+
+    const savedVillage = {
+      id: String(data.data?.id || `${newVillageId}-${selectedAcademicYearId}`),
       name: villageName,
       studentCount: 0,
     };
-
-    setPanchayats((prev) =>
-      prev.map((p) => {
-        if (p.id === panchayatId) {
-          const updatedVillages = [...p.villages, newVillage];
-          return {
-            ...p,
-            villages: updatedVillages,
-            villagesCount: updatedVillages.length,
-          };
-        }
-        return p;
-      })
-    );
-
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl('/api/villages'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentUser.token}`,
-          },
-          body: JSON.stringify({
-            id: newVillageId,
-            name: villageName,
-            panchayat_id: panchayatId,
-            cluster_id: currentUserClusterId,
-          }),
-        });
-      } catch (err) {
-        console.error('Failed to persist village to backend:', err);
-      }
-    }
+    setPanchayats((previous) => previous.map((panchayat) => {
+      if (panchayat.id !== panchayatId) return panchayat;
+      if (panchayat.villages.some((village) => village.name.trim().toLowerCase() === villageName.trim().toLowerCase())) return panchayat;
+      const villages = [...panchayat.villages, savedVillage];
+      return { ...panchayat, villages, villagesCount: villages.length };
+    }));
   };
 
   const handleUpdatePanchayat = (panchayatId: string, name: string) => {
@@ -834,17 +829,15 @@ export default function App() {
   };
 
   const handleDeletePanchayat = async (panchayatId: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before deleting a panchayat.');
+    const response = await fetch(apiUrl(`/api/panchayats/${encodeURIComponent(panchayatId)}?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete panchayat.');
     setPanchayats((prev) => prev.filter((p) => p.id !== panchayatId));
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl(`/api/panchayats/${panchayatId}`), {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${currentUser.token}` },
-        });
-      } catch (err) {
-        console.error('Failed to delete panchayat from backend:', err);
-      }
-    }
+    setSelectedPanchayatId((selected) => selected === panchayatId ? '' : selected);
   };
 
   const handleUpdateVillage = (panchayatId: string, villageId: string, name: string) => {
@@ -869,29 +862,18 @@ export default function App() {
   };
 
   const handleDeleteVillage = async (panchayatId: string, villageId: string) => {
-    setPanchayats((prev) =>
-      prev.map((p) => {
-        if (p.id === panchayatId) {
-          const updated = p.villages.filter((v) => v.id !== villageId);
-          return {
-            ...p,
-            villages: updated,
-            villagesCount: updated.length,
-          };
-        }
-        return p;
-      })
-    );
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl(`/api/villages/${villageId}`), {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${currentUser.token}` },
-        });
-      } catch (err) {
-        console.error('Failed to delete village from backend:', err);
-      }
-    }
+    if (!currentUser?.token) throw new Error('Sign in again before deleting a village.');
+    const response = await fetch(apiUrl(`/api/villages/${encodeURIComponent(villageId)}?panchayatId=${encodeURIComponent(panchayatId)}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete village.');
+    setPanchayats((prev) => prev.map((p) => {
+      if (p.id !== panchayatId) return p;
+      const villages = p.villages.filter((v) => v.id !== villageId);
+      return { ...p, villages, villagesCount: villages.length };
+    }));
   };
 
   // Student mutations
@@ -1555,11 +1537,9 @@ export default function App() {
   }
 
   // Scoped Data Lists based on Logged-in User Role and Cluster
-  const clusterFilterKey = currentUserClusterId === 'salem' ? 'Salem' : currentUserClusterId === 'namakkal' ? 'Namakkal' : 'Dharmapuri';
-  
   const displayPanchayats = currentUserRole === 'Super Admin'
     ? panchayats
-    : panchayats.filter((p) => (p.cluster || '').toLowerCase() === clusterFilterKey.toLowerCase());
+    : panchayats.filter((p) => p.clusterId === currentUserClusterId);
 
   const displayPanchayatIds = new Set(displayPanchayats.map((p) => p.id));
 
@@ -1721,8 +1701,9 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'academic-setup' && currentUserRole === 'Super Admin' && (
+              {currentTab === 'academic-setup' && (
                 <AcademicSetupView
+                  userRole={currentUserRole}
                   authToken={currentUser?.token ?? ''}
                   academicYears={academicYears}
                   isYearsLoading={areAcademicYearsLoading}
@@ -1762,6 +1743,8 @@ export default function App() {
                   onNavigate={handleNavigate}
                   onAddCluster={handleAddCluster}
                   onUpdateCluster={handleUpdateCluster}
+                  onResendCredentials={handleResendClusterCredentials}
+                  onDeleteCluster={handleDeleteCluster}
                   onArchiveCluster={handleArchiveCluster}
                 />
               )}
@@ -1788,11 +1771,18 @@ export default function App() {
               {currentTab === 'panchayats' && (
                 <PanchayatsView
                   panchayats={displayPanchayats}
+                  clusters={clusters}
+                  currentClusterId={currentUserClusterId}
+                  authToken={currentUser?.token ?? ''}
+                  selectedAcademicYearId={selectedAcademicYearId}
+                  selectedAcademicYearName={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
+                  userRole={currentUserRole}
                   onSelectPanchayat={(id) => {
                     setSelectedPanchayatId(id);
                     setCurrentTab('panchayat-detail');
                   }}
                   onAddPanchayat={handleAddPanchayat}
+                  onDeletePanchayat={handleDeletePanchayat}
                   onNavigate={handleNavigate}
                 />
               )}
@@ -1801,9 +1791,13 @@ export default function App() {
                 <PanchayatDetailView
                   panchayat={currentPanchayat}
                   students={displayStudents}
+                  authToken={currentUser?.token ?? ''}
+                  selectedAcademicYearId={selectedAcademicYearId}
+                  userRole={currentUserRole}
                   onBack={() => setCurrentTab('panchayats')}
                   onNavigate={handleNavigate}
                   onAddVillage={handleAddVillage}
+                  onDeleteVillage={handleDeleteVillage}
                 />
               ) : (
                 <div className="rounded-2xl border border-border bg-card p-8 text-center">

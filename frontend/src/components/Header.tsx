@@ -220,6 +220,7 @@ export const Header: React.FC<HeaderProps> = ({
               aria-label="Academic Year"
               value={selectedAcademicYearId}
               onChange={(event) => onSelectAcademicYear?.(event.target.value)}
+              title="Select an academic year to view data for that cycle"
               className="tqi-header-year-select h-8 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
             >
               <option value="">Select Academic Year</option>

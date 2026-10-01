@@ -87,6 +87,7 @@ export interface Panchayat {
   name: string;
   cluster: string;
   clusterId?: string;
+  academicYearId?: string;
   villagesCount: number;
   activeStudents: number;
   volunteersCount: number;

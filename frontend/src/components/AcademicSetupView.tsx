@@ -3,14 +3,17 @@ import {
   BookOpen,
   Calendar,
   CheckCircle2,
+  ClipboardList,
   Edit3,
   Plus,
+  Trash2,
   X,
 } from './ui/icons';
 import { apiUrl } from '../utils/api';
 import { AcademicYear } from '../types';
 
 interface AcademicSetupViewProps {
+  userRole?: 'Super Admin' | 'Cluster Admin';
   authToken?: string;
   isYearsLoading?: boolean;
   academicYears?: AcademicYear[];
@@ -53,7 +56,13 @@ const formatAcademicYearLabel = (year?: string): string => {
   return normalized || 'Academic Year';
 };
 
+const getAcademicYearStart = (year?: string): number => {
+  const match = normalizeAcademicYearName(year).match(/^(\d{4})-/);
+  return match ? Number(match[1]) : 0;
+};
+
 export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
+  userRole = 'Super Admin',
   authToken,
   isYearsLoading = false,
   academicYears = [],
@@ -68,7 +77,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   const [creationResult, setCreationResult] = useState<{ id: string; name: string } | null>(null);
   const [setupRows, setSetupRows] = useState<Array<{ day_number: number; academic_year: string; session_name: string | null }>>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [transferTargetYear, setTransferTargetYear] = useState<AcademicYear | null>(null);
+  const [isTransferring, setIsTransferring] = useState(false);
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit' | 'day'>('create');
+  const [editingAcademicYearId, setEditingAcademicYearId] = useState('');
   const [isEditingDay, setIsEditingDay] = useState<number | null>(null);
   const [wizardStep, setWizardStep] = useState(1);
   const [copyMode, setCopyMode] = useState<'fresh' | 'copy'>('fresh');
@@ -104,6 +116,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
 
   const selectedAcademicYearName = normalizeAcademicYearName(selectedAcademicYear?.name || '');
   const isSelectedYearReadOnly = String(selectedAcademicYear?.status || '').toUpperCase() === 'ARCHIVED';
+  const canManageAcademicYears = userRole !== 'Cluster Admin';
 
   useEffect(() => {
     if (!selectedAcademicYearId && academicYears.length) {
@@ -169,10 +182,16 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   }, [selectedAcademicYearName, setupRows]);
 
   const showYearDrawer = (mode: 'create' | 'edit', initialYear?: AcademicYear | null) => {
-    const activeName = normalizeAcademicYearName(initialYear?.name || selectedAcademicYearName);
+    const existingStartYears = academicYears
+      .map((year) => Number(normalizeAcademicYearName(year.name).split('-')[0]))
+      .filter(Number.isFinite);
+    const nextStartYear = existingStartYears.length
+      ? Math.max(...existingStartYears) + 1
+      : currentCalendarYear;
+    const activeName = normalizeAcademicYearName(initialYear?.name || '');
     const yearParts = activeName.split('-').map((part) => part.trim()).filter(Boolean);
-    const startYear = yearParts[0] || String(currentCalendarYear);
-    const endYear = yearParts[1] || String(currentCalendarYear + 1);
+    const startYear = mode === 'create' ? String(nextStartYear) : yearParts[0] || String(currentCalendarYear);
+    const endYear = mode === 'create' ? String(nextStartYear + 1) : yearParts[1] || String(currentCalendarYear + 1);
 
     const days = createDefaultDays().map((item, index) => {
       const matching = currentDayEntries[index];
@@ -181,6 +200,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     });
 
     setDrawerMode(mode);
+    setEditingAcademicYearId(mode === 'edit' ? initialYear?.id || '' : '');
     setWizardStep(1);
     setCopyMode('fresh');
     setCopyFromYearId(academicYears.find((year) => year.id !== initialYear?.id)?.id || '');
@@ -195,6 +215,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   };
 
   const openDayEditor = (dayNumber: number) => {
+    if (!canManageAcademicYears) return;
     setDrawerMode('day');
     setIsEditingDay(dayNumber);
     setYearDraft({
@@ -209,24 +230,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     setIsDrawerOpen(true);
   };
 
-  const createNextAcademicYear = () => {
-    const [start] = selectedAcademicYearName.split('-').map((part) => Number(part));
-    const nextStart = Number.isFinite(start) ? start + 1 : new Date().getFullYear();
-    showYearDrawer('create');
-    setYearDraft((current) => ({
-      ...current,
-      startYear: String(nextStart),
-      endYear: String(nextStart + 1),
-      isActive: false,
-      days: createDefaultDays(),
-    }));
-    setCopyMode('copy');
-    setCopyFromYearId(selectedAcademicYear?.id || '');
-  };
-
   const closeDrawer = () => {
     setIsDrawerOpen(false);
     setIsEditingDay(null);
+    setEditingAcademicYearId('');
   };
 
   const saveAcademicYear = async () => {
@@ -244,7 +251,8 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
       return;
     }
 
-    if (!isDayEdit && yearDraft.isActive && (drawerMode === 'create' || !selectedAcademicYear?.isActive) && !window.confirm(`Set ${normalizedYearName} as the active academic year? The current active year will become a draft.`)) {
+    const editingYear = academicYears.find((year) => year.id === editingAcademicYearId);
+    if (!isDayEdit && yearDraft.isActive && (drawerMode === 'create' || !editingYear?.isActive) && !window.confirm(`Set ${normalizedYearName} as the active academic year? The current active year will become a draft.`)) {
       return;
     }
 
@@ -289,8 +297,8 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         }
 
         targetYearId = createData?.data?.id || targetYearId;
-      } else if (drawerMode === 'edit' && selectedAcademicYearId) {
-        const updateRes = await fetch(apiUrl(`/api/academic-years/${selectedAcademicYearId}`), {
+      } else if (drawerMode === 'edit' && editingAcademicYearId) {
+        const updateRes = await fetch(apiUrl(`/api/academic-years/${editingAcademicYearId}`), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -376,19 +384,70 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     }));
   };
 
-  const archiveAcademicYear = async (year: AcademicYear) => {
-    if (!window.confirm(`Archive academic year ${year.name}? It will remain available for historical viewing.`)) return;
+  const openTransferDialog = (year: AcademicYear) => {
+    const sourceYears = academicYears
+      .filter((candidate) => candidate.id !== year.id && getAcademicYearStart(candidate.name) < getAcademicYearStart(year.name))
+      .sort((left, right) => getAcademicYearStart(right.name) - getAcademicYearStart(left.name));
+    setCopyFromYearId(sourceYears[0]?.id || '');
+    setCopySelections({
+      sessionPlan: canManageAcademicYears,
+      clusters: true,
+      panchayatsVillages: true,
+      schools: true,
+      students: true,
+      volunteers: true,
+      moduleLibrary: canManageAcademicYears,
+      lessonPlans: true,
+      attendanceHistory: false,
+      sessionReports: false,
+      sessionPhotos: false,
+      financeRecords: false,
+    });
+    setTransferTargetYear(year);
+  };
+
+  const copyDataToAcademicYear = async () => {
+    if (!transferTargetYear || !copyFromYearId) {
+      setToast({ type: 'error', message: 'Select a source academic year.' });
+      return;
+    }
+    if (!window.confirm(`Copy the selected data into ${transferTargetYear.name}? The source academic year will remain unchanged.`)) return;
+    setIsTransferring(true);
     try {
-      const response = await fetch(apiUrl(`/api/academic-years/${year.id}/archive`), {
+      const response = await fetch(apiUrl(`/api/academic-years/${transferTargetYear.id}/copy-data`), {
         method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({ copyFromYearId, copySelections }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to copy academic year data.');
+      setTransferTargetYear(null);
+      setToast({ type: 'success', message: `Selected data copied to ${transferTargetYear.name}.` });
+      onSetupSaved?.();
+    } catch (error: any) {
+      setToast({ type: 'error', message: error?.message || 'Unable to copy academic year data.' });
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const deleteAcademicYear = async (year: AcademicYear) => {
+    const activeNotice = year.isActive ? ' Another available academic year will be activated automatically.' : '';
+    if (!window.confirm(`Permanently delete ${year.name} and all data belonging to it?${activeNotice} This cannot be undone.`)) return;
+    try {
+      const response = await fetch(apiUrl(`/api/academic-years/${year.id}`), {
+        method: 'DELETE',
         headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to archive academic year.');
-      setToast({ type: 'success', message: `${year.name} archived.` });
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete academic year.');
+      setToast({ type: 'success', message: `${year.name} and its associated data were deleted.` });
       onSetupSaved?.();
     } catch (error: any) {
-      setToast({ type: 'error', message: error?.message || 'Unable to archive academic year.' });
+      setToast({ type: 'error', message: error?.message || 'Unable to delete academic year.' });
     }
   };
 
@@ -426,9 +485,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             <BookOpen className="mx-auto h-8 w-8 text-[#0B3D91]" />
             <h2 className="mt-4 text-xl font-bold text-foreground">No Academic Years Found</h2>
             <p className="mt-2 text-sm text-muted-foreground">Create your first academic year to start managing TQI sessions.</p>
-            <button type="button" onClick={() => showYearDrawer('create')} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white">
+            {canManageAcademicYears && <button type="button" onClick={() => showYearDrawer('create')} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white">
               <Plus className="h-4 w-4" /> Create Academic Year
-            </button>
+            </button>}
+            {!canManageAcademicYears && <p className="mt-3 text-sm text-muted-foreground">The Super Admin manages new academic-year creation. Cluster Admin can only copy data into the active year.</p>}
           </div>
         )}
         {isDrawerOpen && (
@@ -453,11 +513,11 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Home › Academic Year</p>
             <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">Academic Year Management</h1>
-            <p className="mt-1 text-sm text-muted-foreground">Create, manage and switch between academic years. Each academic year has its own independent data.</p>
+            <p className="mt-1 text-sm text-muted-foreground">{canManageAcademicYears ? 'Create, manage and switch between academic years. Each academic year has its own independent data.' : 'View academic years and copy your cluster data from a previous year into the active year.'}</p>
           </div>
-          <button type="button" onClick={() => showYearDrawer('create')} className="inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm">
+          {canManageAcademicYears && <button type="button" onClick={() => showYearDrawer('create')} className="inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm">
             <Plus className="h-4 w-4" /> Create Academic Year
-          </button>
+          </button>}
         </div>
 
         {academicYears.length === 0 ? (
@@ -489,8 +549,13 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
                     <button type="button" onClick={() => onSelectAcademicYear?.(year.id)} className="flex-1 rounded-lg border border-[#0B3D91]/15 bg-blue-50 px-3 py-2 text-xs font-semibold text-[#0B3D91]">{isSelected ? 'View Details' : 'View Details'}</button>
                     {status !== 'ARCHIVED' && <button type="button" onClick={() => onSelectAcademicYear?.(year.id)} className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${isSelected ? 'bg-[#0B3D91] text-white' : 'border border-slate-200 bg-white text-slate-700'}`}>{isSelected ? 'Open Year ✓' : 'Open Year'}</button>}
-                    {status === 'DRAFT' && <button type="button" onClick={() => void activateAcademicYear(year)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">Activate</button>}
-                    {status !== 'ARCHIVED' && <button type="button" title="Archive academic year" onClick={() => void archiveAcademicYear(year)} className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600">···</button>}
+                    {canManageAcademicYears && status === 'DRAFT' && <button type="button" onClick={() => void activateAcademicYear(year)} className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800">Activate</button>}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    {canManageAcademicYears && status !== 'ARCHIVED' && <button type="button" onClick={() => showYearDrawer('edit', year)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-[#0B3D91]/30 hover:text-[#0B3D91]"><Edit3 className="h-3.5 w-3.5" />Edit</button>}
+                    {canManageAcademicYears && status === 'DRAFT' && <button type="button" onClick={() => openTransferDialog(year)} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-[#0B3D91]/30 hover:text-[#0B3D91]"><ClipboardList className="h-3.5 w-3.5" />Copy Data</button>}
+                    {!canManageAcademicYears && status === 'ACTIVE' && <button type="button" onClick={() => openTransferDialog(year)} disabled={!academicYears.some((candidate) => getAcademicYearStart(candidate.name) < getAcademicYearStart(year.name))} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:border-[#0B3D91]/30 hover:text-[#0B3D91] disabled:cursor-not-allowed disabled:opacity-50"><ClipboardList className="h-3.5 w-3.5" />Copy Previous Year</button>}
+                    {canManageAcademicYears && <button type="button" title="Permanently delete academic year and its data" onClick={() => void deleteAcademicYear(year)} className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-700 hover:bg-red-50"><Trash2 className="h-3.5 w-3.5" />Delete</button>}
                   </div>
                 </article>
               );
@@ -515,25 +580,6 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
           {isSelectedYearReadOnly && <span className="mt-2 inline-flex rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-700">Read Only · Archived</span>}
         </div>
 
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => showYearDrawer('edit', selectedAcademicYear)}
-            disabled={isSelectedYearReadOnly}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-white px-3.5 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:-translate-y-0.5 hover:border-[#0B3D91]/40 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Edit3 className="h-4 w-4 text-[#0B3D91]" />
-            Edit Academic Year
-          </button>
-          <button
-            type="button"
-            onClick={createNextAcademicYear}
-            className="inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-3.5 py-2 text-sm font-semibold text-white shadow-sm transition-all hover:-translate-y-0.5"
-          >
-            <Plus className="h-4 w-4" />
-            Create Next Academic Year
-          </button>
-        </div>
       </div>
 
       {toast && (
@@ -602,11 +648,11 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   <button
                     type="button"
                     onClick={() => openDayEditor(day.dayNumber)}
-                    disabled={isSelectedYearReadOnly}
+                    disabled={!canManageAcademicYears || isSelectedYearReadOnly}
                     className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 transition-colors hover:border-[#0B3D91]/20 hover:text-[#0B3D91] disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     <Edit3 className="h-3.5 w-3.5" />
-                    View / Edit
+                    {canManageAcademicYears ? 'View / Edit' : 'View'}
                   </button>
                 </div>
               </div>
@@ -615,7 +661,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         )}
       </section>
 
-      {isDrawerOpen && (
+      {canManageAcademicYears && isDrawerOpen && (
         <div className="fixed inset-0 z-40 bg-slate-950/30 backdrop-blur-[2px]">
           <div className="absolute right-0 top-0 h-full w-full max-w-sm overflow-y-auto border-l border-border bg-white shadow-2xl">
             <div className="flex items-center justify-between border-b border-border px-5 py-4">
@@ -835,6 +881,46 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             <div className="mt-5 flex gap-2">
               <button type="button" onClick={() => setCreationResult(null)} className="flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-semibold">Stay on Current Year</button>
               <button type="button" onClick={() => { onSelectAcademicYear?.(creationResult.id); setCreationResult(null); }} className="flex-1 rounded-xl bg-[#0B3D91] px-3 py-2.5 text-sm font-semibold text-white">Open Year</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {transferTargetYear && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-bold">Copy Data to {transferTargetYear.name}</h3>
+                <p className="mt-1 text-sm text-muted-foreground">Choose a previous academic year and the data to copy. The source stays unchanged; Cluster Admin copies only their cluster into the active year.</p>
+              </div>
+              <button type="button" onClick={() => setTransferTargetYear(null)} className="rounded-lg border border-border p-2 text-muted-foreground"><X className="h-4 w-4" /></button>
+            </div>
+            <label className="mt-5 block space-y-1 text-sm font-semibold">Copy From
+              <select value={copyFromYearId} onChange={(event) => setCopyFromYearId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
+                <option value="">Select source year</option>
+                {academicYears.filter((year) => year.id !== transferTargetYear.id && (!canManageAcademicYears ? getAcademicYearStart(year.name) < getAcademicYearStart(transferTargetYear.name) : true)).map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
+              </select>
+            </label>
+            <div className="mt-4 rounded-xl border border-slate-200 p-3">
+              <h4 className="text-sm font-semibold">Select Data to Copy</h4>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {([
+                  ['sessionPlan', 'Session Plan (8 Days)'], ['clusters', 'Clusters'], ['panchayatsVillages', 'Panchayats & Villages'],
+                  ['schools', 'Schools'], ['students', 'Students'], ['volunteers', 'Volunteers'], ['moduleLibrary', 'Module Library'],
+                  ['lessonPlans', 'Lesson Plans'], ['attendanceHistory', 'Attendance History'], ['sessionReports', 'Session Reports'],
+                  ['sessionPhotos', 'Session Photos'], ['financeRecords', 'Finance Records'],
+                ] as const).filter(([key]) => canManageAcademicYears || (key !== 'sessionPlan' && key !== 'moduleLibrary')).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-xs">
+                    <input type="checkbox" checked={copySelections[key]} disabled={!canManageAcademicYears && key === 'clusters'} onChange={(event) => setCopySelections((current) => ({ ...current, [key]: event.target.checked }))} />
+                    {!canManageAcademicYears && key === 'clusters' ? 'Keep my assigned cluster' : label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button type="button" onClick={() => setTransferTargetYear(null)} className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium">Cancel</button>
+              <button type="button" onClick={() => void copyDataToAcademicYear()} disabled={isTransferring || !copyFromYearId} className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60">{isTransferring ? 'Copying…' : 'Copy Selected Data'}</button>
             </div>
           </div>
         </div>

@@ -16,10 +16,12 @@ import {
   Rows,
   RefreshCw,
   Pencil,
+  Trash2,
 } from './ui/icons';
 import { Cluster, TabType, Panchayat, Student, Volunteer } from '../types';
 import { DistrictCombobox } from './ui/DistrictCombobox';
-import { TAMIL_NADU_ALL_CITIES_AND_DISTRICTS } from '../data/districts';
+import { CollegeCombobox } from './ui/CollegeCombobox';
+import { TAMIL_NADU_ALL_CITIES_AND_DISTRICTS, TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
 import { apiUrl } from '../utils/api';
 
 interface ClustersViewProps {
@@ -31,9 +33,18 @@ interface ClustersViewProps {
   selectedAcademicYearId?: string;
   userRole?: string;
   onNavigate: (tab: TabType, targetId?: string) => void;
-  onAddCluster?: (cluster: Partial<Cluster>) => void | Promise<void | boolean | { emailSent: boolean }>;
+  onAddCluster?: (cluster: Partial<Cluster>) => void | Promise<void | boolean | { emailSent: boolean; temporaryPassword?: string; loginEmail?: string; clusterName?: string }>;
   onUpdateCluster?: (id: string, cluster: Partial<Cluster>) => void | Promise<void | boolean>;
+  onResendCredentials?: (id: string) => Promise<{ emailSent: boolean; temporaryPassword: string; loginEmail: string; clusterName: string }>;
+  onDeleteCluster?: (id: string) => Promise<void>;
   onArchiveCluster?: (id: string, archived: boolean) => void | Promise<void>;
+}
+
+interface CredentialDisplay {
+  clusterName: string;
+  loginEmail: string;
+  temporaryPassword: string;
+  emailSent: boolean;
 }
 
 interface ClusterDraft {
@@ -74,6 +85,8 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   onNavigate: _onNavigate,
   onAddCluster,
   onUpdateCluster,
+  onResendCredentials,
+  onDeleteCluster,
   onArchiveCluster,
 }) => {
   const isSuperAdmin = !userRole || userRole === 'Super Admin' || userRole.toLowerCase().includes('super');
@@ -92,6 +105,8 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState('');
+  const [credentialDisplay, setCredentialDisplay] = useState<CredentialDisplay | null>(null);
+  const [resettingCredentialsFor, setResettingCredentialsFor] = useState<string | null>(null);
 
   const loadClusters = useCallback(async () => {
     setIsLoading(true);
@@ -173,7 +188,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     setEditingCluster(cluster);
     setDraft({
       name: cluster.name || '',
-      district: cluster.district || '',
+      district: cluster.name || cluster.district || '',
       collegeName: cluster.collegeName || '',
       collegeDistrict: cluster.collegeDistrict || cluster.district || '',
       spocName: cluster.spocName || cluster.adminName || '',
@@ -184,24 +199,57 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     setDrawerMode('edit');
   };
 
+  const handleCollegeSelection = (college: { name: string; district: string } | null, typedName?: string) => {
+    if (!college) {
+      setDraft((current) => ({ ...current, collegeName: typedName ?? current.collegeName, collegeDistrict: '' }));
+      return;
+    }
+    const collegeDistrict = TAMIL_NADU_OFFICIAL_DISTRICTS.find(
+      (district) => district.toLowerCase() === college.district.toLowerCase(),
+    ) || college.district.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+    setDraft((current) => ({
+      ...current,
+      collegeName: college.name,
+      collegeDistrict,
+    }));
+  };
+
   const saveCluster = async (event: React.FormEvent) => {
     event.preventDefault();
     setFormError('');
+    const mobile = draft.spocMobile.trim();
+    const email = draft.adminEmail.trim().toLowerCase();
     if (!selectedAcademicYearId) {
       setFormError('Select an academic year before saving a cluster.');
+      return;
+    }
+    if (!draft.name.trim()) {
+      setFormError('Cluster name / district is required.');
+      return;
+    }
+    if (!draft.collegeDistrict.trim()) {
+      setFormError('Select the college location.');
+      return;
+    }
+    if (drawerMode === 'create' && !/^\d{10}$/.test(mobile)) {
+      setFormError('SPOC mobile number must contain exactly 10 digits.');
+      return;
+    }
+    if (drawerMode === 'create' && !/^[a-z0-9]+(?:\.[a-z0-9]+)*(?:\+[a-z0-9]+(?:\.[a-z0-9]+)*)?@gmail\.com$/i.test(email)) {
+      setFormError('Enter a valid Gmail address ending in @gmail.com.');
       return;
     }
     setIsSaving(true);
     const payload: Partial<Cluster> = {
       ...draft,
-      spocMobile: draft.spocMobile.trim(),
-      adminPhone: draft.spocMobile.trim(),
+      spocMobile: mobile,
+      adminPhone: mobile,
       adminName: draft.spocName.trim(),
       spocName: draft.spocName.trim(),
-      adminEmail: draft.adminEmail.trim().toLowerCase(),
+      adminEmail: email,
       collegeName: draft.collegeName.trim(),
       collegeDistrict: draft.collegeDistrict.trim(),
-      district: draft.district.trim(),
+      district: draft.name.trim(),
       name: draft.name.trim(),
       academicYearId: selectedAcademicYearId,
     } as Partial<Cluster>;
@@ -212,7 +260,16 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       if (result === false) throw new Error('Unable to save cluster.');
       await loadClusters();
       setDrawerMode(null);
-      const emailSent = typeof result === 'object' && result !== null ? result.emailSent : true;
+      const credentialResult = typeof result === 'object' && result !== null ? result : null;
+      const emailSent = credentialResult ? credentialResult.emailSent : true;
+      if (drawerMode === 'create' && credentialResult?.temporaryPassword) {
+        setCredentialDisplay({
+          clusterName: credentialResult.clusterName || payload.name || payload.collegeName || 'New cluster',
+          loginEmail: credentialResult.loginEmail || payload.adminEmail || '',
+          temporaryPassword: credentialResult.temporaryPassword,
+          emailSent,
+        });
+      }
       setToast(drawerMode === 'edit'
         ? 'Cluster changes saved.'
         : emailSent
@@ -222,6 +279,48 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       setFormError(error?.message || 'Unable to save cluster.');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const resetClusterCredentials = async (cluster: Cluster) => {
+    if (!onResendCredentials) return;
+    if (!window.confirm(`Reset the login password for ${cluster.name}? A new temporary password will be generated.`)) return;
+    setResettingCredentialsFor(cluster.id);
+    try {
+      const result = await onResendCredentials(cluster.id);
+      setCredentialDisplay({
+        clusterName: result.clusterName || cluster.name,
+        loginEmail: result.loginEmail || cluster.adminEmail || '',
+        temporaryPassword: result.temporaryPassword,
+        emailSent: result.emailSent,
+      });
+      setToast(result.emailSent ? 'New login credentials emailed to the SPOC.' : 'Email could not be sent; copy the temporary password below.');
+    } catch (error: any) {
+      setToast(error?.message || 'Unable to reset cluster credentials.');
+    } finally {
+      setResettingCredentialsFor(null);
+    }
+  };
+
+  const deleteCluster = async (cluster: Cluster) => {
+    if (!onDeleteCluster) return;
+    if (!window.confirm(`Delete ${cluster.name} from ${cluster.district}? If it has historical records, it will be deactivated instead to preserve linked data.`)) return;
+    try {
+      await onDeleteCluster(cluster.id);
+      await loadClusters();
+      setToast(`${cluster.name} deleted or deactivated.`);
+    } catch (error: any) {
+      setToast(error?.message || 'Unable to delete cluster.');
+    }
+  };
+
+  const copyTemporaryPassword = async () => {
+    if (!credentialDisplay?.temporaryPassword) return;
+    try {
+      await navigator.clipboard.writeText(credentialDisplay.temporaryPassword);
+      setToast('Temporary password copied.');
+    } catch {
+      setToast('Unable to copy password from this browser.');
     }
   };
 
@@ -327,12 +426,14 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
               <div className="min-w-0"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">SPOC Details</p><div className="flex items-center gap-2"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-[#0B3D91]">{initials || 'SP'}</span><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800">{spocName}</p><a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} className="block truncate text-[11px] text-slate-500 hover:text-[#0B3D91]">{phone || 'Phone not provided'}</a><a href={email ? `mailto:${email}` : undefined} className="block truncate text-[11px] text-slate-500 hover:text-[#0B3D91]">{email || 'Email not provided'}</a></div></div></div>
               <div className="min-w-0"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">College</p><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-[#0B3D91]" /><div className="min-w-0"><p className="line-clamp-2 text-xs font-semibold text-slate-800">{cluster.collegeName || 'College not assigned'}</p><p className="truncate text-[11px] text-slate-500">{cluster.collegeDistrict || cluster.district}</p></div></div></div>
             </div>
-            <div className={`flex items-center gap-2 px-4 py-3 ${viewMode === 'list' ? 'lg:justify-end' : ''}`}>
+            <div className={`flex flex-wrap items-center gap-2 px-4 py-3 ${viewMode === 'list' ? 'lg:justify-end' : ''}`}>
               {cluster.status === 'Inactive' ? <button type="button" onClick={() => void archiveCluster(cluster, false)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Restore</button> : <>
                 <a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} aria-disabled={!phone} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${phone ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Phone className="h-3.5 w-3.5" />Call</a>
                 <a href={email ? `mailto:${email}` : undefined} aria-disabled={!email} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${email ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Mail className="h-3.5 w-3.5" />Email</a>
                 {isSuperAdmin && <button type="button" onClick={() => openEdit(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B3D91] px-2 py-2 text-xs font-semibold text-white hover:bg-[#082f70]"><Pencil className="h-3.5 w-3.5" />Edit</button>}
+                {isSuperAdmin && onResendCredentials && <button type="button" disabled={resettingCredentialsFor === cluster.id} onClick={() => void resetClusterCredentials(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-xs font-semibold text-[#0B3D91] hover:bg-blue-100 disabled:opacity-60" title="Generate and email a new temporary password"><RefreshCw className={`h-3.5 w-3.5 ${resettingCredentialsFor === cluster.id ? 'animate-spin' : ''}`} />{resettingCredentialsFor === cluster.id ? 'Sending…' : 'Reset Login'}</button>}
                 {isSuperAdmin && <button type="button" onClick={() => void archiveCluster(cluster, true)} title="Archive cluster" aria-label={`Archive ${cluster.name}`} className="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-orange-200 hover:bg-orange-50 hover:text-[#FF7A00]"><Archive className="h-4 w-4" /></button>}
+                {isSuperAdmin && onDeleteCluster && <button type="button" onClick={() => void deleteCluster(cluster)} title={`Delete ${cluster.name}`} aria-label={`Delete ${cluster.name}`} className="rounded-xl border border-red-200 p-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}
               </>}
             </div>
           </article>;
@@ -346,15 +447,14 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-7">
               {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
-                <label className={labelClass}>Cluster Name *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Dharmapuri Cluster" className={inputClass} /></label>
-                <DistrictCombobox id="cluster-district" label="District *" placeholder="Select district" required value={draft.district} onChange={(value) => setDraft({ ...draft, district: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
-                <label className={labelClass}>College *<input required value={draft.collegeName} onChange={(event) => setDraft({ ...draft, collegeName: event.target.value })} placeholder="College name" className={inputClass} /></label>
-                <DistrictCombobox id="college-location" label="College Location" placeholder="Select college location" value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
+                <label className={labelClass}>Cluster Name / District *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value, district: event.target.value })} placeholder="Enter district name" className={inputClass} /></label>
+                <div><span className={labelClass}>College *</span><CollegeCombobox value={draft.collegeName} authToken={authToken} onChange={handleCollegeSelection} required /></div>
+                <DistrictCombobox id="college-location" label="College Location *" placeholder="Select college location" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
               </section>
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">SPOC details</h3>
                 <label className={labelClass}>SPOC Name *<input required value={draft.spocName} onChange={(event) => setDraft({ ...draft, spocName: event.target.value })} placeholder="Full name" className={inputClass} /></label>
-                <label className={labelClass}>SPOC Phone *<input required type="tel" value={draft.spocMobile} onChange={(event) => setDraft({ ...draft, spocMobile: event.target.value })} placeholder="+91 98765 43210" className={inputClass} /></label>
-                <label className={labelClass}>SPOC Email *<input required type="email" value={draft.adminEmail} onChange={(event) => setDraft({ ...draft, adminEmail: event.target.value })} placeholder="spoc@college.edu.in" className={inputClass} /></label>
+                <label className={labelClass}>SPOC Phone *<input required type="tel" inputMode="numeric" maxLength={10} pattern="[0-9]{10}" value={draft.spocMobile} onChange={(event) => setDraft({ ...draft, spocMobile: event.target.value.replace(/\D/g, '').slice(0, 10) })} placeholder="10-digit mobile number" className={inputClass} /></label>
+                <label className={labelClass}>SPOC Email *<input required type="email" value={draft.adminEmail} onChange={(event) => setDraft({ ...draft, adminEmail: event.target.value })} placeholder="name@gmail.com" className={inputClass} /></label>
               </section>
               {drawerMode === 'edit' && editingCluster && <section className="space-y-2"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Year totals</h3><div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{Object.entries(getClusterNumbers(editingCluster)).map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-3"><p className="text-lg font-bold text-[#10234E]">{Number(value).toLocaleString()}</p><p className="text-[10px] capitalize text-slate-500">{label}</p></div>)}</div><p className="text-[11px] text-slate-500">Totals are calculated from records in this academic year; they are not editable here.</p></section>}
               <div className="flex items-start gap-2 rounded-xl bg-blue-50 px-3 py-2.5 text-xs text-[#0B3D91]"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" /><span>Academic year is locked to the selection in the global navbar. Cluster totals refresh from that year’s records.</span></div>
@@ -362,6 +462,29 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-7"><button type="button" disabled={isSaving} onClick={() => setDrawerMode(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button><button type="submit" disabled={isSaving} className="rounded-xl bg-[#0B3D91] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#082f70] disabled:opacity-60">{isSaving ? 'Saving…' : drawerMode === 'edit' ? 'Save Changes' : 'Save Cluster'}</button></div>
           </form>
         </aside>
+      </div>}
+
+      {credentialDisplay && <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+        <section role="dialog" aria-modal="true" aria-labelledby="cluster-credentials-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 id="cluster-credentials-title" className="text-lg font-bold text-[#10234E]">Cluster login credentials</h2>
+              <p className="mt-1 text-sm text-slate-500">{credentialDisplay.clusterName}</p>
+            </div>
+            <button type="button" onClick={() => setCredentialDisplay(null)} aria-label="Close credentials" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-4 w-4" /></button>
+          </div>
+          <p className={`mt-4 rounded-xl border px-3 py-2.5 text-sm ${credentialDisplay.emailSent ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+            {credentialDisplay.emailSent ? `Credentials were emailed to ${credentialDisplay.loginEmail}.` : `Email could not be sent to ${credentialDisplay.loginEmail}. Copy and share this password securely; SMTP delivery needs valid configuration.`}
+          </p>
+          <label className="mt-4 block text-xs font-semibold text-slate-600">Temporary password
+            <div className="mt-1.5 flex gap-2">
+              <input readOnly value={credentialDisplay.temporaryPassword} className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 font-mono text-sm text-slate-900" />
+              <button type="button" onClick={() => void copyTemporaryPassword()} className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><ClipboardList className="h-4 w-4" />Copy</button>
+            </div>
+          </label>
+          <p className="mt-3 text-xs text-slate-500">The Cluster Admin must change this password at first sign-in. Share it only with the intended recipient.</p>
+          <div className="mt-5 flex justify-end"><button type="button" onClick={() => setCredentialDisplay(null)} className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white">Done</button></div>
+        </section>
       </div>}
 
       {toast && <div role="status" className="fixed bottom-5 right-5 z-[100000] rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white shadow-xl">{toast}</div>}

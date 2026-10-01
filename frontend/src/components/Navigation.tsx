@@ -81,16 +81,11 @@ export const Navigation: React.FC<NavigationProps> = ({
       label: 'OVERVIEW',
       items: [
         { id: 'dashboard', label: 'Dashboard', icon: House },
-        ...(isSuperAdmin
-          ? [
-              {
-                id: 'academic-setup',
-                label: 'Academic Term (8-day)',
-                icon: CalendarBlank,
-                superAdminOnly: true,
-              },
-            ]
-          : []),
+        {
+          id: 'academic-setup',
+          label: 'Academic Term (8-day)',
+          icon: CalendarBlank,
+        },
       ],
     },
     {

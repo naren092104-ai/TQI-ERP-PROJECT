@@ -255,6 +255,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
     document.body.removeChild(link);
   };
 
+  const handlePrintReport = () => {
+    window.print();
+  };
+
   // Super Admin cluster export state
   const [selectedClusterExport, setSelectedClusterExport] = useState<string>('all');
 
@@ -265,11 +269,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
       : ['Dharmapuri', 'Salem', 'Coimbatore', 'Erode'];
 
     return clusterNames.map((cName) => {
-      const cSessions = sessions.filter((s) => !s.cluster || s.cluster.toLowerCase() === cName.toLowerCase());
-      const cFinance = financeEntries.filter((f) => !f.clusterName || f.clusterName.toLowerCase() === cName.toLowerCase());
-      const cPlans = lessonPlans.filter((p) => !p.cluster || p.cluster.toLowerCase() === cName.toLowerCase());
-      const cStudents = students.filter((st) => !st.cluster || st.cluster.toLowerCase() === cName.toLowerCase());
-      const cVolunteers = volunteers.filter((v) => !v.cluster || v.cluster.toLowerCase() === cName.toLowerCase());
+      const matchClusterName = (value?: string) => !value || value.toLowerCase() === cName.toLowerCase();
+
+      const cSessions = sessions.filter((s) => matchClusterName(s.clusterName) || matchClusterName(s.clusterId));
+      const cFinance = financeEntries.filter((f) => matchClusterName(f.clusterName));
+      const cPlans = lessonPlans.filter((p) => matchClusterName(p.cluster) || matchClusterName(p.clusterId));
+      const cStudents = students.filter((st) => matchClusterName(st.clusterId));
+      const cVolunteers = volunteers.filter((v) => matchClusterName(v.clusterId));
 
       return {
         clusterName: cName,

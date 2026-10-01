@@ -10,19 +10,25 @@ import {
   CalendarCheck,
   X,
   MapPin,
+  Trash2,
 } from './ui/icons';
-import { TabType, Panchayat, Student } from '../types';
+import { TabType, Panchayat, Student, UserRole } from '../types';
 import Badge from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { EmptyState } from './ui/EmptyState';
+import { apiUrl } from '../utils/api';
 
 interface PanchayatDetailViewProps {
   panchayat: Panchayat;
   students: Student[];
+  authToken?: string;
+  selectedAcademicYearId?: string;
+  userRole?: UserRole;
   onBack: () => void;
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
-  onAddVillage: (panchayatId: string, villageName: string) => void;
+  onAddVillage: (panchayatId: string, villageName: string) => Promise<void>;
+  onDeleteVillage?: (panchayatId: string, villageId: string) => Promise<void>;
 }
 
 function villageStudentsOf(panchayatId: string, villageName: string, all: Student[]) {
@@ -37,13 +43,102 @@ function villageStudentsOf(panchayatId: string, villageName: string, all: Studen
 export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
   panchayat,
   students = [],
+  authToken,
+  selectedAcademicYearId = '',
+  userRole = 'Cluster Admin',
   onBack,
   onNavigate,
   onAddVillage,
+  onDeleteVillage,
 }) => {
   const [showAdd, setShowAdd] = useState(false);
   const [newVillage, setNewVillage] = useState('');
+  const [villageDirectory, setVillageDirectory] = useState<string[]>([]);
+  const [isLoadingVillageDirectory, setIsLoadingVillageDirectory] = useState(false);
+  const [villageDirectoryError, setVillageDirectoryError] = useState('');
+  const [villageSaveError, setVillageSaveError] = useState('');
+  const [isSavingVillage, setIsSavingVillage] = useState(false);
+  const [isVillageMenuOpen, setIsVillageMenuOpen] = useState(false);
+  const [directoryVillages, setDirectoryVillages] = useState<string[]>([]);
+  const [isLoadingDirectoryVillages, setIsLoadingDirectoryVillages] = useState(false);
+  const [directoryVillageError, setDirectoryVillageError] = useState('');
+  const [addingDirectoryVillage, setAddingDirectoryVillage] = useState('');
+  const [directoryVillageSaveError, setDirectoryVillageSaveError] = useState('');
+  const [deletingVillageId, setDeletingVillageId] = useState('');
   const [search, setSearch] = useState('');
+
+  const isSuperAdmin = userRole === 'Super Admin';
+
+  React.useEffect(() => {
+    if (!isSuperAdmin || !selectedAcademicYearId) {
+      setDirectoryVillages([]);
+      setDirectoryVillageError('');
+      setIsLoadingDirectoryVillages(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadDirectoryVillages = async () => {
+      setDirectoryVillages([]);
+      setDirectoryVillageError('');
+      setIsLoadingDirectoryVillages(true);
+      try {
+        const response = await fetch(apiUrl(`/api/villages/directory?panchayatId=${encodeURIComponent(panchayat.id)}`), {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success || !Array.isArray(data.villages)) {
+          throw new Error(data?.error || 'Unable to load villages mapped to this Panchayat.');
+        }
+        setDirectoryVillages(data.villages.filter((name: unknown): name is string => typeof name === 'string' && Boolean(name.trim())));
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') setDirectoryVillageError(error?.message || 'Unable to load the village directory.');
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingDirectoryVillages(false);
+      }
+    };
+
+    void loadDirectoryVillages();
+    return () => controller.abort();
+  }, [authToken, isSuperAdmin, panchayat.id, selectedAcademicYearId]);
+
+  React.useEffect(() => {
+    if (!showAdd || !selectedAcademicYearId) {
+      setVillageDirectory([]);
+      setVillageDirectoryError('');
+      setIsLoadingVillageDirectory(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const loadVillageDirectory = async () => {
+      setVillageDirectory([]);
+      setVillageDirectoryError('');
+      setVillageSaveError('');
+      setIsLoadingVillageDirectory(true);
+      try {
+        const response = await fetch(apiUrl(`/api/villages/directory?panchayatId=${encodeURIComponent(panchayat.id)}`), {
+          signal: controller.signal,
+          cache: 'no-store',
+          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success || !Array.isArray(data.villages)) {
+          throw new Error(data?.error || 'Unable to load villages for this Panchayat.');
+        }
+        setVillageDirectory(data.villages.filter((name: unknown): name is string => typeof name === 'string' && Boolean(name.trim())));
+      } catch (error: any) {
+        if (error?.name !== 'AbortError') setVillageDirectoryError(error?.message || 'Unable to load this Panchayat’s village list.');
+      } finally {
+        if (!controller.signal.aborted) setIsLoadingVillageDirectory(false);
+      }
+    };
+
+    void loadVillageDirectory();
+    return () => controller.abort();
+  }, [authToken, panchayat.id, selectedAcademicYearId, showAdd]);
 
   const panStudents = useMemo(() => {
     return students.filter(
@@ -62,12 +157,59 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
     );
   }, [panchayat.villages, search]);
 
-  const handleSave = (e: React.FormEvent) => {
+  const normalizeVillageName = (name: string) => name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+  const matchingVillageOptions = villageDirectory.filter((name) =>
+    !newVillage.trim() || normalizeVillageName(name).includes(normalizeVillageName(newVillage)),
+  );
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newVillage.trim()) return;
-    onAddVillage(panchayat.id, newVillage.trim());
-    setNewVillage('');
-    setShowAdd(false);
+    const selectedName = newVillage.trim().replace(/\s+/g, ' ');
+    if (panchayat.villages.some((village) => normalizeVillageName(village.name) === normalizeVillageName(selectedName))) {
+      setVillageSaveError('This village is already added to this Panchayat.');
+      return;
+    }
+    setIsSavingVillage(true);
+    setVillageSaveError('');
+    try {
+      await onAddVillage(panchayat.id, selectedName);
+      setNewVillage('');
+      setShowAdd(false);
+      setIsVillageMenuOpen(false);
+    } catch (error: any) {
+      setVillageSaveError(error?.message || 'Unable to save this village.');
+    } finally {
+      setIsSavingVillage(false);
+    }
+  };
+
+  const isVillageAlreadyAdded = (name: string) =>
+    panchayat.villages.some((village) => normalizeVillageName(village.name) === normalizeVillageName(name));
+
+  const handleAddDirectoryVillage = async (name: string) => {
+    if (isVillageAlreadyAdded(name) || addingDirectoryVillage) return;
+    setAddingDirectoryVillage(name);
+    setDirectoryVillageSaveError('');
+    try {
+      await onAddVillage(panchayat.id, name);
+    } catch (error: any) {
+      setDirectoryVillageSaveError(error?.message || `Unable to add ${name}.`);
+    } finally {
+      setAddingDirectoryVillage('');
+    }
+  };
+
+  const handleDeleteVillage = async (villageId: string, villageName: string) => {
+    if (!onDeleteVillage || !window.confirm(`Delete village ${villageName}? Deletion is blocked if linked student or school records exist.`)) return;
+    setDeletingVillageId(villageId);
+    setDirectoryVillageSaveError('');
+    try {
+      await onDeleteVillage(panchayat.id, villageId);
+    } catch (error: any) {
+      setDirectoryVillageSaveError(error?.message || `Unable to delete ${villageName}.`);
+    } finally {
+      setDeletingVillageId('');
+    }
   };
 
   const getStatusBadge = (status: string) => {
@@ -173,6 +315,52 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
         </div>
       </div>
 
+      {isSuperAdmin && (
+        <section className="rounded-lg border border-border bg-card p-4 shadow-xs sm:p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">Village directory · {panchayat.name}</h2>
+              <p className="mt-1 text-xs text-muted-foreground">All villages mapped to this Panchayat. Add only the villages you need.</p>
+            </div>
+            <span className="rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">
+              {isLoadingDirectoryVillages ? 'Loading…' : `${directoryVillages.length} villages`}
+            </span>
+          </div>
+
+          {directoryVillageError && <p role="alert" className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{directoryVillageError}</p>}
+          {directoryVillageSaveError && <p role="alert" className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{directoryVillageSaveError}</p>}
+
+          {isLoadingDirectoryVillages ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 3 }).map((_, index) => <div key={index} className="h-20 animate-pulse rounded-lg bg-muted" />)}
+            </div>
+          ) : directoryVillages.length ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {directoryVillages.map((name) => {
+                const alreadyAdded = isVillageAlreadyAdded(name);
+                const isAdding = addingDirectoryVillage === name;
+                return (
+                  <article key={name} className="flex min-h-24 flex-col justify-between rounded-lg border border-border bg-background p-3">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <h3 className="text-sm font-semibold text-foreground">{name}</h3>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${alreadyAdded ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {alreadyAdded ? 'Added' : 'Directory only'}
+                      </span>
+                      {!alreadyAdded && <button type="button" onClick={() => void handleAddDirectoryVillage(name)} disabled={Boolean(addingDirectoryVillage)} className="rounded-md bg-primary px-2.5 py-1 text-[11px] font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60">{isAdding ? 'Adding…' : 'Add village'}</button>}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : !directoryVillageError ? (
+            <p className="mt-4 text-xs text-muted-foreground">No online village mapping is available for this Panchayat.</p>
+          ) : null}
+        </section>
+      )}
+
       {/* 4. Villages Data Table */}
       <div className="rounded-lg border border-border bg-card shadow-xs overflow-hidden">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border px-4 py-3">
@@ -260,6 +448,7 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
                         {vBoys} boys &middot; {vGirls} girls
                       </td>
                       <td className="px-4 py-3.5 text-right">
+                        {onDeleteVillage && <button type="button" title={`Delete ${v.name}`} disabled={Boolean(deletingVillageId)} onClick={(event) => { event.stopPropagation(); void handleDeleteVillage(v.id, v.name); }} className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -300,19 +489,45 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
             </div>
 
             <form onSubmit={handleSave} className="mt-4 space-y-4 text-xs">
+              <div className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                {isLoadingVillageDirectory
+                  ? 'Loading villages for this Panchayat…'
+                  : villageDirectoryError || `${villageDirectory.length} villages mapped to this Panchayat are available.`}
+              </div>
+              {villageSaveError && <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{villageSaveError}</p>}
               <div>
                 <label className="mb-1 block text-xs font-semibold text-foreground" htmlFor="vil-name">
                   Village Name *
                 </label>
-                <Input
-                  id="vil-name"
-                  type="text"
-                  required
-                  placeholder="e.g. Ammapettai"
-                  value={newVillage}
-                  onChange={(e) => setNewVillage(e.target.value)}
-                  autoFocus
-                />
+                <div className="relative">
+                  <Input
+                    id="vil-name"
+                    type="search"
+                    required
+                    autoComplete="off"
+                    placeholder="Search villages in this Panchayat"
+                    value={newVillage}
+                    onFocus={() => setIsVillageMenuOpen(true)}
+                    onChange={(e) => { setNewVillage(e.target.value); setVillageSaveError(''); setIsVillageMenuOpen(true); }}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setIsVillageMenuOpen(false); }}
+                    role="combobox"
+                    aria-expanded={isVillageMenuOpen}
+                    aria-controls="village-name-options"
+                    autoFocus
+                  />
+                  {isVillageMenuOpen && <div id="village-name-options" role="listbox" aria-label={`Villages under ${panchayat.name}`} className="absolute z-50 mt-1 max-h-56 w-full overflow-y-auto rounded-md border border-border bg-card p-1 shadow-lg">
+                    {isLoadingVillageDirectory
+                      ? <p className="px-3 py-2 text-xs text-muted-foreground">Loading village names…</p>
+                      : villageDirectoryError
+                        ? <p className="px-3 py-2 text-xs text-destructive">{villageDirectoryError}</p>
+                        : matchingVillageOptions.length
+                          ? matchingVillageOptions.map((name) => {
+                              const alreadyAdded = panchayat.villages.some((village) => normalizeVillageName(village.name) === normalizeVillageName(name));
+                              return <button key={name} type="button" role="option" aria-selected={normalizeVillageName(newVillage) === normalizeVillageName(name)} disabled={alreadyAdded} onClick={() => { setNewVillage(name); setIsVillageMenuOpen(false); setVillageSaveError(''); }} className="flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground">{name}{alreadyAdded && <span className="ml-2 text-[10px]">Already added</span>}</button>;
+                            })
+                          : <p className="px-3 py-2 text-xs text-muted-foreground">{villageDirectory.length ? 'No directory match. You can still save the village name you typed.' : 'Directory unavailable. You can still type and save the village name.'}</p>}
+                  </div>}
+                </div>
               </div>
 
               <div>
@@ -331,8 +546,8 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
                 <Button type="button" variant="outline" onClick={() => setShowAdd(false)}>
                   Cancel
                 </Button>
-                <Button type="submit">
-                  Save Village
+                <Button type="submit" disabled={isSavingVillage || isLoadingVillageDirectory}>
+                  {isSavingVillage ? 'Saving…' : 'Save Village'}
                 </Button>
               </div>
             </form>

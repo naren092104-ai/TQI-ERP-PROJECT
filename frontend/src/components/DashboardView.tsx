@@ -529,7 +529,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
               <button
                 type="button"
-                onClick={() => onNavigate(isClusterAdmin ? 'lesson-plans' : 'academic-setup')}
+                onClick={() => onNavigate(isClusterAdmin ? 'lesson-plan' : 'academic-setup')}
                 className="text-xs font-medium text-primary hover:underline"
               >
                 {isClusterAdmin ? 'View Lesson Plans' : 'Academic Term Setup'}
