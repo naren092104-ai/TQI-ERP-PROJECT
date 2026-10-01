@@ -168,9 +168,6 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         schoolsSet.add(st.schoolName.trim());
       }
     });
-    if (schoolsSet.size === 0) {
-      schoolsSet.add('Government High School');
-    }
     return Array.from(schoolsSet);
   }, [students, currentPanchayat, selectedVillageId, currentVillage]);
 
@@ -183,7 +180,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       if (!matchPanchayat || !matchVillage) return false;
 
       if (selectedSchool !== 'all') {
-        const sch = s.schoolName?.trim() || 'Government High School';
+        const sch = s.schoolName?.trim() || '';
         if (sch.toLowerCase() !== selectedSchool.toLowerCase()) return false;
       }
       return true;

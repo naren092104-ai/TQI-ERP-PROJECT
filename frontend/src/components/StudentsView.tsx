@@ -191,7 +191,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
     const schoolMap = new Map<string, { name: string; studentCount: number }>();
     villageStudents.forEach((st) => {
-      const sch = st.schoolName?.trim() || 'Government High School';
+      const sch = st.schoolName?.trim();
+      if (!sch) return;
       const existing = schoolMap.get(sch);
       if (existing) {
         existing.studentCount += 1;
@@ -200,10 +201,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       }
     });
 
-    // If empty, supply a default community school so users can drill in or add students immediately
-    if (schoolMap.size === 0) {
-      schoolMap.set('Government High School', { name: 'Government High School', studentCount: 0 });
-    }
     return Array.from(schoolMap.values());
   }, [students, currentPanchayat, currentVillage]);
 
@@ -216,7 +213,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       if (!matchPanchayat || !matchVillage) return false;
 
       if (selectedSchoolName && selectedSchoolName !== 'all') {
-        const studentSchool = s.schoolName?.trim() || 'Government High School';
+        const studentSchool = s.schoolName?.trim() || '';
         if (studentSchool.toLowerCase() !== selectedSchoolName.toLowerCase()) return false;
       }
 
@@ -295,7 +292,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       parentName: '',
       phone: '',
       status: 'active',
-      schoolName: selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : (villageSchools[0]?.name || 'Government High School'),
+      schoolName: selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : (villageSchools[0]?.name || ''),
     });
     setActiveFormMode('add-student');
   };
@@ -310,7 +307,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       parentName: st.parentName || '',
       phone: st.phone || '',
       status: st.status || 'active',
-      schoolName: st.schoolName || selectedSchoolName || 'Government High School',
+      schoolName: st.schoolName || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : ''),
     });
     setActiveFormMode('edit-student');
   };
@@ -326,7 +323,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       return;
     }
 
-    const targetSchool = studentForm.schoolName.trim() || selectedSchoolName || 'Government High School';
+    const targetSchool = studentForm.schoolName.trim() || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '');
 
     if (editingStudent) {
       const payload: Partial<Student> = {
@@ -448,7 +445,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Female',
         'Date of Birth': '2014-04-15',
         'Contact Phone (Optional)': '9443211223',
-        'School (Optional)': selectedSchoolName || 'Government High School',
+        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
       },
       {
         'Student Name': 'Gokul Nathan',
@@ -456,7 +453,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Male',
         'Date of Birth': '2011-08-20',
         'Contact Phone (Optional)': '',
-        'School (Optional)': selectedSchoolName || 'Government High School',
+        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
       },
       {
         'Student Name': 'Deepika R.',
@@ -464,7 +461,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Female',
         'Date of Birth': '2009-01-10',
         'Contact Phone (Optional)': '9789044556',
-        'School (Optional)': selectedSchoolName || 'Government High School',
+        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
       },
       {
         'Student Name': 'Vignesh M.',
@@ -472,7 +469,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'Gender': 'Male',
         'Date of Birth': '2007-11-28',
         'Contact Phone (Optional)': '',
-        'School (Optional)': selectedSchoolName || 'Government High School',
+        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
       },
     ];
     const ws = XLSX.utils.json_to_sheet(sample);
@@ -526,7 +523,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           const parentName = findVal(['parent', 'father', 'mother', 'guardian']) || '';
           const phone = findVal(['phone', 'mobile', 'contact']) || ''; // Optional
           const rawSchool = findVal(['school', 'center', 'institution']);
-          const schoolName = rawSchool || selectedSchoolName || 'Government High School';
+          const schoolName = rawSchool || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '');
           const status = 'active' as const;
 
           let isValid = true;
@@ -570,7 +567,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       panchayatName: currentPanchayat.name,
       villageId: currentVillage.id,
       villageName: currentVillage.name,
-      schoolName: r.schoolName || selectedSchoolName || 'Government High School',
+      schoolName: r.schoolName || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : ''),
       parentName: r.parentName,
       phone: r.phone,
       status: r.status,
@@ -1301,6 +1298,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             </div>
           </div>
 
+          {villageSchools.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
+              <School className="mx-auto h-8 w-8 text-muted-foreground" />
+              <h2 className="mt-3 text-base font-semibold text-foreground">No schools registered in this village</h2>
+              <p className="mt-1 text-sm text-muted-foreground">No school will be shown until one is actually registered.</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <Button type="button" variant="outline" onClick={() => handleSelectSchool('all')}>
+                  View all students
+                </Button>
+                <Button type="button" onClick={() => setActiveFormMode('add-school')}>
+                  <Plus className="mr-1 h-4 w-4" /> Add School / Hub
+                </Button>
+              </div>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {/* All Schools in Village Summary */}
             <div
@@ -1338,6 +1350,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 </div>
               ))}
           </div>
+          )}
         </div>
       )}
 
