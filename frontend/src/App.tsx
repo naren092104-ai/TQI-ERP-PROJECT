@@ -1709,7 +1709,7 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'panchayat-detail' && (
+              {currentTab === 'panchayat-detail' && (currentPanchayat ? (
                 <PanchayatDetailView
                   panchayat={currentPanchayat}
                   students={displayStudents}
@@ -1717,7 +1717,20 @@ export default function App() {
                   onNavigate={handleNavigate}
                   onAddVillage={handleAddVillage}
                 />
-              )}
+              ) : (
+                <div className="rounded-2xl border border-border bg-card p-8 text-center">
+                  <p className="text-sm text-muted-foreground">
+                    {panchayats.length === 0 ? 'Loading Panchayat details…' : 'No Panchayat is available to display.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentTab('panchayats')}
+                    className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+                  >
+                    Back to Panchayats
+                  </button>
+                </div>
+              ))}
 
               {currentTab === 'students' && (
                 <StudentsView

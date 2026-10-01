@@ -285,6 +285,15 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         if (!saveRes.ok || !saveData?.success) {
           throw new Error(saveData?.error || 'Unable to save session day.');
         }
+
+        setSetupRows((currentRows) => [
+          ...currentRows.filter((row) => normalizeAcademicYearName(row.academic_year) !== normalizedYearName),
+          ...payloadDays.map((day) => ({
+            day_number: day.dayNumber,
+            academic_year: normalizedYearName,
+            session_name: day.sessionName || null,
+          })),
+        ]);
       }
 
       if (drawerMode === 'create' && targetYearId) {
@@ -472,7 +481,13 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
               </button>
             </div>
 
-            <div className="space-y-6 p-5">
+            <form
+              className="space-y-6 p-5"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void saveAcademicYear();
+              }}
+            >
               {drawerMode !== 'day' && (
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-foreground">Academic Year</label>
@@ -548,15 +563,14 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   Cancel
                 </button>
                 <button
-                  type="button"
-                  onClick={saveAcademicYear}
+                  type="submit"
                   disabled={isSaving}
                   className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {isSaving ? 'Saving...' : drawerMode === 'day' ? 'Save Session Day' : drawerMode === 'create' ? 'Create Academic Year' : 'Save Academic Year'}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
