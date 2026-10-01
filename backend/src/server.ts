@@ -31,20 +31,24 @@ app.use(cors({
 }));
 
 
-// DB now stores Title-case roles and statuses directly. These helpers are
-// pass-throughs preserved so callers don't have to change, but they are
-// identity functions.
-const normalizeRole = (role: string | null | undefined): 'Super Admin' | 'Cluster Admin' =>
-  (role === 'Super Admin' || role === 'Cluster Admin') ? role : 'Cluster Admin';
+// DB historically stored a few legacy uppercase role aliases such as
+// SUPER_ADMIN and CLUSTER_ADMIN. Normalize them to the canonical Title-Case
+// values expected by the application, while still accepting legacy values at
+// runtime.
+const normalizeRole = (role: string | null | undefined): 'Super Admin' | 'Cluster Admin' => {
+  const normalized = String(role || '').trim().toLowerCase();
+  if (normalized === 'super_admin' || normalized === 'super admin' || normalized === 'admin') return 'Super Admin';
+  if (normalized === 'cluster_admin' || normalized === 'cluster admin') return 'Cluster Admin';
+  return (normalized === 'super admin' || normalized === 'super_admin') ? 'Super Admin' : 'Cluster Admin';
+};
 
-const toDbRole = (role: string): 'Super Admin' | 'Cluster Admin' =>
-  (role === 'Super Admin' || role === 'Cluster Admin') ? role : 'Cluster Admin';
+const toDbRole = (role: string): 'Super Admin' | 'Cluster Admin' => normalizeRole(role);
 
 const serializeUser = (row: any) => ({
   id: row.id,
   name: row.name,
   email: row.email,
-  role: row.role,
+  role: normalizeRole(row.role),
   clusterId: row.cluster_id || 'all',
   clusterName: row.cluster_id ? `${row.cluster_id} Cluster` : 'All Clusters',
   phone: row.phone || '',
@@ -499,7 +503,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     console.log(`[AUTH LOGIN] Attempt for: ${email} | Found ID: ${user.id} | Status: "${rawStatus}" -> parsed: "${userStatus}"`);
 
     // Super Admin is never blocked by status. Other accounts only blocked if explicitly inactive.
-    const isSuperAdmin = user.role === 'Super Admin' || user.role === 'SUPER_ADMIN';
+    const isSuperAdmin = normalizeRole(user.role) === 'Super Admin';
     if (!isSuperAdmin && (userStatus === 'inactive' || userStatus === 'blocked' || userStatus === 'disabled')) {
       console.warn(`[AUTH LOGIN] Blocked inactive user: ${email}`);
       res.status(403).json({ success: false, error: 'This user account is inactive.' });
@@ -2824,6 +2828,20 @@ app.get('/api/modules/:id/resources/:resourceId/download', requireAuth, async (r
   }
 });
 
+const normalizeDateValue = (value: unknown, fallback: string): string => {
+  const raw = String(value ?? '').trim();
+  if (!raw) return fallback;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+
+  return fallback;
+};
+
 // --- 5. Academic Years ---
 app.get('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
@@ -2838,7 +2856,21 @@ app.get('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, re
 app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { name, startDate, endDate, isActive } = req.body;
+    const normalizedName = String(name || '').trim().replace(/[–—]/g, '-');
     const id = `ay-${randomUUID()}`;
+    const safeStartDate = normalizeDateValue(startDate, '2026-05-31');
+    const safeEndDate = normalizeDateValue(endDate, '2027-05-30');
+
+    if (!normalizedName) {
+      res.status(400).json({ success: false, error: 'Academic year name is required.' });
+      return;
+    }
+
+    const [existingRows] = await pool.query<any[]>('SELECT id FROM academic_years WHERE name = ? LIMIT 1', [normalizedName]);
+    if (existingRows.length > 0) {
+      res.status(409).json({ success: false, error: 'An academic year with this name already exists.' });
+      return;
+    }
 
     await pool.query('START TRANSACTION');
     if (isActive) {
@@ -2847,21 +2879,27 @@ app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, r
 
     await pool.query(
       'INSERT INTO academic_years (id, name, start_date, end_date, is_active) VALUES (?, ?, ?, ?, ?)',
-      [id, name, startDate, endDate, Boolean(isActive)]
+      [id, normalizedName, safeStartDate, safeEndDate, Boolean(isActive)]
     );
 
     await pool.query('COMMIT');
     res.json({ success: true, data: { id } });
-  } catch (error) {
+  } catch (error: any) {
     await pool.query('ROLLBACK').catch(() => undefined);
     console.error('Failed to create academic year:', error);
-    res.status(500).json({ success: false, error: 'Unable to create.' });
+    if (error?.code === 'ER_DUP_ENTRY' || String(error?.message || '').includes('Duplicate entry')) {
+      res.status(409).json({ success: false, error: 'An academic year with this name already exists.' });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Unable to create academic year.' });
   }
 });
 
 app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { name, startDate, endDate, isActive } = req.body;
+    const safeStartDate = normalizeDateValue(startDate, '2026-05-31');
+    const safeEndDate = normalizeDateValue(endDate, '2027-05-30');
 
     await pool.query('START TRANSACTION');
     if (isActive) {
@@ -2870,7 +2908,7 @@ app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest
 
     await pool.query(
       'UPDATE academic_years SET name = ?, start_date = ?, end_date = ?, is_active = ? WHERE id = ?',
-      [name, startDate, endDate, Boolean(isActive), req.params.id]
+      [name, safeStartDate, safeEndDate, Boolean(isActive), req.params.id]
     );
 
     await pool.query('COMMIT');

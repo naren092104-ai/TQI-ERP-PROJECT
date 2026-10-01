@@ -87,12 +87,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [setupDays, setSetupDays] = useState<{ dayNumber: number; sessionName: string }[]>([]);
   const isClusterAdmin = userRole === 'Cluster Admin';
 
+  const effectiveAuthToken = authToken || (() => {
+    try {
+      const saved = localStorage.getItem('tqi_auth_session');
+      if (!saved) return '';
+      return JSON.parse(saved)?.token || '';
+    } catch {
+      return '';
+    }
+  })();
+
   useEffect(() => {
-    if (!authToken) return;
+    if (!effectiveAuthToken) return;
 
     fetch(apiUrl('/api/academic-setup'), {
       headers: {
-        Authorization: `Bearer ${authToken}`,
+        Authorization: `Bearer ${effectiveAuthToken}`,
       },
     })
       .then((res) => (res.ok ? res.json() : null))
@@ -107,7 +117,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         }
       })
       .catch(() => {});
-  }, [authToken]);
+  }, [effectiveAuthToken]);
 
   // Real MySQL calculated metrics
   const totalClusters = clusters.length;

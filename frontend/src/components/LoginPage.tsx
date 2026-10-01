@@ -60,6 +60,13 @@ const TqiLoadingMark: React.FC = () => (
   </span>
 );
 
+const normalizeUserRole = (role?: string): UserRole => {
+  const normalized = String(role || '').trim().toLowerCase();
+  if (normalized === 'super_admin' || normalized === 'super admin') return 'Super Admin';
+  if (normalized === 'cluster_admin' || normalized === 'cluster admin') return 'Cluster Admin';
+  return 'Super Admin';
+};
+
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -162,7 +169,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
+        role: normalizeUserRole(user.role),
         clusterId: user.clusterId || 'all',
         clusterName: user.clusterName || 'All Clusters',
         designation: user.role === 'Super Admin' ? 'Statewide Super Admin' : 'Cluster Admin (College SPOC)',

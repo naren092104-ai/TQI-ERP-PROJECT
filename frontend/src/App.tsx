@@ -64,6 +64,12 @@ const KNOWN_TABS: Set<string> = new Set([
   'session-reports', 'session-submissions', 'module-library',
 ]);
 
+const normalizeUserRole = (role?: string): UserRole => {
+  const normalized = String(role || '').trim().toLowerCase();
+  if (normalized === 'super_admin' || normalized === 'super admin') return 'Super Admin';
+  if (normalized === 'cluster_admin' || normalized === 'cluster admin') return 'Cluster Admin';
+  return 'Super Admin';
+};
 
 export default function App() {
   // Session & Authentication State
@@ -71,7 +77,12 @@ export default function App() {
     try {
       const saved = localStorage.getItem('tqi_auth_session');
       if (saved) {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved) as Partial<AuthSession> | null;
+        if (!parsed) return null;
+        return {
+          ...parsed,
+          role: normalizeUserRole(parsed.role),
+        } as AuthSession;
       }
     } catch {
       // ignore invalid session data
@@ -151,6 +162,7 @@ export default function App() {
   const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
   const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
   const [academicYears, setAcademicYears] = useState<AcademicYear[]>([]);
+  const [selectedAcademicYearId, setSelectedAcademicYearId] = useState<string>('');
   const [modules, setModules] = useState<TqiModule[]>([]);
 
   // Sync with API Backend
@@ -248,6 +260,7 @@ export default function App() {
       if (Array.isArray(sessionSubmissionsRes?.sessionSubmissions)) setSessionSubmissions(sessionSubmissionsRes.sessionSubmissions);
       else if (Array.isArray(sessionSubmissionsRes?.data)) setSessionSubmissions(sessionSubmissionsRes.data);
       if (Array.isArray(academicYearsRes?.academicYears))           setAcademicYears(academicYearsRes.academicYears);
+      else if (Array.isArray(academicYearsRes?.data))               setAcademicYears(academicYearsRes.data);
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
     } catch {
@@ -262,16 +275,36 @@ export default function App() {
     return () => controller.abort();
   }, [fetchBackendData, currentUser?.token]);
 
+  useEffect(() => {
+    if (!academicYears.length) return;
+
+    if (!selectedAcademicYearId) {
+      const fallback = academicYears.find((year) => year.isActive || year.status === 'ACTIVE') || academicYears[0];
+      if (fallback) setSelectedAcademicYearId(fallback.id);
+      return;
+    }
+
+    const exists = academicYears.some((year) => year.id === selectedAcademicYearId);
+    if (!exists) {
+      setSelectedAcademicYearId(academicYears[0].id);
+    }
+  }, [academicYears, selectedAcademicYearId]);
+
   // Auth Handlers
   const handleLoginSuccess = (session: AuthSession) => {
+    const normalizedSession: AuthSession = {
+      ...session,
+      role: normalizeUserRole(session.role),
+      clusterId: session.clusterId || 'all',
+    };
     try {
-      localStorage.setItem('tqi_auth_session', JSON.stringify(session));
+      localStorage.setItem('tqi_auth_session', JSON.stringify(normalizedSession));
     } catch {
       // ignore
     }
-    setCurrentUser(session);
-    setCurrentUserRole(session.role);
-    setCurrentUserClusterId(session.clusterId);
+    setCurrentUser(normalizedSession);
+    setCurrentUserRole(normalizedSession.role);
+    setCurrentUserClusterId(normalizedSession.clusterId);
     setCurrentTab('dashboard');
     if (session.role === 'Super Admin') {
       setSelectedPanchayatId('vedakkattamaduvu');
@@ -1564,6 +1597,14 @@ export default function App() {
               setSidebarCollapsed((prev) => !prev);
             }
           }}
+          academicYears={academicYears.map((year) => ({
+            id: year.id,
+            name: year.name,
+            is_active: Boolean(year.isActive || year.is_active),
+            status: year.isActive ? 'ACTIVE' : 'DRAFT',
+          }))}
+          selectedAcademicYearId={selectedAcademicYearId}
+          onSelectAcademicYear={(yearId) => setSelectedAcademicYearId(yearId)}
         />
       }
     >
@@ -1602,6 +1643,9 @@ export default function App() {
               {currentTab === 'academic-setup' && currentUserRole === 'Super Admin' && (
                 <AcademicSetupView
                   authToken={currentUser?.token ?? ''}
+                  academicYears={academicYears}
+                  selectedAcademicYearId={selectedAcademicYearId}
+                  onSelectAcademicYear={setSelectedAcademicYearId}
                   onSetupSaved={() => fetchBackendData(new AbortController().signal)}
                 />
               )}
