@@ -95,7 +95,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const [reviewingRequest, setReviewingRequest] = useState<DateChangeRequest | null>(null);
   const [reviewRemarks, setReviewRemarks] = useState('');
   const [sessionProposalDates, setSessionProposalDates] = useState<Record<string, string>>({});
-  const [sessionProposalLocations, setSessionProposalLocations] = useState<Record<string, { panchayatId: string; villageId: string }>>({});
   const [approvingSessionId, setApprovingSessionId] = useState<string | null>(null);
   const [newDateValue, setNewDateValue] = useState('');
   const [dateChangeReason, setDateChangeReason] = useState('');
@@ -972,19 +971,19 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 String(volunteer.status || 'Active').toLowerCase() === 'active'
               ).length;
               const proposalPanchayats = panchayats.filter((panchayat) => panchayat.clusterId === session.clusterId);
-              const proposalPanchayatId = sessionProposalLocations[session.id]?.panchayatId
-                || session.targetLocations?.[0]?.panchayatId
+              const proposalPanchayatId = session.targetLocations?.[0]?.panchayatId
                 || session.panchayatId
                 || proposalPanchayats[0]?.id
                 || '';
               const proposalPanchayat = proposalPanchayats.find((panchayat) => panchayat.id === proposalPanchayatId);
-              const proposalVillageId = sessionProposalLocations[session.id]?.villageId
-                || session.targetLocations?.[0]?.villageId
+              const proposalVillageId = session.targetLocations?.[0]?.villageId
                 || session.villageId
                 || proposalPanchayat?.villages[0]?.id
                 || proposalPanchayat?.villages[0]?.name
                 || '';
-              const proposalVillages = proposalPanchayat?.villages || [];
+              const proposalVillage = proposalPanchayat?.villages.find((village) => village.id === proposalVillageId || village.name === proposalVillageId);
+              const proposalPanchayatName = session.panchayatName || proposalPanchayat?.name || 'Panchayat';
+              const proposalVillageName = session.villageName || session.targetLocations?.[0]?.villageName || proposalVillage?.name || 'Village';
               return <article key={session.id} className="rounded-2xl border border-border bg-card p-5 shadow-xs transition hover:border-primary/40 hover:shadow-md">
                 <div className="flex items-start justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="text-xs font-mono text-muted-foreground">#{sNo}</span><Badge variant="default" size="sm">Day {dayNum}</Badge></span><Badge variant={displayStatus === 'Completed' ? 'success' : displayStatus === 'In Progress' ? 'info' : displayStatus === 'Needs Attention' || displayStatus === 'Action Req.' ? 'warning' : 'secondary'} size="sm">{displayStatus}</Badge></div>
                 <h2 className="mt-4 text-base font-bold text-foreground">{session.name || session.title || 'Academic Session'}</h2>
@@ -992,27 +991,9 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 <div className="mt-4 space-y-2 border-t border-border pt-3 text-xs">
                   <div className="flex items-center gap-2 font-medium text-foreground"><Calendar className="h-3.5 w-3.5 text-primary" />{session.date || 'Date not set'} {session.dateFixed ? <Badge variant="success" size="sm">Confirmed</Badge> : session.date ? <Badge variant="warning" size="sm">Pending approval</Badge> : null}</div>
                   {isClusterAdmin && !session.dateFixed && <>
-                    <Input aria-label={`Propose date for Day ${dayNum}`} type="date" value={sessionProposalDates[session.id] ?? session.date ?? ''} onChange={(event) => setSessionProposalDates((previous) => ({ ...previous, [session.id]: event.target.value }))} className="h-8 rounded-lg text-xs" />
-                    <div className="grid grid-cols-2 gap-2">
-                      <label className="space-y-1 text-[10px] font-semibold text-muted-foreground">Panchayat
-                        <select value={proposalPanchayatId} onChange={(event) => {
-                          const nextPanchayat = proposalPanchayats.find((item) => item.id === event.target.value);
-                          const nextVillageId = nextPanchayat?.villages[0]?.id || nextPanchayat?.villages[0]?.name || '';
-                          setSessionProposalLocations((previous) => ({ ...previous, [session.id]: { panchayatId: event.target.value, villageId: nextVillageId } }));
-                        }} className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground">
-                          <option value="">Select Panchayat</option>
-                          {proposalPanchayats.map((panchayat) => <option key={panchayat.id} value={panchayat.id}>{panchayat.name}</option>)}
-                        </select>
-                      </label>
-                      <label className="space-y-1 text-[10px] font-semibold text-muted-foreground">Village
-                        <select value={proposalVillageId} onChange={(event) => setSessionProposalLocations((previous) => ({ ...previous, [session.id]: { panchayatId: proposalPanchayatId, villageId: event.target.value } }))} disabled={!proposalVillages.length} className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground disabled:opacity-50">
-                          <option value="">Select Village</option>
-                          {proposalVillages.map((village) => <option key={village.id || village.name} value={village.id || village.name}>{village.name}</option>)}
-                        </select>
-                      </label>
-                    </div>
+                    <Input aria-label={`Propose date for Day ${dayNum}`} type="date" value={sessionProposalDates[session.id] ?? session.date ?? ''} onChange={(event) => setSessionProposalDates((previous) => ({ ...previous, [session.id]: event.target.value }))} className="h-9 rounded-xl text-xs" />
                   </>}
-                  <p className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-3.5 w-3.5" />{session.panchayatName || 'Panchayat'} · {session.villageName || 'Village'}</p>
+                  <p className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-3.5 w-3.5" />{proposalPanchayatName} · {proposalVillageName}</p>
                   <p className="flex items-center gap-2 text-muted-foreground"><Users className="h-3.5 w-3.5" />{sessionVolunteersCount} active volunteers</p>
                   <p className="text-[11px] text-muted-foreground">{session.clusterName || clusters.find((cluster) => cluster.id === session.clusterId)?.name || 'Cluster'}</p>
                 </div>
