@@ -432,15 +432,14 @@ export function exportVolunteerAttendanceRosterExcel(
   const sheet = XLSX.utils.aoa_to_sheet([
     ['TALENT QUEST FOR INDIA — VOLUNTEER ATTENDANCE'],
     ['Academic Year', context.academicYear],
-    ['Cluster', context.cluster, 'Panchayat', context.panchayat],
-    ['Village', context.village, 'Day', context.day, 'Date', context.date],
+    ['Cluster', context.cluster, 'Day', context.day, 'Date', context.date],
     [],
     ['S.No', 'Volunteer Name', 'Role', 'Attendance'],
     ...rows.map((row, index) => [index + 1, row.name, row.role, row.attendance]),
   ]);
   sheet['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 22 }, { wch: 18 }];
   XLSX.utils.book_append_sheet(workbook, sheet, 'Volunteer Attendance');
-  const safeName = `${context.day}_${context.village}_${context.cluster}`.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  const safeName = `${context.day}_${context.cluster}`.replace(/[^a-zA-Z0-9_-]+/g, '_');
   XLSX.writeFile(workbook, `TQI_Volunteer_Attendance_${safeName}.xlsx`);
 }
 
@@ -465,10 +464,10 @@ export function exportSuperAdminAttendanceExcel(
   const isStudents = context.subject === 'students';
   const detailRows = rows.map((row, index) => isStudents
     ? [index + 1, row.name, row.standard || '—', row.cluster, row.panchayat, row.village, row.day, row.date, row.attendance, row.taskStatus || '—']
-    : [index + 1, row.name, row.role || 'Volunteer', row.cluster, row.panchayat, row.village, row.day, row.date, row.attendance]);
+    : [index + 1, row.name, row.role || 'Volunteer', row.cluster, row.day, row.date, row.attendance]);
   const headers = isStudents
     ? ['S.No', 'Student Name', 'Standard', 'Cluster', 'Panchayat', 'Village', 'Day', 'Date', 'Attendance', 'Task Completion']
-    : ['S.No', 'Volunteer Name', 'Role', 'Cluster', 'Panchayat', 'Village', 'Day', 'Date', 'Attendance'];
+    : ['S.No', 'Volunteer Name', 'Role', 'Cluster', 'Day', 'Date', 'Attendance'];
   const sheet = XLSX.utils.aoa_to_sheet([
     [`TALENT QUEST FOR INDIA — ${isStudents ? 'STUDENT' : 'VOLUNTEER'} ATTENDANCE`],
     ['Academic Year', context.academicYear],

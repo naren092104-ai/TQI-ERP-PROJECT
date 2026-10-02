@@ -168,31 +168,48 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
     (!panchayatId || entry.panchayatId === panchayatId) &&
     (!villageId || entry.villageId === villageId || entry.villageName === villageId)
   );
-  const selectedScopeLabel = [
-    activeCluster?.name || (!clusterId ? 'All Clusters' : 'Cluster'),
-    dayNumber === null ? 'All Days' : `Day ${dayNumber}`,
-    activePanchayat?.name || (!panchayatId ? 'All Panchayats' : ''),
-    activeVillage?.name || (!villageId ? 'All Villages' : ''),
-  ].filter(Boolean).join('_');
-  const selectedScopeRows: AttendanceDownloadRow[] = selectedScopeAttendance.flatMap((entry) => {
+  const scopeDates = [...new Set(selectedScopeAttendance.map((entry) => entry.date).filter(Boolean))];
+  const scopeDateLabel = scopeDates.length === 1 ? scopeDates[0] : scopeDates.length > 1 ? 'Multiple Dates' : '—';
+  const selectedScopeLabel = isVolunteer
+    ? [activeCluster?.name || (!clusterId ? 'All Clusters' : 'Cluster'), dayNumber === null ? 'All Days' : `Day ${dayNumber}`, scopeDateLabel].join('_')
+    : [activeCluster?.name || (!clusterId ? 'All Clusters' : 'Cluster'), dayNumber === null ? 'All Days' : `Day ${dayNumber}`, activePanchayat?.name || (!panchayatId ? 'All Panchayats' : ''), activeVillage?.name || (!villageId ? 'All Villages' : ''), scopeDateLabel].filter(Boolean).join('_');
+  const selectedScopeRowMap = new Map<string, { row: AttendanceDownloadRow; locationPriority: number; statusPriority: number }>();
+  selectedScopeAttendance.forEach((entry) => {
     const entryCluster = clusters.find((cluster) => cluster.id === entry.clusterId)?.name || entry.clusterName || entry.clusterId;
     const entryPanchayat = panchayats.find((item) => item.id === entry.panchayatId)?.name || entry.panchayatName || 'All Panchayats';
     const base = { cluster: entryCluster, panchayat: entryPanchayat, village: entry.villageName || 'All Villages' };
-    return isVolunteer
-      ? ((entry.volunteerAttendance || []) as VolunteerAttendanceRecord[]).map((record) => ({
-          ...base,
-          name: record.volunteerName,
-          role: record.role || 'Volunteer',
-          attendance: record.status,
-        }))
-      : ((entry.records || []) as AttendanceRecord[]).map((record) => ({
-          ...base,
-          name: record.studentName,
-          standard: record.standard || '—',
-          attendance: record.status,
-          taskStatus: record.taskStatus || '—',
-        }));
+    const locationPriority = entry.villageId || (entry.villageName && entry.villageName !== 'All Villages') ? 3 : entry.panchayatId ? 2 : 1;
+    const statusPriority = entry.status === 'Approved' ? 3 : ['Submitted', 'Pending Review', 'Resubmission'].includes(entry.status) ? 2 : 1;
+    if (isVolunteer) {
+      ((entry.volunteerAttendance || []) as VolunteerAttendanceRecord[]).forEach((record) => {
+        const key = `${entry.clusterId}:${entry.dayNumber}:${record.volunteerId || record.volunteerName.trim().toLowerCase()}`;
+        const candidate = {
+          row: { ...base, name: record.volunteerName, role: record.role || 'Volunteer', attendance: record.status, day: `Day ${entry.dayNumber}`, date: entry.date || '—' },
+          locationPriority,
+          statusPriority,
+        };
+        const current = selectedScopeRowMap.get(key);
+        if (!current || candidate.locationPriority > current.locationPriority || (candidate.locationPriority === current.locationPriority && candidate.statusPriority > current.statusPriority)) {
+          selectedScopeRowMap.set(key, candidate);
+        }
+      });
+      return;
+    }
+    ((entry.records || []) as AttendanceRecord[]).forEach((record) => {
+      const identity = record.studentId || record.studentName.trim().toLowerCase();
+      const key = `${entry.clusterId}:${entry.dayNumber}:${identity}`;
+      const candidate = {
+        row: { ...base, name: record.studentName, standard: record.standard || '—', attendance: record.status, taskStatus: record.taskStatus || '—', day: `Day ${entry.dayNumber}`, date: entry.date || '—' },
+        locationPriority,
+        statusPriority,
+      };
+      const current = selectedScopeRowMap.get(key);
+      if (!current || candidate.locationPriority > current.locationPriority || (candidate.locationPriority === current.locationPriority && candidate.statusPriority > current.statusPriority)) {
+        selectedScopeRowMap.set(key, candidate);
+      }
+    });
   });
+  const selectedScopeRows: AttendanceDownloadRow[] = [...selectedScopeRowMap.values()].map(({ row }) => row);
 
   const handleExportAttendanceExcel = () => {
     exportSuperAdminAttendanceExcel(selectedScopeRows.map((row) => ({
@@ -200,12 +217,12 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
       cluster: row.cluster || '—',
       panchayat: row.panchayat || '—',
       village: row.village,
-      day: dayNumber === null ? 'All Days' : `Day ${dayNumber}`,
-      date: selectedScopeAttendance.find((entry) => Number(entry.dayNumber) === dayNumber)?.date || '—',
       standard: row.standard,
       role: row.role,
       attendance: row.attendance,
       taskStatus: row.taskStatus,
+      day: row.day,
+      date: row.date,
     })), {
       subject,
       academicYear: academicYear || '—',
@@ -239,7 +256,7 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
         panchayat: activePanchayat?.name || (panchayatId ? 'Panchayat' : 'All Panchayats'),
         village: activeVillage?.name || (villageId ? 'Village' : 'All Villages'),
         day: dayNumber === null ? 'All Days' : `Day ${dayNumber}`,
-        date: selectedScopeAttendance.find((entry) => Number(entry.dayNumber) === dayNumber)?.date || '—',
+        date: scopeDateLabel,
         standard: isVolunteer ? undefined : 'All Standards',
         logoDataUrl,
       } as const;

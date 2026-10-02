@@ -428,12 +428,16 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         village: record.villageName || currentVillage?.name || attendanceExportContext.village,
         attendance: record.status,
         taskStatus: record.taskStatus,
+        day: attendanceExportContext.day,
+        date: attendanceExportContext.date,
       }))
     : currentVolunteerRecordsList.map((record) => ({
         name: record.volunteerName,
         role: record.role || 'Volunteer',
         village: attendanceExportContext.village,
         attendance: record.status,
+        day: attendanceExportContext.day,
+        date: attendanceExportContext.date,
       }));
 
   const handleExportAttendanceExcel = () => {

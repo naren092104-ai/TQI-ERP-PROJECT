@@ -10,6 +10,8 @@ export interface AttendanceDownloadRow {
   village: string;
   attendance: string;
   taskStatus?: string;
+  day?: string;
+  date?: string;
 }
 
 export interface AttendanceDownloadContext {
@@ -47,8 +49,16 @@ const styles = StyleSheet.create({
 });
 
 export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; context: AttendanceDownloadContext }> = ({ rows, context }) => {
+  const isOverallVolunteerReport = context.kind === 'volunteers' && context.cluster === 'All Clusters';
+  const isMultiDayReport = context.day === 'All Days';
   const columns = context.kind === 'students'
-    ? [
+    ? isMultiDayReport
+      ? [
+          { title: 'S.No', width: 24 }, { title: 'Student Name', width: 76 }, { title: 'Std', width: 36 },
+          { title: 'Cluster', width: 56 }, { title: 'Panchayat', width: 56 }, { title: 'Village', width: 56 },
+          { title: 'Day', width: 34 }, { title: 'Date', width: 48 }, { title: 'Attendance', width: 62 }, { title: 'Task', width: 91 },
+        ]
+      : [
         { title: 'S.No', width: 25 },
         { title: 'Student Name', width: 91 },
         { title: 'Standard', width: 40 },
@@ -60,22 +70,23 @@ export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; cont
       ]
     : [
         { title: 'S.No', width: 25 },
-        { title: 'Volunteer Name', width: 96 },
-        { title: 'Role', width: 46 },
-        { title: 'Cluster', width: 68 },
-        { title: 'Panchayat', width: 68 },
-        { title: 'Village', width: 68 },
-        { title: 'Attendance', width: 168 },
+        { title: 'Volunteer Name', width: isMultiDayReport ? 100 : isOverallVolunteerReport ? 125 : 155 },
+        { title: 'Role', width: isMultiDayReport ? 58 : isOverallVolunteerReport ? 66 : 95 },
+        ...(isOverallVolunteerReport ? [{ title: 'Cluster', width: isMultiDayReport ? 65 : 100 }] : []),
+        ...(isMultiDayReport ? [{ title: 'Day', width: 38 }, { title: 'Date', width: 52 }] : []),
+        { title: 'Attendance', width: isMultiDayReport ? (isOverallVolunteerReport ? 201 : 263) : isOverallVolunteerReport ? 223 : 264 },
       ];
   const documentTitle = context.kind === 'students' ? 'Student Attendance Details' : 'Volunteer Attendance Details';
-  const metaItems = [
-    ['Cluster', context.cluster],
-    ['Panchayat', context.panchayat],
-    ['Village', context.village],
-    ['Day', context.day],
-    ['Date', context.date],
-    ...(context.kind === 'students' ? [['Standard', context.standard || 'All']] : []),
-  ];
+  const metaItems = context.kind === 'volunteers'
+    ? [['Cluster', context.cluster], ['Day', context.day], ['Date', context.date]]
+    : [
+        ['Cluster', context.cluster],
+        ['Panchayat', context.panchayat],
+        ['Village', context.village],
+        ['Day', context.day],
+        ['Date', context.date],
+        ['Standard', context.standard || 'All'],
+      ];
 
   return (
     <Document title={`${documentTitle} — ${context.academicYear}`}>
@@ -105,8 +116,18 @@ export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; cont
           </View>
           {rows.map((row, index) => {
             const values = context.kind === 'students'
-              ? [String(index + 1), row.name, row.standard || '—', row.cluster || context.cluster, row.panchayat || context.panchayat, row.village, row.attendance, row.taskStatus || '—']
-              : [String(index + 1), row.name, row.role || 'Volunteer', row.cluster || context.cluster, row.panchayat || context.panchayat, row.village, row.attendance];
+              ? [
+                  String(index + 1), row.name, row.standard || '—', row.cluster || context.cluster,
+                  row.panchayat || context.panchayat, row.village,
+                  ...(isMultiDayReport ? [row.day || '—', row.date || '—'] : []),
+                  row.attendance, row.taskStatus || '—',
+                ]
+              : [
+                  String(index + 1), row.name, row.role || 'Volunteer',
+                  ...(isOverallVolunteerReport ? [row.cluster || context.cluster] : []),
+                  ...(isMultiDayReport ? [row.day || '—', row.date || '—'] : []),
+                  row.attendance,
+                ];
             return (
               <View key={`${row.name}-${index}`} style={styles.row} wrap={false}>
                 {values.map((value, cellIndex) => (
