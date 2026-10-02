@@ -51,7 +51,7 @@ const styles = StyleSheet.create({
 export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; context: AttendanceDownloadContext }> = ({ rows, context }) => {
   const isOverallVolunteerReport = context.kind === 'volunteers' && context.cluster === 'All Clusters';
   const isMultiDayReport = context.day === 'All Days';
-  const columns = context.kind === 'students'
+  const fixedColumns = context.kind === 'students'
     ? isMultiDayReport
       ? [
           { title: 'S.No', width: 24 }, { title: 'Student Name', width: 76 }, { title: 'Std', width: 36 },
@@ -68,14 +68,26 @@ export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; cont
         { title: 'Attendance', width: 70 },
         { title: 'Task Completion', width: 109 },
       ]
-    : [
-        { title: 'S.No', width: 25 },
-        { title: 'Volunteer Name', width: isMultiDayReport ? 100 : isOverallVolunteerReport ? 125 : 155 },
-        { title: 'Role', width: isMultiDayReport ? 58 : isOverallVolunteerReport ? 66 : 95 },
-        ...(isOverallVolunteerReport ? [{ title: 'Cluster', width: isMultiDayReport ? 65 : 100 }] : []),
-        ...(isMultiDayReport ? [{ title: 'Day', width: 38 }, { title: 'Date', width: 52 }] : []),
-        { title: 'Attendance', width: isMultiDayReport ? (isOverallVolunteerReport ? 201 : 263) : isOverallVolunteerReport ? 223 : 264 },
-      ];
+    : [];
+  const measuredWidth = (heading: string, values: string[], minWidth: number, maxWidth: number) =>
+    Math.min(maxWidth, Math.max(minWidth, ...[heading, ...values].map((value) => value.length * 4.2 + 12)));
+  const volunteerColumns = context.kind === 'volunteers' ? [
+    { title: 'S.No', width: 32 },
+    { title: 'Volunteer Name', width: measuredWidth('Volunteer Name', rows.map((row) => row.name), 78, 155) },
+    { title: 'Role', width: measuredWidth('Role', rows.map((row) => row.role || 'Volunteer'), 48, 100) },
+    ...(isOverallVolunteerReport ? [{ title: 'Cluster', width: measuredWidth('Cluster', rows.map((row) => row.cluster || context.cluster), 65, 140) }] : []),
+    ...(isMultiDayReport ? [
+      { title: 'Day', width: measuredWidth('Day', rows.map((row) => row.day || 'All Days'), 38, 62) },
+      { title: 'Date', width: measuredWidth('Date', rows.map((row) => row.date || '—'), 52, 82) },
+    ] : []),
+    { title: 'Attendance', width: measuredWidth('Attendance', rows.map((row) => row.attendance), 72, 96) },
+  ] : [];
+  const rawColumns = context.kind === 'students' ? fixedColumns : volunteerColumns;
+  const rawTableWidth = rawColumns.reduce((sum, column) => sum + column.width, 0);
+  const maxTableWidth = 539;
+  const scale = rawTableWidth > maxTableWidth ? maxTableWidth / rawTableWidth : 1;
+  const columns = rawColumns.map((column) => ({ ...column, width: column.width * scale }));
+  const tableWidth = columns.reduce((sum, column) => sum + column.width, 0);
   const documentTitle = context.kind === 'students' ? 'Student Attendance Details' : 'Volunteer Attendance Details';
   const metaItems = context.kind === 'volunteers'
     ? [['Cluster', context.cluster], ['Day', context.day], ['Date', context.date]]
@@ -106,7 +118,7 @@ export const AttendanceRosterPdf: React.FC<{ rows: AttendanceDownloadRow[]; cont
             </View>
           ))}
         </View>
-        <View style={styles.table}>
+        <View style={[styles.table, { width: tableWidth, alignSelf: 'flex-start' }]}>
           <View style={styles.headerRow} fixed>
             {columns.map((column) => (
               <View key={column.title} style={[styles.headerCell, { width: column.width }]}>
