@@ -309,7 +309,7 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
                 <tr>
                   <th className="w-12 px-4 py-3 text-center">#</th>
                   <th className="px-4 py-3">Village Name</th>
-                  <th className="px-4 py-3">Students</th>
+                  <th className="px-4 py-3">Learners</th>
                   <th className="px-4 py-3">Demographics</th>
                   <th className="px-4 py-3 text-right">Actions</th>
                 </tr>
@@ -324,39 +324,26 @@ export const PanchayatDetailView: React.FC<PanchayatDetailViewProps> = ({
                   return (
                     <tr
                       key={v.id || v.name}
-                      onClick={() => onNavigate('students', panchayat.id, v.name)}
-                      className="cursor-pointer transition-colors hover:bg-muted/30"
+                      className="transition-colors hover:bg-muted/30"
                     >
                       <td className="px-4 py-3.5 text-center font-mono text-muted-foreground">
                         {idx + 1}
                       </td>
                       <td className="px-4 py-3.5">
-                        <span className="font-semibold text-foreground hover:text-primary transition-colors">
+                        <span className="font-semibold text-foreground">
                           {v.name}
                         </span>
                       </td>
                       <td className="px-4 py-3.5">
                         <Badge variant="primary" className="font-medium">
-                          {count} students
+                          {count} learners
                         </Badge>
                       </td>
                       <td className="px-4 py-3.5 text-muted-foreground">
                         {vBoys} boys &middot; {vGirls} girls
                       </td>
                       <td className="px-4 py-3.5 text-right">
-                        {onDeleteVillage && <button type="button" title={`Delete ${v.name}`} disabled={Boolean(deletingVillageId)} onClick={(event) => { event.stopPropagation(); void handleDeleteVillage(v.id, v.name); }} className="mr-2 inline-flex h-7 w-7 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onNavigate('students', panchayat.id, v.name);
-                          }}
-                          className="h-7 gap-1 px-2 text-xs text-primary"
-                        >
-                          <span>Students</span>
-                          <ChevronRight className="h-3 w-3" />
-                        </Button>
+                        {onDeleteVillage && <button type="button" title={`Delete ${v.name}`} disabled={Boolean(deletingVillageId)} onClick={() => void handleDeleteVillage(v.id, v.name)} className="inline-flex h-7 w-7 items-center justify-center rounded-md text-rose-600 hover:bg-rose-50 disabled:opacity-50"><Trash2 className="h-3.5 w-3.5" /></button>}
                       </td>
                     </tr>
                   );

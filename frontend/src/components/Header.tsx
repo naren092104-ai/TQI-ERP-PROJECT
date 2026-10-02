@@ -116,9 +116,9 @@ export const Header: React.FC<HeaderProps> = ({
   const quickSearchItems = [
     { label: 'Dashboard', tab: 'dashboard' as TabType, category: 'Overview' },
     { label: 'Academic setup (8-day cycle)', tab: 'academic-setup' as TabType, category: 'Curriculum' },
-    { label: 'Attendance & homework logs', tab: 'attendance' as TabType, category: 'Operations' },
-    { label: 'Students roster', tab: 'students' as TabType, category: 'Roster' },
-    { label: 'Volunteers directory', tab: 'volunteers' as TabType, category: 'Roster' },
+    { label: 'Students attendance', tab: 'attendance' as TabType, category: 'Operations' },
+    { label: 'Students', tab: 'students' as TabType, category: 'Roster' },
+    { label: 'Volunteers', tab: 'volunteers' as TabType, category: 'Roster' },
     { label: 'Finance & OCR bill verification', tab: 'finance' as TabType, category: 'Finance' },
     { label: 'Approval center', tab: 'approvals' as TabType, category: 'Governance' },
     { label: 'Module library & PPTs', tab: 'module-library' as TabType, category: 'Curriculum' },

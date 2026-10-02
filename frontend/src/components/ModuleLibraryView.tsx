@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { TqiModule, UserRole } from '../types';
 import { Plus, Search, FileText, Download, Upload, Trash2, X, Edit3, Eye } from './ui/icons';
 import {
@@ -11,9 +11,10 @@ import {
 
 interface ModuleLibraryViewProps {
   modules: TqiModule[];
+  academicDays: Array<{ dayNumber: number; sessionName: string }>;
   currentUserRole: UserRole;
   currentAcademicYear?: string;
-  onCreateModule?: (module: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => Promise<void>;
+  onCreateModule?: (module: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => Promise<string | void>;
   onUpdateModule?: (id: string, module: any) => Promise<void>;
   onDeleteModule?: (id: string) => Promise<void>;
   onUploadResource?: (moduleId: string, file: File) => Promise<void>;
@@ -25,6 +26,7 @@ interface ModuleLibraryViewProps {
 
 export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
   modules,
+  academicDays,
   currentUserRole,
   currentAcademicYear = '',
   onCreateModule,
@@ -39,6 +41,11 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingModule, setEditingModule] = useState<TqiModule | null>(null);
+  const availableDays = useMemo(
+    () => [...new Map(academicDays.filter((day) => Number.isInteger(day.dayNumber) && day.dayNumber > 0 && day.sessionName.trim()).map((day) => [day.dayNumber, day])).values()].sort((a, b) => a.dayNumber - b.dayNumber),
+    [academicDays],
+  );
+  const availableDayNumbers = useMemo(() => new Set(availableDays.map((day) => day.dayNumber)), [availableDays]);
 
   useEffect(() => {
     void onRefreshModules?.();
@@ -59,11 +66,15 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
     }
   }, [currentAcademicYear, editingModule]);
 
-  const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all'>('all');
+  useEffect(() => {
+    if (availableDays.length && !availableDayNumbers.has(formData.dayNumber)) {
+      setFormData((current) => ({ ...current, dayNumber: availableDays[0].dayNumber }));
+    }
+  }, [availableDays, availableDayNumbers, formData.dayNumber]);
 
   const filteredModules = modules.filter(m => {
     if (m.status === 'Archived') return false;
-    if (selectedDayFilter !== 'all' && m.dayNumber !== selectedDayFilter) return false;
+    if (!availableDayNumbers.has(Number(m.dayNumber))) return false;
     const q = searchTerm.toLowerCase();
     return (
       m.moduleName.toLowerCase().includes(q) ||
@@ -74,6 +85,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
   });
 
   const handleOpenModal = (mod?: TqiModule) => {
+    const defaultDay = availableDays[0]?.dayNumber || 1;
     if (mod) {
       setEditingModule(mod);
       setFormData({
@@ -82,7 +94,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
         topic: mod.moduleName,
         description: mod.description || '',
         academicYear: currentAcademicYear || mod.academicYear,
-        dayNumber: mod.dayNumber || 1
+        dayNumber: availableDayNumbers.has(Number(mod.dayNumber)) ? Number(mod.dayNumber) : defaultDay
       });
     } else {
       setEditingModule(null);
@@ -92,7 +104,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
         topic: '',
         description: '',
         academicYear: currentAcademicYear,
-        dayNumber: selectedDayFilter !== 'all' ? selectedDayFilter : 1
+        dayNumber: defaultDay
       });
     }
     setIsModalOpen(true);
@@ -100,6 +112,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!availableDayNumbers.has(formData.dayNumber)) return;
     if (editingModule && onUpdateModule) {
       await onUpdateModule(editingModule.id, formData);
     } else if (onCreateModule) {
@@ -120,6 +133,37 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
         for (const file of files) {
           await onUploadResource(moduleId, file);
         }
+      }
+    };
+    input.click();
+  };
+
+  const handleUploadDay = (day: { dayNumber: number; sessionName: string }) => {
+    if (currentUserRole !== 'Super Admin') return;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.accept = '.pdf,.ppt,.pptx';
+    input.onchange = async (event) => {
+      const files = Array.from((event.target as HTMLInputElement).files || []);
+      if (!files.length) return;
+      try {
+        let targetModule = modules.find((module) => Number(module.dayNumber || 1) === day.dayNumber && module.status !== 'Archived');
+        if (!targetModule && onCreateModule) {
+          const createdModuleId = await onCreateModule({
+            moduleNumber: `DAY-${day.dayNumber}`,
+            moduleName: day.sessionName,
+            topic: day.sessionName,
+            description: '',
+            academicYear: currentAcademicYear,
+            dayNumber: day.dayNumber,
+          });
+          if (createdModuleId) targetModule = { id: createdModuleId } as TqiModule;
+        }
+        if (!targetModule || !onUploadResource) throw new Error('Unable to prepare this Academic Setup day for upload.');
+        for (const file of files) await onUploadResource(targetModule.id, file);
+      } catch (error) {
+        console.error('Failed to upload Academic Setup day resources:', error);
       }
     };
     input.click();
@@ -161,39 +205,8 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
         </div>
       </div>
 
-      {/* Day Filter Tabs and Search - Mobile & Desktop friendly */}
-      <div className="flex flex-col md:flex-row md:items-center gap-3">
-        {/* Scrollable Day Badges */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 md:pb-0 scrollbar-none shrink-0">
-          <button
-            type="button"
-            onClick={() => setSelectedDayFilter('all')}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-              selectedDayFilter === 'all'
-                ? 'bg-brand-500 text-white shadow-theme-xs'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-            }`}
-          >
-            All Days
-          </button>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((dayNum) => (
-            <button
-              key={dayNum}
-              type="button"
-              onClick={() => setSelectedDayFilter(dayNum)}
-              className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                selectedDayFilter === dayNum
-                  ? 'bg-brand-500 text-white shadow-theme-xs'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-              }`}
-            >
-              Day {dayNum}
-            </button>
-          ))}
-        </div>
-
-        {/* Search Input */}
-        <div className="relative flex-1">
+      {/* Module search */}
+      <div className="relative">
           <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
@@ -202,12 +215,22 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
             placeholder="Search modules or topics..."
             className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-xs sm:text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
           />
-        </div>
       </div>
 
-      {/* Modules Grid - 1 col on mobile, 2 on tablet, 3 on desktop */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredModules.map((module) => {
+      {/* One section per Academic Setup day; each day remains visible before content is uploaded. */}
+      {availableDays.length ? <div className="space-y-5">
+        {availableDays.map((day) => {
+          const dayModules = filteredModules.filter((module) => Number(module.dayNumber || 1) === day.dayNumber);
+          return <section key={day.dayNumber} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 pb-3 dark:border-gray-800">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-brand-500">Day {day.dayNumber}</p>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">{day.sessionName}</h2>
+              </div>
+              {currentUserRole === 'Super Admin' && <button type="button" onClick={() => handleUploadDay(day)} className="inline-flex items-center gap-1.5 rounded-lg border border-brand-200 px-3 py-2 text-xs font-semibold text-brand-600 hover:bg-brand-50 dark:border-brand-500/30 dark:text-brand-300 dark:hover:bg-brand-500/10"><Upload className="h-3.5 w-3.5" />Upload files</button>}
+            </div>
+            {dayModules.length ? <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {dayModules.map((module) => {
           const primaryPpt = module.resources?.find(r => r.isPrimaryPPT || isPptFile(r.fileName || r.originalFileName, r.fileType));
           const otherResources = module.resources?.filter(r => r.id !== primaryPpt?.id) || [];
 
@@ -409,12 +432,11 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
           );
         })}
 
-        {filteredModules.length === 0 && (
-          <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-xl dark:border-gray-800">
-            No modules found matching your search or day filter.
-          </div>
-        )}
-      </div>
+            </div> : <div className="rounded-xl border border-dashed border-gray-200 px-4 py-7 text-center text-xs text-gray-500 dark:border-gray-700">{currentUserRole === 'Super Admin' ? 'No materials uploaded for this day yet. Use Upload files to add PPT or PDF materials.' : 'No materials uploaded by Super Admin for this day yet.'}</div>}
+          </section>;
+        })}
+        {currentUserRole !== 'Super Admin' && filteredModules.length === 0 && <div className="py-12 text-center text-sm text-gray-500">No uploaded materials found for this academic year or filter.</div>}
+      </div> : <div className="rounded-xl border border-dashed border-gray-200 py-12 text-center text-sm text-gray-500 dark:border-gray-800">No named Academic Setup days are configured for this academic year.</div>}
 
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 p-4">
@@ -429,7 +451,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
             </div>
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
               <div>
-                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Day Number (1-8)</label>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-gray-400 mb-1">Academic Setup Day</label>
                   <Select
                     value={String(formData.dayNumber)}
                     onValueChange={(val) => setFormData({ ...formData, dayNumber: Number(val) })}
@@ -438,9 +460,9 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
                       <SelectValue placeholder="Select Day" />
                     </SelectTrigger>
                     <SelectContent>
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
+                      {availableDays.map(({ dayNumber: d, sessionName }) => (
                         <SelectItem key={d} value={String(d)}>
-                          Day {d}
+                          Day {d} · {sessionName}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -459,7 +481,7 @@ export const ModuleLibraryView: React.FC<ModuleLibraryViewProps> = ({
               </div>
               <div className="pt-4 flex justify-end gap-2 border-t border-gray-100 dark:border-gray-800">
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300">Cancel</button>
-                <button type="submit" className="px-4 py-2 text-xs font-semibold text-white bg-brand-500 rounded-xl hover:bg-brand-600">Save Module</button>
+                <button type="submit" disabled={!availableDays.length} className="px-4 py-2 text-xs font-semibold text-white bg-brand-500 rounded-xl hover:bg-brand-600 disabled:cursor-not-allowed disabled:opacity-50">Save Module</button>
               </div>
             </form>
           </div>

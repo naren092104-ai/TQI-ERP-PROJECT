@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { CheckCircle2 } from './components/ui/icons';
 import {
   TabType,
   Student,
@@ -157,6 +158,9 @@ export default function App() {
   const [lessonPlans, setLessonPlans] = useState<LessonPlan[]>([]);
   const [photoGroups, setPhotoGroups] = useState<SessionPhotoGroup[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [areNotificationsLoaded, setAreNotificationsLoaded] = useState(false);
+  const [toastNotification, setToastNotification] = useState<NotificationItem | null>(null);
+  const seenNotificationIds = useRef<Set<string> | null>(null);
   const [dateChangeRequests, setDateChangeRequests] = useState<DateChangeRequest[]>([]);
   const [sessionReports, setSessionReports] = useState<SessionReport[]>([]);
   const [sessionSubmissions, setSessionSubmissions] = useState<SessionSubmission[]>([]);
@@ -170,6 +174,17 @@ export default function App() {
     }
   });
   const [modules, setModules] = useState<TqiModule[]>([]);
+  const [moduleAcademicDays, setModuleAcademicDays] = useState<Array<{ dayNumber: number; sessionName: string }>>([]);
+
+  const uniqueById = useCallback(<T extends { id?: string | number | null }>(items: T[] = []): T[] => {
+    const next = new Map<string, T>();
+    items.forEach((item) => {
+      if (!item || item.id == null || item.id === '') return;
+      const key = String(item.id);
+      if (!next.has(key)) next.set(key, item);
+    });
+    return Array.from(next.values());
+  }, []);
 
   // Sync with API Backend
   const fetchBackendData = useCallback(async (signal?: AbortSignal) => {
@@ -224,11 +239,11 @@ export default function App() {
         academicYearsRes,
         modulesRes,
       ] = await Promise.all([
-        get(`/api/panchayats?clusterId=${currentUserClusterId}`),
-        get(`/api/students?clusterId=${currentUserClusterId}`),
-        get(`/api/volunteers?clusterId=${currentUserClusterId}`),
-        get(`/api/sessions?clusterId=${currentUserClusterId}`),
-        get(`/api/attendance?clusterId=${currentUserClusterId}`),
+        get(`/api/panchayats?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/students?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/volunteers?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/sessions?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/attendance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/finance?clusterId=${currentUserClusterId}`),
         get(`/api/lesson-plans?clusterId=${currentUserClusterId}`),
         get(`/api/approvals?clusterId=${currentUserClusterId}`),
@@ -240,23 +255,26 @@ export default function App() {
         get('/api/session-reports'),
         get('/api/session-submissions'),
         get('/api/academic-years'),
-        get('/api/modules'),
+        get(`/api/modules?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
       ]);
 
       if (signal.aborted) return;
 
-      if (Array.isArray(panchayatsRes?.panchayats))         setPanchayats(panchayatsRes.panchayats);
-      if (Array.isArray(studentsRes?.students))             setStudents(studentsRes.students);
-      if (Array.isArray(volunteersRes?.volunteers))         setVolunteers(volunteersRes.volunteers);
+      if (Array.isArray(panchayatsRes?.panchayats))         setPanchayats(uniqueById(panchayatsRes.panchayats));
+      if (Array.isArray(studentsRes?.students))             setStudents(uniqueById(studentsRes.students));
+      if (Array.isArray(volunteersRes?.volunteers))         setVolunteers(uniqueById(volunteersRes.volunteers));
       if (Array.isArray(sessionsRes?.sessions))             setSessions(sessionsRes.sessions);
       if (Array.isArray(attendanceRes?.attendanceSessions)) setAttendanceSessions(attendanceRes.attendanceSessions);
       if (Array.isArray(financeRes?.financeEntries))        setFinanceEntries(financeRes.financeEntries);
       if (Array.isArray(lessonPlansRes?.lessonPlans))       setLessonPlans(lessonPlansRes.lessonPlans);
       if (Array.isArray(approvalsRes?.approvals))           setApprovals(approvalsRes.approvals);
       if (Array.isArray(auditRes?.auditLogs))               setAuditLogs(auditRes.auditLogs);
-      if (Array.isArray(notificationsRes?.notifications))   setNotifications(notificationsRes.notifications);
-      if (Array.isArray(clustersRes?.clusters))             setClusters(clustersRes.clusters);
-      if (Array.isArray(usersRes?.users))                   setUsers(usersRes.users);
+      if (Array.isArray(notificationsRes?.notifications)) {
+        setNotifications(notificationsRes.notifications);
+        setAreNotificationsLoaded(true);
+      }
+      if (Array.isArray(clustersRes?.clusters))             setClusters(uniqueById(clustersRes.clusters));
+      if (Array.isArray(usersRes?.users))                   setUsers(uniqueById(usersRes.users));
       if (Array.isArray(dateChangeRequestsRes?.dateChangeRequests)) setDateChangeRequests(dateChangeRequestsRes.dateChangeRequests);
       else if (Array.isArray(dateChangeRequestsRes?.data)) setDateChangeRequests(dateChangeRequestsRes.data);
 
@@ -291,6 +309,18 @@ export default function App() {
         })));
       }
       setAreAcademicYearsLoading(false);
+      if (Array.isArray(modulesRes?.academicDays)) setModuleAcademicDays(modulesRes.academicDays);
+      else if (Array.isArray(sessionsRes?.sessions)) {
+        const dayMap = new Map<number, { dayNumber: number; sessionName: string }>();
+        sessionsRes.sessions.forEach((session: any) => {
+          const dayNumber = Number(session.dayNumber);
+          const sessionName = String(session.name || session.title || '').trim();
+          if (Number.isInteger(dayNumber) && dayNumber > 0 && sessionName && !dayMap.has(dayNumber)) {
+            dayMap.set(dayNumber, { dayNumber, sessionName });
+          }
+        });
+        setModuleAcademicDays([...dayMap.values()].sort((first, second) => first.dayNumber - second.dayNumber));
+      }
       if (Array.isArray(modulesRes?.modules))                       setModules(modulesRes.modules);
       else if (Array.isArray(modulesRes?.data))                     setModules(modulesRes.data);
     } catch {
@@ -305,6 +335,50 @@ export default function App() {
     fetchBackendData(controller.signal);
     return () => controller.abort();
   }, [fetchBackendData, currentUser?.token]);
+
+  useEffect(() => {
+    if (!currentUser?.token) return;
+    let active = true;
+    const refreshNotifications = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/notifications'), {
+          cache: 'no-store',
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+        });
+        if (!response.ok || !active) return;
+        const data = await response.json().catch(() => null);
+        if (Array.isArray(data?.notifications) && active) {
+          setNotifications(data.notifications);
+          setAreNotificationsLoaded(true);
+        }
+      } catch {
+        // Keep the last known notifications while offline.
+      }
+    };
+    const timer = window.setInterval(() => void refreshNotifications(), 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [currentUser?.token]);
+
+  useEffect(() => {
+    if (!areNotificationsLoaded) return;
+    const currentIds = new Set(notifications.map((notification) => notification.id));
+    if (seenNotificationIds.current === null) {
+      seenNotificationIds.current = currentIds;
+      return;
+    }
+    const newlyReceived = notifications.find((notification) => !notification.isRead && !seenNotificationIds.current?.has(notification.id));
+    seenNotificationIds.current = currentIds;
+    if (newlyReceived) setToastNotification(newlyReceived);
+  }, [notifications, areNotificationsLoaded]);
+
+  useEffect(() => {
+    if (!toastNotification) return;
+    const timer = window.setTimeout(() => setToastNotification(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [toastNotification]);
 
   useEffect(() => {
     if (!academicYears.length) return;
@@ -396,19 +470,24 @@ export default function App() {
 
   // Super Admin Approval Actions
   const handleApproveSubmission = async (id: string, module: string, recordId: string) => {
-    try {
-      await fetch(apiUrl(`/api/approvals/${id}/approve`), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '',
-          'x-user-role': currentUserRole,
-          'x-user-cluster-id': currentUserClusterId,
-        },
-      });
-    } catch {
-      // ignore
-    }
+    const response = module === 'Attendance'
+      ? await fetch(apiUrl(`/api/attendance/${encodeURIComponent(recordId)}/review`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+          body: JSON.stringify({ action: 'approve', academicYearId: selectedAcademicYearId }),
+        })
+      : await fetch(apiUrl(`/api/approvals/${encodeURIComponent(id)}/approve`), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '',
+            'x-user-role': currentUserRole,
+            'x-user-cluster-id': currentUserClusterId,
+          },
+          body: JSON.stringify({ academicYearId: selectedAcademicYearId }),
+        });
+    const responseData = await response.json().catch(() => null);
+    if (!response.ok || !responseData?.success) throw new Error(responseData?.error || `Unable to approve ${module.toLowerCase()}.`);
 
     setApprovals((prev) =>
       prev.map((a) => (a.id === id ? { ...a, status: 'Approved' } : a))
@@ -430,36 +509,17 @@ export default function App() {
         prev.map((fe) => (fe.id === recordId || fe.draftId === recordId ? { ...fe, status: 'Approved' } : fe))
       );
     }
-
-    const newLog: AuditLogEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      userId: 'u-super-admin-1',
-      userName: 'Dr. K. Senthil Nathan',
-      userRole: 'Super Admin',
-      action: `Approved ${module}`,
-      module,
-      recordId,
-      clusterId: currentUserClusterId,
-      clusterName: 'Dharmapuri Cluster',
-      details: `Approved ${module} submission (${recordId})`,
-    };
-    setAuditLogs((prev) => [newLog, ...prev]);
-
-    const newNotif: NotificationItem = {
-      id: `notif-${Date.now()}`,
-      title: `${module} Approved`,
-      message: `Super Admin has approved ${module} (${recordId}).`,
-      timeAgo: 'Just now',
-      isRead: false,
-      type: 'approval',
-    };
-    setNotifications((prev) => [newNotif, ...prev]);
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleRequestCorrection = async (id: string, module: string, recordId: string, reason: string) => {
-    try {
-      await fetch(apiUrl(`/api/approvals/${id}/request-correction`), {
+    const response = module === 'Attendance'
+      ? await fetch(apiUrl(`/api/attendance/${encodeURIComponent(recordId)}/review`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+          body: JSON.stringify({ action: 'request-resubmission', remarks: reason, academicYearId: selectedAcademicYearId }),
+        })
+      : await fetch(apiUrl(`/api/approvals/${encodeURIComponent(id)}/request-correction`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -469,9 +529,8 @@ export default function App() {
         },
         body: JSON.stringify({ reason }),
       });
-    } catch {
-      // ignore
-    }
+    const responseData = await response.json().catch(() => null);
+    if (!response.ok || !responseData?.success) throw new Error(responseData?.error || 'Unable to request correction.');
 
     setApprovals((prev) =>
       prev.map((a) =>
@@ -483,7 +542,7 @@ export default function App() {
       setAttendanceSessions((prev) =>
         prev.map((s) =>
           s.id === recordId
-            ? { ...s, status: 'Correction Requested', correctionReason: reason }
+            ? { ...s, status: 'Resubmission', correctionReason: reason, reviewRemarks: reason }
             : s
         )
       );
@@ -505,30 +564,7 @@ export default function App() {
       );
     }
 
-    const newLog: AuditLogEntry = {
-      id: `log-${Date.now()}`,
-      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19),
-      userId: 'u-super-admin-1',
-      userName: 'Dr. K. Senthil Nathan',
-      userRole: 'Super Admin',
-      action: `Correction Requested on ${module}`,
-      module,
-      recordId,
-      clusterId: currentUserClusterId,
-      clusterName: 'Dharmapuri Cluster',
-      details: `Correction requested for ${recordId}: "${reason}"`,
-    };
-    setAuditLogs((prev) => [newLog, ...prev]);
-
-    const newNotif: NotificationItem = {
-      id: `notif-${Date.now()}`,
-      title: `Correction Requested: ${module}`,
-      message: `Super Admin requested changes on ${recordId}: "${reason}"`,
-      timeAgo: 'Just now',
-      isRead: false,
-      type: 'correction',
-    };
-    setNotifications((prev) => [newNotif, ...prev]);
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleRejectSubmission = async (id: string, module: string, recordId: string, reason: string) => {
@@ -562,8 +598,8 @@ export default function App() {
       });
       const data = await response.json();
       if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to create cluster.');
-      if (data.cluster) setClusters((prev) => [...prev, data.cluster]);
-      if (data.user) setUsers((prev) => [...prev, data.user]);
+      if (data.cluster) setClusters((prev) => uniqueById([...prev, data.cluster]));
+      if (data.user) setUsers((prev) => uniqueById([...prev, data.user]));
       else {
         const usersResponse = await fetch(apiUrl('/api/users'), { headers: { Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' } });
         const usersData = await usersResponse.json();
@@ -609,17 +645,6 @@ export default function App() {
     if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save cluster.');
     await fetchBackendData(new AbortController().signal);
     return true;
-  };
-
-  const handleArchiveCluster = async (clusterId: string, archived: boolean) => {
-    const response = await fetch(apiUrl(`/api/clusters/${encodeURIComponent(clusterId)}/archive`), {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
-      body: JSON.stringify({ archived, academicYearId: selectedAcademicYearId }),
-    });
-    const data = await response.json().catch(() => null);
-    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update cluster archive status.');
-    await fetchBackendData(new AbortController().signal);
   };
 
   // Delete Cluster Mutation
@@ -706,6 +731,9 @@ export default function App() {
 
   // Navigation handlers
   const handleNavigate = (tab: TabType, targetId?: string, secondaryParam?: string) => {
+    if (tab === 'panchayats' && targetId && currentUserRole === 'Super Admin') {
+      setCurrentUserClusterId(targetId);
+    }
     if (tab === 'panchayat-detail' && targetId) {
       setSelectedPanchayatId(targetId);
     }
@@ -778,7 +806,7 @@ export default function App() {
       status: 'On Track',
       villages: [],
     };
-    setPanchayats((previous) => [created, ...previous.filter((item) => item.id !== created.id)]);
+    setPanchayats((previous) => uniqueById([created, ...previous.filter((item) => item.id !== created.id)]));
     return created;
   };
 
@@ -804,6 +832,7 @@ export default function App() {
       }),
     });
     const data = await response.json().catch(() => null);
+    if (response.status === 401) throw new Error('Your session has expired. Sign out and sign in again, then retry adding the village.');
     if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save village.');
 
     const savedVillage = {
@@ -878,6 +907,9 @@ export default function App() {
 
   // Student mutations
   const handleAddStudent = async (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => {
+    const parentPanchayat = panchayats.find((panchayat) => panchayat.id === newStudent.panchayatId);
+    const clusterId = parentPanchayat?.clusterId;
+    if (!clusterId) throw new Error('Could not resolve the student’s cluster from the selected panchayat.');
     const newId = `stu-${Date.now()}`;
     const code = `STU-24-${String(students.length + 1).padStart(3, '0')}`;
     const avatarLetter = newStudent.name.charAt(0).toUpperCase();
@@ -886,12 +918,13 @@ export default function App() {
 
     const created: Student = {
       ...newStudent,
+      clusterId,
       id: newId,
       code,
       avatarLetter,
       avatarBg,
     };
-    setStudents((prev) => [created, ...prev]);
+    setStudents((prev) => uniqueById([created, ...prev]));
 
     setPanchayats((prev) =>
       prev.map((p) => {
@@ -923,7 +956,7 @@ export default function App() {
             ...newStudent,
             id: newId,
             code,
-            clusterId: currentUserClusterId,
+            clusterId,
           }),
         });
       } catch (err) {
@@ -933,7 +966,8 @@ export default function App() {
   };
 
   const handleBulkAddStudents = async (
-    newStudentsList: Array<Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>>
+    newStudentsList: Array<Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>>,
+    requestedClusterId?: string,
   ) => {
     if (!newStudentsList || newStudentsList.length === 0) return;
 
@@ -946,17 +980,26 @@ export default function App() {
 
     const currentTotal = students.length;
     const createdBatch: Student[] = newStudentsList.map((st, idx) => {
+      const parentPanchayat = panchayats.find((panchayat) => panchayat.id === st.panchayatId);
+      if (!parentPanchayat?.clusterId) throw new Error(`Could not resolve the cluster for ${st.name || 'a student'}.`);
+      if (requestedClusterId && requestedClusterId !== 'all' && requestedClusterId !== parentPanchayat.clusterId) {
+        throw new Error('The import cluster does not match the selected panchayat.');
+      }
       const codeNumber = currentTotal + idx + 1;
       return {
         ...st,
+        clusterId: parentPanchayat.clusterId,
         id: `stu-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
         code: `STU-24-${String(codeNumber).padStart(3, '0')}`,
         avatarLetter: (st.name || 'S').charAt(0).toUpperCase(),
         avatarBg: colors[(currentTotal + idx) % colors.length],
       };
     });
+    if (createdBatch.some((student) => student.clusterId !== createdBatch[0]?.clusterId)) {
+      throw new Error('Import students from one cluster at a time.');
+    }
 
-    setStudents((prev) => [...createdBatch, ...prev]);
+    setStudents((prev) => uniqueById([...createdBatch, ...prev]));
 
     setPanchayats((prev) =>
       prev.map((p) => {
@@ -990,7 +1033,7 @@ export default function App() {
             Authorization: `Bearer ${currentUser.token}`,
           },
           body: JSON.stringify({
-            clusterId: currentUserClusterId,
+            clusterId: createdBatch[0]?.clusterId || requestedClusterId,
             students: createdBatch,
           }),
         });
@@ -1061,6 +1104,7 @@ export default function App() {
 
     const created: Volunteer = {
       ...newVol,
+      clusterId: newVol.clusterId || currentUserClusterId,
       id: newId,
       avatarText,
       totalSessions: 0,
@@ -1069,9 +1113,9 @@ export default function App() {
     };
     setVolunteers((prev) => [created, ...prev]);
 
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl('/api/volunteers'), {
+    try {
+      if (currentUser?.token) {
+        const response = await fetch(apiUrl('/api/volunteers'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1080,31 +1124,56 @@ export default function App() {
           body: JSON.stringify({
             ...newVol,
             id: newId,
-            clusterId: currentUserClusterId,
+            clusterId: newVol.clusterId || currentUserClusterId,
+            academicYearId: selectedAcademicYearId,
           }),
         });
-      } catch (err) {
-        console.error('Failed to persist volunteer to backend:', err);
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save volunteer.');
       }
+    } catch (error) {
+      setVolunteers((previous) => previous.filter((volunteer) => volunteer.id !== newId));
+      throw error;
     }
   };
 
   const handleUpdateVolunteer = async (id: string, updated: Partial<Volunteer>) => {
-    setVolunteers((prev) => prev.map((v) => (v.id === id ? { ...v, ...updated } : v)));
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl(`/api/volunteers/${id}`), {
+    const previousVolunteer = volunteers.find((volunteer) => volunteer.id === id);
+    setVolunteers((previous) => previous.map((volunteer) => volunteer.id === id ? { ...volunteer, ...updated } : volunteer));
+    try {
+      if (currentUser?.token) {
+        const response = await fetch(apiUrl(`/api/volunteers/${encodeURIComponent(id)}`), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${currentUser.token}`,
           },
-          body: JSON.stringify(updated),
+          body: JSON.stringify({ ...updated, academicYearId: selectedAcademicYearId }),
         });
-      } catch (err) {
-        console.error('Failed to update volunteer in backend:', err);
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save volunteer changes.');
       }
+    } catch (error) {
+      if (previousVolunteer) {
+        setVolunteers((previous) => previous.map((volunteer) => volunteer.id === id ? previousVolunteer : volunteer));
+      }
+      throw error;
     }
+  };
+
+  const handleBulkImportVolunteers = async (
+    bulkVolunteers: Array<Pick<Volunteer, 'name' | 'year' | 'department' | 'email' | 'phone'>>,
+    clusterId: string,
+  ) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to import volunteers.');
+    const response = await fetch(apiUrl('/api/volunteers/bulk'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ volunteers: bulkVolunteers, clusterId, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to upload volunteers.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleDeleteVolunteer = async (id: string) => {
@@ -1122,12 +1191,17 @@ export default function App() {
   };
 
   // Session mutations
-  const handleAddSession = (newSession: Omit<Session, 'id'>) => {
-    const created: Session = {
-      ...newSession,
-      id: `sess-${Date.now()}`,
-    };
-    setSessions((prev) => [created, ...prev]);
+  const handleAddSession = async (newSession: Omit<Session, 'id'>) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to schedule sessions.');
+    const response = await fetch(apiUrl('/api/sessions'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ ...newSession, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data.session) throw new Error(data?.error || 'Unable to schedule session.');
+    const created: Session = { ...newSession, ...data.session, id: String(data.session.id) };
+    setSessions((previous) => [created, ...previous.filter((session) => !(session.clusterId === created.clusterId && session.dayNumber === created.dayNumber))]);
   };
 
   const handleUpdateSession = async (id: string, updated: Partial<Session>) => {
@@ -1140,13 +1214,36 @@ export default function App() {
           ...existing,
           ...updated,
           academicYear: existing.academicYear,
+          academicYearId: selectedAcademicYearId,
           dayNumber: existing.dayNumber,
-          sessionName: existing.name,
+          sessionName: updated.name || updated.title || existing.name,
         }),
       });
-      if (!response.ok) return;
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save session changes.');
     }
     setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...updated } : s)));
+  };
+
+  const handleApproveSessionDate = async (session: Session, date: string) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to approve session dates.');
+    const response = await fetch(apiUrl(`/api/sessions/${encodeURIComponent(session.id)}/approve-date`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({
+        date,
+        dayNumber: session.dayNumber,
+        clusterId: session.clusterId,
+        academicYearId: selectedAcademicYearId,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data.session) throw new Error(data?.error || 'Unable to approve session date.');
+    const approvedSession = { ...session, ...data.session } as Session;
+    setSessions((previous) => previous.map((item) => item.id === session.id || (item.clusterId === session.clusterId && item.dayNumber === session.dayNumber)
+      ? { ...item, ...approvedSession }
+      : item));
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleDeleteSession = (id: string) => {
@@ -1159,9 +1256,10 @@ export default function App() {
       const response = await fetch(apiUrl('/api/attendance'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
-        body: JSON.stringify(session),
+        body: JSON.stringify({ ...session, academicYearId: selectedAcademicYearId }),
       });
-      if (!response.ok) return;
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save attendance.');
     }
 
     setAttendanceSessions((prev) => {
@@ -1179,21 +1277,66 @@ export default function App() {
         id: `appr-${Date.now()}`,
         module: 'Attendance',
         recordId: session.id,
-        recordTitle: `${session.panchayatName || 'Center'} - ${session.sessionName || 'Attendance'}`,
-        clusterId: currentUserClusterId,
-        clusterName: 'Dharmapuri Cluster',
-        submittedBy: 'Dharmapuri Cluster Admin',
+        recordTitle: `${session.panchayatName || 'Center'} · ${session.villageName || 'All Villages'} · Day ${session.dayNumber || 1}`,
+        clusterId: session.clusterId || currentUserClusterId,
+        clusterName: clusters.find((cluster) => cluster.id === session.clusterId)?.name || 'Cluster',
+        submittedBy: currentUser?.name || 'Cluster Admin',
         submittedAt: 'Just now',
         status: 'Pending',
         details: {
+          attendanceType: session.attendanceType || 'students',
           presentCount: session.presentCount || session.records?.filter((s) => s.status === 'Present').length || 0,
           totalCount: session.totalCount || session.records?.length || 0,
+          panchayatName: session.panchayatName || '',
           villageName: session.villageName || '',
           dayNumber: session.dayNumber || 1,
+          records: session.records || [],
+          volunteerAttendance: session.volunteerAttendance || [],
         },
       };
       setApprovals((prev) => [newAppr, ...prev]);
     }
+  };
+
+  const handleReviewAttendance = async (
+    attendanceId: string,
+    action: 'approve' | 'request-resubmission' | 'approve-edit' | 'deny-edit',
+    remarks: string,
+  ) => {
+    const response = await fetch(apiUrl(`/api/attendance/${encodeURIComponent(attendanceId)}/review`), {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '',
+      },
+      body: JSON.stringify({ action, remarks, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Unable to update the attendance review.');
+    }
+    setAttendanceSessions((previous) => previous.map((attendance) => attendance.id === attendanceId
+      ? { ...attendance, status: data.status, reviewRemarks: data.reviewRemarks || undefined }
+      : attendance));
+    if (action === 'approve' || action === 'request-resubmission') {
+      setApprovals((previous) => previous.map((approval) => approval.module === 'Attendance' && approval.recordId === attendanceId
+        ? { ...approval, status: action === 'approve' ? 'Approved' : 'Correction Requested' }
+        : approval));
+      await fetchBackendData(new AbortController().signal);
+    }
+  };
+
+  const handleRequestAttendanceEdit = async (attendanceId: string, reason: string) => {
+    const response = await fetch(apiUrl(`/api/attendance/${encodeURIComponent(attendanceId)}/request-edit`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: currentUser?.token ? `Bearer ${currentUser.token}` : '' },
+      body: JSON.stringify({ reason, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to request attendance edit approval.');
+    setAttendanceSessions((previous) => previous.map((attendance) => attendance.id === attendanceId
+      ? { ...attendance, status: 'Edit Requested', editReason: reason }
+      : attendance));
   };
 
   // Finance mutations
@@ -1338,74 +1481,100 @@ export default function App() {
   };
 
   // Notification actions
-  const handleMarkAsRead = (id: string) => {
+  const handleMarkAsRead = async (id: string) => {
     setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)));
+    if (!currentUser?.token) return;
+    try {
+      const response = await fetch(apiUrl(`/api/notifications/${encodeURIComponent(id)}/read`), {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${currentUser.token}` },
+      });
+      if (!response.ok) console.error('Unable to mark notification as read.');
+    } catch (error) {
+      console.error('Unable to mark notification as read:', error);
+    }
   };
 
-  const handleMarkAllAsRead = () => {
+  const handleMarkAllAsRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    if (!currentUser?.token) return;
+    try {
+      const response = await fetch(apiUrl('/api/notifications/read-all'), {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${currentUser.token}` },
+      });
+      if (!response.ok) console.error('Unable to mark notifications as read.');
+    } catch (error) {
+      console.error('Unable to mark notifications as read:', error);
+    }
   };
 
   // Date Change Request handlers
   const handleSubmitDateChangeRequest = async (sessionId: string, originalDate: string, requestedDate: string, reason: string) => {
-    try {
-      const response = await fetch(apiUrl('/api/date-change-requests'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: JSON.stringify({ sessionId, originalDate, requestedDate, reason }),
-      });
-      const data = await response.json();
-      if (data?.success && data.dateChangeRequest) {
-        setDateChangeRequests(prev => [data.dateChangeRequest, ...prev]);
-      }
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl('/api/date-change-requests'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ sessionId, originalDate, requestedDate, reason, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !(data.request || data.dateChangeRequest)) {
+      throw new Error(data?.error || 'Unable to submit date change request.');
+    }
+    const request = data.request || data.dateChangeRequest;
+    setDateChangeRequests((previous) => [request, ...previous.filter((item) => item.id !== request.id)]);
   };
 
   const handleReviewDateChangeRequest = async (requestId: string, action: 'approve' | 'reject', remarks: string) => {
-    try {
-      const response = await fetch(apiUrl(`/api/date-change-requests/${requestId}/${action}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: JSON.stringify({ remarks }),
-      });
-      const data = await response.json();
-      if (data?.success) {
-        setDateChangeRequests(prev => prev.map(r => r.id === requestId ? { ...r, status: action === 'approve' ? 'APPROVED' : 'REJECTED', reviewRemarks: remarks } : r));
-        if (action === 'approve') {
-          // Refresh sessions to get updated dates
-          fetchBackendData(new AbortController().signal);
-        }
-      }
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl(`/api/date-change-requests/${encodeURIComponent(requestId)}/${action}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ remarks, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to review date change request.');
+    const request = dateChangeRequests.find((item) => item.id === requestId);
+    setDateChangeRequests((previous) => previous.map((item) => item.id === requestId
+      ? { ...item, status: action === 'approve' ? 'APPROVED' : 'REJECTED', reviewRemarks: remarks }
+      : item));
+    if (action === 'approve' && request) {
+      setSessions((previous) => previous.map((session) => session.id === request.sessionId
+        ? { ...session, date: request.requestedDate, dateFixed: true, status: 'Scheduled' }
+        : session));
+    }
+    await fetchBackendData(new AbortController().signal);
   };
 
   // Session Report handlers
   const handleSaveSessionReport = async (report: Partial<SessionReport>) => {
-    try {
-      const response = await fetch(apiUrl('/api/session-reports'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: JSON.stringify(report),
-      });
-      const data = await response.json();
-      if (data?.success && data.sessionReport) {
-        setSessionReports(prev => {
-          const idx = prev.findIndex(r => r.id === data.sessionReport.id);
-          if (idx >= 0) { const copy = [...prev]; copy[idx] = data.sessionReport; return copy; }
-          return [data.sessionReport, ...prev];
-        });
+    const response = await fetch(apiUrl('/api/session-reports'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ ...report, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data.sessionReport) {
+      throw new Error(data?.error || 'Unable to save session report.');
+    }
+    setSessionReports((previous) => {
+      const index = previous.findIndex((item) => item.id === data.sessionReport.id);
+      if (index >= 0) {
+        const copy = [...previous];
+        copy[index] = data.sessionReport;
+        return copy;
       }
-    } catch { /* ignore */ }
+      return [data.sessionReport, ...previous];
+    });
+    return data.sessionReport as SessionReport;
   };
 
   const handleDeleteSessionReport = async (reportId: string) => {
-    try {
-      await fetch(apiUrl(`/api/session-reports/${reportId}`), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
-      });
-      setSessionReports(prev => prev.filter(r => r.id !== reportId));
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl(`/api/session-reports/${reportId}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete session report.');
+    setSessionReports((previous) => previous.filter((item) => item.id !== reportId));
   };
 
   // Session Submission handlers
@@ -1454,81 +1623,113 @@ export default function App() {
 
   // Module handlers
   const handleCreateModule = async (moduleData: { moduleNumber: string; moduleName: string; topic: string; description: string; academicYear: string; dayNumber: number }) => {
-    try {
-      const response = await fetch(apiUrl('/api/modules'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: JSON.stringify(moduleData),
-      });
-      const data = await response.json();
-      const newMod: TqiModule = {
-        id: data?.module?.id || `mod-${Date.now()}`,
-        moduleNumber: moduleData.moduleNumber,
-        moduleName: moduleData.moduleName,
-        topic: moduleData.topic,
-        description: moduleData.description,
-        academicYear: moduleData.academicYear,
-        dayNumber: moduleData.dayNumber,
-        status: 'Active',
-        version: 1,
-        resources: [],
-        createdBy: currentUser?.name || 'Super Admin',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-      setModules(prev => [newMod, ...prev]);
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl('/api/modules'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ ...moduleData, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data?.module?.id) throw new Error(data?.error || 'Unable to create module.');
+    const moduleId = String(data.module.id);
+    const newMod: TqiModule = {
+      id: moduleId,
+      moduleNumber: moduleData.moduleNumber,
+      moduleName: moduleData.moduleName,
+      topic: moduleData.topic,
+      description: moduleData.description,
+      academicYear: moduleData.academicYear,
+      dayNumber: moduleData.dayNumber,
+      status: 'Active',
+      version: 1,
+      resources: [],
+      createdBy: currentUser?.name || 'Super Admin',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setModules((previous) => [newMod, ...previous]);
+    return moduleId;
   };
 
   const handleUpdateModule = async (id: string, moduleData: any) => {
-    try {
-      const response = await fetch(apiUrl(`/api/modules/${id}`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: JSON.stringify(moduleData),
-      });
-      const data = await response.json();
-      if (data?.success && data.data) {
-        setModules(prev => prev.map(m => m.id === id ? { ...m, ...data.data } : m));
-      }
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl(`/api/modules/${id}`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ ...moduleData, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update module.');
+    setModules((previous) => previous.map((module) => module.id === id ? { ...module, ...moduleData } : module));
   };
 
   const handleDeleteModule = async (id: string) => {
-    try {
-      await fetch(apiUrl(`/api/modules/${id}`), {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
-      });
-      setModules(prev => prev.filter(m => m.id !== id));
-    } catch { /* ignore */ }
+    const response = await fetch(apiUrl(`/api/modules/${id}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to archive module.');
+    setModules((previous) => previous.filter((module) => module.id !== id));
   };
 
   const handleUploadModuleResource = async (moduleId: string, file: File) => {
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources`), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
-        body: formData,
-      });
-      const data = await response.json();
-      if (data?.success && data.resource) {
-        setModules(prev => prev.map(m => {
-          if (m.id === moduleId) {
-            const resources = m.resources ? [...m.resources, data.resource] : [data.resource];
-            return { ...m, resources };
-          }
-          return m;
-        }));
-      }
-    } catch { /* ignore */ }
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources`), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: formData,
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success || !data.resource) throw new Error(data?.error || 'Unable to upload module resource.');
+    setModules((previous) => previous.map((module) => module.id === moduleId
+      ? { ...module, resources: [...(module.resources || []), data.resource] }
+      : module));
   };
 
-  const handleDownloadModuleResource = (moduleId: string, resourceId: string) => {
-    const downloadUrl = apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download`);
-    window.open(downloadUrl, '_blank');
+  const handleViewModuleResource = async (moduleId: string, resourceId: string) => {
+    const previewWindow = window.open('about:blank', '_blank');
+    try {
+      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download?inline=1`), {
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      if (!response.ok) throw new Error('Unable to open this resource.');
+      const url = URL.createObjectURL(await response.blob());
+      if (previewWindow) previewWindow.location.href = url;
+      else window.open(url, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (error) {
+      previewWindow?.close();
+      console.error('Failed to preview module resource:', error);
+    }
+  };
+
+  const handleDownloadModuleResource = async (moduleId: string, resourceId: string) => {
+    try {
+      const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources/${resourceId}/download`), {
+        headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+      });
+      if (!response.ok) throw new Error('Unable to download this resource.');
+      const url = URL.createObjectURL(await response.blob());
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = modules.find((module) => module.id === moduleId)?.resources.find((resource) => resource.id === resourceId)?.fileName || 'module-resource';
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Failed to download module resource:', error);
+    }
+  };
+
+  const handleDeleteModuleResource = async (moduleId: string, resourceId: string) => {
+    const response = await fetch(apiUrl(`/api/modules/${moduleId}/resources/${resourceId}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser?.token || ''}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete this resource.');
+    setModules((previous) => previous.map((module) => module.id === moduleId
+      ? { ...module, resources: module.resources.filter((resource) => resource.id !== resourceId) }
+      : module));
   };
 
   // If user is logged out, render the Login Page
@@ -1603,15 +1804,24 @@ export default function App() {
     <AdminLayout
       sidebarCollapsed={sidebarCollapsed}
       overlays={
-        <CommandPalette
-          open={paletteOpen}
-          onClose={() => setPaletteOpen(false)}
-          onNavigate={(tab) => {
-            handleNavigate(tab);
-            setPaletteOpen(false);
-          }}
-          currentUserRole={currentUserRole}
-        />
+        <>
+          <CommandPalette
+            open={paletteOpen}
+            onClose={() => setPaletteOpen(false)}
+            onNavigate={(tab) => {
+              handleNavigate(tab);
+              setPaletteOpen(false);
+            }}
+            currentUserRole={currentUserRole}
+          />
+          {toastNotification && <div role="status" aria-live="polite" className="fixed right-5 top-20 z-[100000] w-[min(24rem,calc(100vw-2.5rem))] rounded-2xl border border-border bg-card p-4 shadow-2xl animate-in fade-in-0 slide-in-from-top-3">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary"><CheckCircle2 className="h-5 w-5" /></span>
+              <div className="min-w-0 flex-1"><div className="text-sm font-bold text-foreground">{toastNotification.title}</div><p className="mt-1 text-xs text-muted-foreground">{toastNotification.message}</p><button type="button" onClick={() => { handleNavigate('notifications'); setToastNotification(null); }} className="mt-2 text-xs font-semibold text-primary hover:underline">Open notifications</button></div>
+              <button type="button" aria-label="Dismiss notification" onClick={() => setToastNotification(null)} className="rounded-md p-1 text-muted-foreground hover:bg-muted"><span aria-hidden="true">×</span></button>
+            </div>
+          </div>}
+        </>
       }
       sidebar={
         <Navigation
@@ -1745,7 +1955,6 @@ export default function App() {
                   onUpdateCluster={handleUpdateCluster}
                   onResendCredentials={handleResendClusterCredentials}
                   onDeleteCluster={handleDeleteCluster}
-                  onArchiveCluster={handleArchiveCluster}
                 />
               )}
 
@@ -1819,6 +2028,10 @@ export default function App() {
                   authToken={currentUser?.token ?? ''}
                   students={displayStudents}
                   panchayats={displayPanchayats}
+                  clusters={clusters}
+                  academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
+                  userRole={currentUserRole}
+                  onBulkImportStudents={handleBulkAddStudents}
                   initialFilters={initialStudentFilters}
                   onAddStudent={handleAddStudent}
                   onUpdateStudent={handleUpdateStudent}
@@ -1830,9 +2043,15 @@ export default function App() {
                 <VolunteersView
                   volunteers={displayVolunteers}
                   panchayats={displayPanchayats}
+                  clusters={clusters}
+                  userRole={currentUserRole}
+                  currentClusterId={currentUserClusterId}
+                  authToken={currentUser?.token ?? ''}
+                  academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   onAddVolunteer={handleAddVolunteer}
                   onUpdateVolunteer={handleUpdateVolunteer}
                   onDeleteVolunteer={handleDeleteVolunteer}
+                  onBulkImportVolunteers={handleBulkImportVolunteers}
                 />
               )}
 
@@ -1847,6 +2066,7 @@ export default function App() {
                   onNavigate={handleNavigate}
                   onAddSession={handleAddSession}
                   onUpdateSession={handleUpdateSession}
+                  onApproveSessionDate={handleApproveSessionDate}
                   onDeleteSession={handleDeleteSession}
                   onRequestDateChange={handleSubmitDateChangeRequest}
                   onReviewDateChange={handleReviewDateChangeRequest}
@@ -1862,11 +2082,14 @@ export default function App() {
                   panchayats={displayPanchayats}
                   clusters={clusters}
                   sessions={displaySessions}
+                  academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   userRole={currentUserRole}
                   draftId={activeDraftId}
                   initialSubject={currentTab === 'volunteer-attendance' ? 'volunteers' : 'students'}
                   onNavigate={handleNavigate}
                   onSaveAttendance={handleSaveAttendance}
+                  onReviewAttendance={handleReviewAttendance}
+                  onRequestAttendanceEdit={handleRequestAttendanceEdit}
                 />
               )}
 
@@ -1995,7 +2218,11 @@ export default function App() {
                   clusters={clusters}
                   currentUserRole={currentUserRole}
                   currentUserClusterId={currentUserClusterId}
+                  authToken={currentUser?.token || ''}
+                  academicYears={academicYears}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   onSaveReport={handleSaveSessionReport}
+                  onReportPhotosUpdate={(reportId, photos) => setSessionReports((previous) => previous.map((report) => report.id === reportId ? { ...report, photos } : report))}
                   onDeleteReport={handleDeleteSessionReport}
                 />
               )}
@@ -2017,6 +2244,7 @@ export default function App() {
               {currentTab === 'module-library' && (
                 <ModuleLibraryView
                   modules={modules}
+                  academicDays={moduleAcademicDays}
                   currentUserRole={currentUserRole}
                   currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   onCreateModule={handleCreateModule}
@@ -2024,6 +2252,8 @@ export default function App() {
                   onDeleteModule={handleDeleteModule}
                   onUploadResource={handleUploadModuleResource}
                   onDownloadResource={handleDownloadModuleResource}
+                  onViewResource={handleViewModuleResource}
+                  onDeleteResource={handleDeleteModuleResource}
                   onRefreshModules={fetchBackendData}
                 />
               )}

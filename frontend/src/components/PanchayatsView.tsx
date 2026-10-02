@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
+  ArrowLeft,
   Plus, 
   Search, 
   MapPin, 
@@ -9,6 +10,8 @@ import {
   X,
   ChevronRight,
   Trash2,
+  GridFour,
+  Rows,
 } from './ui/icons';
 import { Cluster, TabType, Panchayat, UserRole } from '../types';
 import Badge from './ui/badge';
@@ -45,6 +48,7 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
 }) => {
   const [search, setSearch]             = useState('');
   const [statusFilter, setStatusFilter] = useState('All');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [showAdd, setShowAdd]           = useState(false);
   const [selectedCluster, setSelectedCluster] = useState(currentClusterId && currentClusterId !== 'all' ? currentClusterId : 'all');
   const [form, setForm] = useState({ name: '' });
@@ -278,9 +282,10 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
             <button
               type="button"
               onClick={() => setSelectedCluster('all')}
-              className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              All Clusters
+              <ArrowLeft className="h-4 w-4" />
+              Back to Clusters
             </button>
           )}
           <button
@@ -296,7 +301,7 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
         </div>
       </div>
       {/* 2. Compact Metric Cards (counts & status only) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Panchayats</span>
@@ -315,18 +320,10 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
 
         <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Students</span>
-            <GraduationCap className="h-4 w-4 text-theme-purple-500" />
-          </div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalStudents}</div>
-        </div>
-
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.03]">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Volunteers</span>
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Coverage</span>
             <Users className="h-4 w-4 text-warning-500" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalVols}</div>
+          <div className="mt-2 text-2xl font-bold text-gray-900 dark:text-white">{totalStudents + totalVols}</div>
         </div>
       </div>
 
@@ -400,6 +397,26 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
           <span className="text-xs text-gray-400 dark:text-gray-500 ml-auto sm:ml-2">
             {filtered.length} of {panchayats.length}
           </span>
+          <div className="ml-1 flex shrink-0 items-center gap-1 rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-700 dark:bg-gray-800" role="group" aria-label="Panchayat display mode">
+            <button
+              type="button"
+              aria-label="List view"
+              aria-pressed={viewMode === 'list'}
+              onClick={() => setViewMode('list')}
+              className={`rounded-md p-1.5 transition ${viewMode === 'list' ? 'bg-brand-500 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            >
+              <Rows className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              aria-label="Card view"
+              aria-pressed={viewMode === 'grid'}
+              onClick={() => setViewMode('grid')}
+              className={`rounded-md p-1.5 transition ${viewMode === 'grid' ? 'bg-brand-500 text-white' : 'text-gray-500 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`}
+            >
+              <GridFour className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -413,6 +430,45 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
           </p>
         </div>
       ) : (
+        viewMode === 'grid' ? (
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((p) => (
+              <article key={p.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-theme-xs transition hover:-translate-y-0.5 hover:border-brand-300 hover:shadow-md dark:border-gray-800 dark:bg-gray-900">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => onSelectPanchayat(p.id)}
+                      className="text-left text-sm font-semibold text-gray-900 hover:text-brand-500 dark:text-white dark:hover:text-brand-400"
+                    >
+                      {p.name}
+                    </button>
+                    <p className="mt-1 truncate text-xs text-gray-400 dark:text-gray-500">
+                      {p.villages.slice(0, 3).map((v) => v.name).join(', ') || 'No villages added'}
+                      {p.villages.length > 3 && ` +${p.villages.length - 3} more`}
+                    </p>
+                  </div>
+                  {getStatusBadge(p.status)}
+                </div>
+                <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 dark:border-gray-800">
+                  <span className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                    {p.villagesCount || p.villages.length} {((p.villagesCount || p.villages.length) === 1) ? 'village' : 'villages'}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onSelectPanchayat(p.id)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-500 hover:bg-brand-100 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20"
+                    >
+                      Open <ChevronRight className="h-3 w-3" />
+                    </button>
+                    {isSuperAdmin && <button type="button" onClick={() => void removePanchayat(p)} title={`Delete ${p.name}`} aria-label={`Delete ${p.name}`} className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" /></button>}
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
         <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
           <Table>
             <TableHeader>
@@ -420,8 +476,6 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
                 <TableCell isHeader className="w-[300px]">Panchayat</TableCell>
                 <TableCell isHeader>Status</TableCell>
                 <TableCell isHeader>Villages</TableCell>
-                <TableCell isHeader>Students</TableCell>
-                <TableCell isHeader>Volunteers</TableCell>
                 <TableCell isHeader className="text-right">Actions</TableCell>
               </TableRow>
             </TableHeader>
@@ -447,21 +501,8 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
                   <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
                     {p.villagesCount || p.villages.length}
                   </TableCell>
-                  <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
-                    {p.activeStudents}
-                  </TableCell>
-                  <TableCell className="text-gray-600 dark:text-gray-300 font-medium">
-                    {p.volunteersCount}
-                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onNavigate('students', p.id)}
-                        className="rounded-lg px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-white transition"
-                      >
-                        Students
-                      </button>
                       <button
                         type="button"
                         onClick={() => onSelectPanchayat(p.id)}
@@ -478,6 +519,7 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
             </TableBody>
           </Table>
         </div>
+        )
       )}
       </>}
 

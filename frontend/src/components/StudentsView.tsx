@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { Student, Panchayat, Village, UserRole } from '../types';
+import { pdf } from '@react-pdf/renderer';
+import { Student, Panchayat, Village, UserRole, Cluster } from '../types';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { EmptyState } from './ui/EmptyState';
-import { apiUrl } from '../utils/api';
+import { VillageAttendancePdf, VillageAttendanceReportData } from '../utils/pdf/VillageAttendancePdf';
 import {
   Select,
   SelectContent,
@@ -32,7 +33,6 @@ import {
   AlertCircle,
   Phone,
   Calendar,
-  School,
   ArrowLeft,
   ChevronRight,
   Building2,
@@ -44,6 +44,8 @@ interface StudentsViewProps {
   authToken?: string;
   students: Student[];
   panchayats: Panchayat[];
+  clusters: Cluster[];
+  academicYear?: string;
   initialFilters?: { panchayatId?: string; villageId?: string };
   userRole?: UserRole;
   onAddStudent: (newStudent: Omit<Student, 'id' | 'code' | 'avatarLetter' | 'avatarBg'>) => Promise<void> | void;
@@ -67,23 +69,21 @@ interface StudentsViewProps {
 
 interface ParsedStudentRow {
   name: string;
-  gender: 'male' | 'female';
   standard: string;
-  dob: string;
-  parentName: string;
-  phone: string;
-  status: 'active' | 'inactive';
-  schoolName?: string;
+  villageName: string;
+  villageId: string;
   isValid: boolean;
   validationError?: string;
 }
 
-const STANDARDS = ['5', '6', '7', '8', '9', '10', '11', '12'];
+const standardKey = (value?: string) => String(value || '').match(/\d+/)?.[0] || String(value || '').trim();
+const STANDARDS = ['9', '10', '11', '12'];
 
 export const StudentsView: React.FC<StudentsViewProps> = ({
-  authToken,
   students,
   panchayats,
+  clusters,
+  academicYear = '',
   initialFilters,
   userRole = 'Super Admin',
   onAddStudent,
@@ -101,19 +101,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
 
-  // Navigation Drill-Down State: 'panchayats' -> 'villages' -> 'schools' -> 'students'
-  const [drillLevel, setDrillLevel] = useState<'panchayats' | 'villages' | 'schools' | 'students'>('panchayats');
+  // Navigation Drill-Down State: 'clusters' -> 'panchayats' -> 'villages' -> 'students'
+  const [drillLevel, setDrillLevel] = useState<'clusters' | 'panchayats' | 'villages' | 'students'>(isSuperAdmin ? 'clusters' : 'panchayats');
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string | null>(null);
   const [selectedVillageId, setSelectedVillageId] = useState<string | null>(null);
-  const [selectedSchoolName, setSelectedSchoolName] = useState<string | null>(null);
 
   // Search & Filter
   const [search, setSearch] = useState('');
   const [selectedStd, setSelectedStd] = useState<string>('all');
   const [selectedGender, setSelectedGender] = useState<'all' | 'female' | 'male'>('all');
+  const [studentPage, setStudentPage] = useState(1);
+  const [attendancePdfStandard, setAttendancePdfStandard] = useState<string | null>(null);
 
   // Inline forms (No popups)
-  const [activeFormMode, setActiveFormMode] = useState<'none' | 'add-student' | 'edit-student' | 'import' | 'add-panchayat' | 'add-village' | 'add-school'>('none');
+  const [activeFormMode, setActiveFormMode] = useState<'none' | 'add-student' | 'edit-student' | 'import' | 'add-panchayat' | 'add-village'>('none');
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [viewingStudent, setViewingStudent] = useState<Student | null>(null);
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
@@ -125,17 +127,16 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     name: '',
     gender: 'male' as 'male' | 'female' | 'other',
     dob: '2010-06-15',
-    standard: '5',
+    standard: '9',
     parentName: '',
     phone: '',
     status: 'active' as 'active' | 'inactive',
-    schoolName: '',
   });
 
   const [newPanchayatName, setNewPanchayatName] = useState('');
   const [newVillageName, setNewVillageName] = useState('');
-  const [newSchoolName, setNewSchoolName] = useState('');
-  const [registeredSchools, setRegisteredSchools] = useState<Array<{ id: string; name: string; village_id?: string; villageId?: string }>>([]);
+  const [isSavingVillage, setIsSavingVillage] = useState(false);
+  const [villageSaveError, setVillageSaveError] = useState('');
   const [renameEntityName, setRenameEntityName] = useState('');
 
   // Bulk Import state
@@ -151,6 +152,28 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
   };
 
+  const clusterGroups = useMemo(() => {
+    return clusters
+      .filter((cluster) => cluster.status !== 'Inactive')
+      .map((cluster) => {
+        const clusterPanchayats = panchayats.filter((panchayat) => panchayat.clusterId === cluster.id);
+        const clusterPanchayatIds = new Set(clusterPanchayats.map((panchayat) => panchayat.id));
+        return {
+          id: cluster.id,
+          name: cluster.name,
+          panchayats: clusterPanchayats,
+          villageCount: clusterPanchayats.reduce((sum, panchayat) => sum + (panchayat.villages?.length ?? 0), 0),
+          studentCount: students.filter((student) => student.clusterId === cluster.id || clusterPanchayatIds.has(student.panchayatId)).length,
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [clusters, panchayats, students]);
+
+  const currentCluster = useMemo(() => {
+    if (!selectedClusterId) return null;
+    return clusterGroups.find((cluster) => cluster.id === selectedClusterId) || null;
+  }, [clusterGroups, selectedClusterId]);
+
   // Resolve current hierarchy objects cleanly by unique ID to avoid similar name collisions
   const currentPanchayat = useMemo(() => {
     if (!selectedPanchayatId) return null;
@@ -162,29 +185,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     return currentPanchayat.villages.find((v) => v.id === selectedVillageId || v.name === selectedVillageId) || null;
   }, [currentPanchayat, selectedVillageId]);
 
-  useEffect(() => {
-    if (!currentPanchayat || !currentVillage) {
-      setRegisteredSchools([]);
-      return;
-    }
-    const controller = new AbortController();
-    fetch(apiUrl(`/api/schools?panchayatId=${encodeURIComponent(currentPanchayat.id)}&villageId=${encodeURIComponent(currentVillage.id)}`), {
-      signal: controller.signal,
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-    })
-      .then((response) => response.ok ? response.json() : null)
-      .then((data) => setRegisteredSchools(Array.isArray(data?.schools) ? data.schools : []))
-      .catch((error) => { if (error?.name !== 'AbortError') setRegisteredSchools([]); });
-    return () => controller.abort();
-  }, [currentPanchayat, currentVillage, authToken]);
-
   // Handle initialFilters from outside (e.g. navigation query)
   useEffect(() => {
     if (initialFilters?.panchayatId) {
       setSelectedPanchayatId(initialFilters.panchayatId);
       if (initialFilters.villageId) {
         setSelectedVillageId(initialFilters.villageId);
-        setDrillLevel('schools');
+          setDrillLevel('students');
       } else {
         setDrillLevel('villages');
       }
@@ -200,31 +207,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     }
   }, [openOnMount, selectedPanchayatId, selectedVillageId]);
 
-  // Derive all distinct schools within current village based on existing students
-  const villageSchools = useMemo(() => {
-    if (!currentPanchayat || !currentVillage) return [];
-    const villageStudents = students.filter(
-      (s) =>
-        s.panchayatId === currentPanchayat.id &&
-        (s.villageId === currentVillage.id || s.villageName === currentVillage.name)
-    );
-
-    const schoolMap = new Map<string, { name: string; studentCount: number }>();
-    registeredSchools.forEach((school) => schoolMap.set(school.name, { name: school.name, studentCount: 0 }));
-    villageStudents.forEach((st) => {
-      const sch = st.schoolName?.trim();
-      if (!sch) return;
-      const existing = schoolMap.get(sch);
-      if (existing) {
-        existing.studentCount += 1;
-      } else {
-        schoolMap.set(sch, { name: sch, studentCount: 1 });
-      }
-    });
-
-    return Array.from(schoolMap.values());
-  }, [students, currentPanchayat, currentVillage, registeredSchools]);
-
   // Filtered Students when in 'students' view
   const currentStudents = useMemo(() => {
     if (!currentPanchayat || !currentVillage) return [];
@@ -233,12 +215,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       const matchVillage = s.villageId === currentVillage.id || s.villageName === currentVillage.name;
       if (!matchPanchayat || !matchVillage) return false;
 
-      if (selectedSchoolName && selectedSchoolName !== 'all') {
-        const studentSchool = s.schoolName?.trim() || '';
-        if (studentSchool.toLowerCase() !== selectedSchoolName.toLowerCase()) return false;
-      }
-
-      if (selectedStd !== 'all' && s.standard !== selectedStd) return false;
+      if (selectedStd !== 'all' && standardKey(s.standard) !== selectedStd) return false;
       if (selectedGender !== 'all' && s.gender !== selectedGender) return false;
 
       if (search.trim()) {
@@ -251,13 +228,97 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
       return true;
     });
-  }, [students, currentPanchayat, currentVillage, selectedSchoolName, selectedStd, selectedGender, search]);
+  }, [students, currentPanchayat, currentVillage, selectedStd, selectedGender, search]);
+
+  const studentPageSize = 25;
+  const studentPageCount = Math.max(1, Math.ceil(currentStudents.length / studentPageSize));
+  const paginatedStudents = currentStudents.slice((studentPage - 1) * studentPageSize, studentPage * studentPageSize);
+
+  useEffect(() => {
+    setStudentPage(1);
+  }, [selectedStd, selectedGender, search, selectedVillageId]);
+
+  useEffect(() => {
+    if (studentPage > studentPageCount) setStudentPage(studentPageCount);
+  }, [studentPage, studentPageCount]);
+
+  const downloadAttendancePdf = async (grade: string) => {
+    if (!currentPanchayat || !currentVillage) return;
+    setAttendancePdfStandard(grade);
+    try {
+      const gradeStudents = students
+        .filter((student) =>
+          student.panchayatId === currentPanchayat.id &&
+          (student.villageId === currentVillage.id || student.villageName === currentVillage.name) &&
+          standardKey(student.standard) === grade
+        )
+        .sort((left, right) => left.name.localeCompare(right.name));
+      const clusterId = currentPanchayat.clusterId || selectedClusterId || '';
+      const selectedCluster = clusters.find((cluster) => cluster.id === clusterId);
+      const reportData: VillageAttendanceReportData = {
+        cluster: { id: clusterId, name: selectedCluster?.name || currentPanchayat.cluster || '' },
+        panchayat: { id: currentPanchayat.id, name: currentPanchayat.name },
+        village: { id: currentVillage.id, name: currentVillage.name },
+        academicYear,
+        standard: `Standard ${grade}`,
+        sessionDates: {},
+        students: gradeStudents.map((student, index) => ({
+          no: index + 1,
+          name: student.name,
+          standard: `Standard ${grade}`,
+          panchayatName: currentPanchayat.name,
+          contactNumber: '',
+          attendance: {},
+        })),
+        totalStudentsCount: gradeStudents.length,
+      };
+      const pdfDocument = React.createElement(VillageAttendancePdf, { data: reportData }) as unknown as Parameters<typeof pdf>[0];
+      const blob = await pdf(pdfDocument).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `TQI_Attendance_${currentVillage.name}_Std_${grade}_${academicYear || 'Academic_Year'}`.replace(/[^a-zA-Z0-9_-]+/g, '_') + '.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showToast(`Standard ${grade} attendance PDF downloaded.`);
+    } catch (error) {
+      console.error('Unable to generate attendance PDF:', error);
+      showToast('Unable to generate attendance PDF. Please try again.');
+    } finally {
+      setAttendancePdfStandard(null);
+    }
+  };
+
+  const standardOptions = useMemo(() => {
+    if (!currentPanchayat || !currentVillage) return [];
+    const grouped = new Map<string, number>();
+    students.forEach((student) => {
+      if (student.panchayatId !== currentPanchayat.id || !(student.villageId === currentVillage.id || student.villageName === currentVillage.name)) return;
+      if (selectedGender !== 'all' && student.gender !== selectedGender) return;
+      const query = search.trim().toLowerCase();
+      if (query && !student.name.toLowerCase().includes(query) && !(student.code || '').toLowerCase().includes(query) && !(student.phone || '').includes(query)) return;
+      const key = standardKey(student.standard);
+      if (key) grouped.set(key, (grouped.get(key) || 0) + 1);
+    });
+    return [...grouped.entries()].sort((left, right) => Number(left[0]) - Number(right[0]) || left[0].localeCompare(right[0]));
+  }, [students, currentPanchayat, currentVillage, selectedGender, search]);
 
   // Handlers for Navigation
+  const handleSelectCluster = (clusterId: string) => {
+    setSelectedClusterId(clusterId);
+    setSelectedPanchayatId(null);
+    setSelectedVillageId(null);
+    setDrillLevel('panchayats');
+    setActiveFormMode('none');
+    setSearch('');
+  };
+
   const handleSelectPanchayat = (p: Panchayat) => {
+    setSelectedClusterId(p.clusterId || clusterGroups.find((cluster) => cluster.name === p.cluster)?.id || selectedClusterId || null);
     setSelectedPanchayatId(p.id);
     setSelectedVillageId(null);
-    setSelectedSchoolName(null);
     setDrillLevel('villages');
     setActiveFormMode('none');
     setSearch('');
@@ -265,14 +326,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   const handleSelectVillage = (v: Village) => {
     setSelectedVillageId(v.id || v.name);
-    setSelectedSchoolName(null);
-    setDrillLevel('schools');
-    setActiveFormMode('none');
-    setSearch('');
-  };
-
-  const handleSelectSchool = (schoolName: string) => {
-    setSelectedSchoolName(schoolName);
+    setSelectedStd('all');
     setDrillLevel('students');
     setActiveFormMode('none');
     setSearch('');
@@ -281,23 +335,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const handleBackToPanchayats = () => {
     setSelectedPanchayatId(null);
     setSelectedVillageId(null);
-    setSelectedSchoolName(null);
-    setDrillLevel('panchayats');
+    setDrillLevel(isSuperAdmin ? (selectedClusterId ? 'panchayats' : 'clusters') : 'panchayats');
     setActiveFormMode('none');
     setSearch('');
   };
 
   const handleBackToVillages = () => {
     setSelectedVillageId(null);
-    setSelectedSchoolName(null);
+    setSelectedStd('all');
     setDrillLevel('villages');
     setActiveFormMode('none');
     setSearch('');
   };
 
-  const handleBackToSchools = () => {
-    setSelectedSchoolName(null);
-    setDrillLevel('schools');
+  const handleBackToClusters = () => {
+    setSelectedClusterId(null);
+    setSelectedPanchayatId(null);
+    setSelectedVillageId(null);
+    setDrillLevel('clusters');
     setActiveFormMode('none');
     setSearch('');
   };
@@ -309,11 +364,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       name: '',
       gender: 'male',
       dob: '2010-06-15',
-      standard: '5',
+      standard: '9',
       parentName: '',
       phone: '',
       status: 'active',
-      schoolName: selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : (villageSchools[0]?.name || ''),
     });
     setActiveFormMode('add-student');
   };
@@ -324,11 +378,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       name: st.name,
       gender: st.gender,
       dob: st.dob || '2010-06-15',
-      standard: STANDARDS.includes(st.standard) ? st.standard : '5',
+      standard: STANDARDS.includes(st.standard) ? st.standard : '9',
       parentName: st.parentName || '',
       phone: st.phone || '',
       status: st.status || 'active',
-      schoolName: st.schoolName || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : ''),
     });
     setActiveFormMode('edit-student');
   };
@@ -339,12 +392,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       alert('Please enter student name.');
       return;
     }
+    if (!STANDARDS.includes(studentForm.standard)) {
+      alert('Student standard must be between 9 and 12.');
+      return;
+    }
     if (!currentPanchayat || !currentVillage) {
       alert('Active Panchayat and Village context is required.');
       return;
     }
-
-    const targetSchool = studentForm.schoolName.trim() || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '');
 
     if (editingStudent) {
       const payload: Partial<Student> = {
@@ -355,7 +410,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         parentName: studentForm.parentName.trim(),
         phone: studentForm.phone.trim(),
         status: studentForm.status,
-        schoolName: targetSchool,
+        schoolName: '',
       };
 
       if (onEditStudent) {
@@ -377,7 +432,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         panchayatName: currentPanchayat.name,
         villageId: currentVillage.id,
         villageName: currentVillage.name,
-        schoolName: targetSchool,
+        schoolName: '',
       });
       showToast(`Registered student ${studentForm.name}`);
     }
@@ -403,40 +458,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setActiveFormMode('none');
   };
 
-  const handleCreateVillage = (e: React.FormEvent) => {
+  const handleCreateVillage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newVillageName.trim() || !currentPanchayat) return;
-    if (onAddVillage) {
-      onAddVillage(currentPanchayat.id, newVillageName.trim());
-      showToast(`Added Village "${newVillageName.trim()}" to ${currentPanchayat.name}`);
-    }
-    setNewVillageName('');
-    setActiveFormMode('none');
-  };
-
-  const handleCreateSchool = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSchoolName.trim()) return;
-    if (!currentPanchayat || !currentVillage) return;
+    if (!newVillageName.trim() || !currentPanchayat || isSavingVillage) return;
+    setVillageSaveError('');
+    setIsSavingVillage(true);
     try {
-      const response = await fetch(apiUrl('/api/schools'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
-        body: JSON.stringify({ name: newSchoolName.trim(), villageId: currentVillage.id }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to create school.');
-      const createdSchool = data.school;
-      setRegisteredSchools((current) => current.some((school) => school.id === createdSchool.id) ? current : [...current, createdSchool]);
-      setSelectedSchoolName(createdSchool.name);
+      if (!onAddVillage) throw new Error('Village creation is not available right now.');
+      await onAddVillage(currentPanchayat.id, newVillageName.trim());
+      showToast(`Added Village "${newVillageName.trim()}" to ${currentPanchayat.name}`);
+      setNewVillageName('');
+      setActiveFormMode('none');
     } catch (error: any) {
-      alert(error?.message || 'Unable to create school.');
-      return;
+      setVillageSaveError(error?.message || 'Unable to save village. Please try again.');
+    } finally {
+      setIsSavingVillage(false);
     }
-    setDrillLevel('students');
-    setNewSchoolName('');
-    setActiveFormMode('none');
-    showToast(`Created School "${newSchoolName.trim()}". You can now add students.`);
   };
 
   // Rename Entity
@@ -475,43 +512,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   // Excel Sample and File Upload
   const handleDownloadSample = () => {
     const sample = [
-      {
-        'Student Name': 'Kavya S.',
-        'Standard': '5',
-        'Gender': 'Female',
-        'Date of Birth': '2014-04-15',
-        'Contact Phone (Optional)': '9443211223',
-        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
-      },
-      {
-        'Student Name': 'Gokul Nathan',
-        'Standard': '8',
-        'Gender': 'Male',
-        'Date of Birth': '2011-08-20',
-        'Contact Phone (Optional)': '',
-        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
-      },
-      {
-        'Student Name': 'Deepika R.',
-        'Standard': '10',
-        'Gender': 'Female',
-        'Date of Birth': '2009-01-10',
-        'Contact Phone (Optional)': '9789044556',
-        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
-      },
-      {
-        'Student Name': 'Vignesh M.',
-        'Standard': '12',
-        'Gender': 'Male',
-        'Date of Birth': '2007-11-28',
-        'Contact Phone (Optional)': '',
-        'School (Optional)': selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '',
-      },
+      { Name: 'Kavya S.', Standard: '9', Village: currentVillage?.name || '' },
+      { Name: 'Gokul Nathan', Standard: '10', Village: currentVillage?.name || '' },
+      { Name: 'Deepika R.', Standard: '11', Village: currentVillage?.name || '' },
+      { Name: 'Vignesh M.', Standard: '12', Village: currentVillage?.name || '' },
     ];
     const ws = XLSX.utils.json_to_sheet(sample);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Students_Template');
-    XLSX.writeFile(wb, 'TQI_Students_Card_Import_Template.xlsx');
+    XLSX.writeFile(wb, 'TQI_Students_Import_Template.xlsx');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -543,33 +552,30 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             );
             return matchedKey ? String(row[matchedKey]).trim() : '';
           };
-          const name = findVal(['name', 'studentname', 'fullname']) || '';
-          const rawGender = findVal(['gender', 'sex']).toLowerCase();
-          const gender: 'male' | 'female' =
-            rawGender.startsWith('m') || rawGender.includes('boy') ? 'male' : 'female';
-
+          const name = findVal(['name', 'studentname', 'fullname']);
           const rawStd = findVal(['standard', 'std', 'class', 'grade']);
-          let standard = '5';
           const match = rawStd.match(/\d+/);
-          if (match && STANDARDS.includes(match[0])) {
-            standard = match[0];
-          }
+          const standard = match && STANDARDS.includes(match[0]) ? match[0] : '';
+          const rawVillage = findVal(['village']);
+          const normalizedVillage = rawVillage.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
+          const village = currentPanchayat?.villages.find((item) =>
+            item.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en') === normalizedVillage
+          );
+          const errors = [
+            !name && 'Missing student name',
+            !standard && 'Standard must be between 9 and 12',
+            !rawVillage && 'Missing village',
+            rawVillage && !village && 'Village is not in the selected Panchayat',
+          ].filter(Boolean);
 
-          const dob = findVal(['dob', 'birth', 'dateofbirth']) || '2010-06-15';
-          const parentName = findVal(['parent', 'father', 'mother', 'guardian']) || '';
-          const phone = findVal(['phone', 'mobile', 'contact']) || ''; // Optional
-          const rawSchool = findVal(['school', 'center', 'institution']);
-          const schoolName = rawSchool || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : '');
-          const status = 'active' as const;
-
-          let isValid = true;
-          let validationError = '';
-          if (!name) {
-            isValid = false;
-            validationError = 'Missing student name';
-          }
-
-          return { name, gender, standard, dob, parentName, phone, status, schoolName, isValid, validationError };
+          return {
+            name,
+            standard,
+            villageName: village?.name || rawVillage,
+            villageId: village?.id || village?.name || '',
+            isValid: errors.length === 0,
+            validationError: errors.join('; '),
+          };
         });
 
         setImportRows(parsed);
@@ -596,17 +602,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
     const formatted = validRows.map((r) => ({
       name: r.name,
-      gender: r.gender,
-      dob: r.dob,
+      gender: 'male' as const,
+      dob: '2014-01-01',
       standard: r.standard,
       panchayatId: currentPanchayat.id,
       panchayatName: currentPanchayat.name,
-      villageId: currentVillage.id,
-      villageName: currentVillage.name,
-      schoolName: r.schoolName || (selectedSchoolName && selectedSchoolName !== 'all' ? selectedSchoolName : ''),
-      parentName: r.parentName,
-      phone: r.phone,
-      status: r.status,
+      villageId: r.villageId,
+      villageName: r.villageName,
+      schoolName: '',
+      parentName: '',
+      phone: '',
+      status: 'active' as const,
     }));
 
     if (onBulkImportStudents) {
@@ -615,7 +621,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       formatted.forEach((st) => onAddStudent(st));
     }
 
-    showToast(`Successfully imported ${formatted.length} students to ${currentVillage.name}`);
+    showToast(`Successfully imported ${formatted.length} students to ${currentPanchayat.name}`);
     setActiveFormMode('none');
     setImportRows([]);
     setImportFileName('');
@@ -646,12 +652,33 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-            <button
-              onClick={handleBackToPanchayats}
-              className={`hover:text-primary transition-colors ${drillLevel === 'panchayats' ? 'text-primary font-bold' : ''}`}
-            >
-              Panchayats
-            </button>
+            {isSuperAdmin && (
+              <button
+                onClick={handleBackToClusters}
+                className={`hover:text-primary transition-colors ${drillLevel === 'clusters' ? 'text-primary font-bold' : ''}`}
+              >
+                Clusters
+              </button>
+            )}
+            {!isSuperAdmin && (
+              <button
+                onClick={handleBackToPanchayats}
+                className={`hover:text-primary transition-colors ${drillLevel === 'panchayats' ? 'text-primary font-bold' : ''}`}
+              >
+                Panchayats
+              </button>
+            )}
+            {isSuperAdmin && selectedClusterId && currentCluster && (
+              <>
+                <ChevronRight className="h-3 w-3" />
+                <button
+                  onClick={handleBackToPanchayats}
+                  className={`hover:text-primary transition-colors ${drillLevel === 'panchayats' ? 'text-primary font-bold' : ''}`}
+                >
+                  {currentCluster.name}
+                </button>
+              </>
+            )}
             {currentPanchayat && (
               <>
                 <ChevronRight className="h-3 w-3" />
@@ -667,37 +694,31 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <>
                 <ChevronRight className="h-3 w-3" />
                 <button
-                  onClick={handleBackToSchools}
-                  className={`hover:text-primary transition-colors ${drillLevel === 'schools' ? 'text-primary font-bold' : ''}`}
+                  onClick={handleBackToVillages}
+                  className={`hover:text-primary transition-colors ${drillLevel === 'students' ? 'text-primary font-bold' : ''}`}
                 >
                   {currentVillage.name}
                 </button>
               </>
             )}
-            {selectedSchoolName && (
-              <>
-                <ChevronRight className="h-3 w-3" />
-                <span className="text-foreground font-bold">{selectedSchoolName}</span>
-              </>
-            )}
           </div>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
-            {drillLevel === 'panchayats' && 'Students Roster: Panchayats'}
+            {drillLevel === 'clusters' && 'Students Roster: Clusters'}
+            {drillLevel === 'panchayats' && (isSuperAdmin ? `${currentCluster?.name || 'Cluster'} — Panchayats` : 'Students Roster: Panchayats')}
             {drillLevel === 'villages' && `${currentPanchayat?.name} — Villages`}
-            {drillLevel === 'schools' && `${currentVillage?.name} — Schools & Learning Centers`}
-            {drillLevel === 'students' && `${selectedSchoolName} — Enrolled Students`}
+            {drillLevel === 'students' && `${currentVillage?.name} — Students`}
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {drillLevel === 'panchayats' && `${panchayats.length} total Panchayats listed in system`}
+            {drillLevel === 'clusters' && `${clusterGroups.length} total clusters listed in system`}
+            {drillLevel === 'panchayats' && (isSuperAdmin ? `${currentCluster?.panchayats.length || 0} panchayats in this cluster` : `${panchayats.length} total Panchayats listed in system`) }
             {drillLevel === 'villages' && `${currentPanchayat?.villages.length || 0} villages under this panchayat`}
-            {drillLevel === 'schools' && `${villageSchools.length} learning locations in this village`}
-            {drillLevel === 'students' && `${currentStudents.length} active students enrolled in this school`}
+            {drillLevel === 'students' && `${currentStudents.length} students enrolled in this village`}
           </p>
         </div>
 
         {/* Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {drillLevel === 'panchayats' && isSuperAdmin && (
+          {(drillLevel === 'panchayats' || drillLevel === 'clusters') && isSuperAdmin && (
             <Button
               onClick={() => setActiveFormMode(activeFormMode === 'add-panchayat' ? 'none' : 'add-panchayat')}
               className="gap-1.5 rounded-xl bg-primary text-primary-foreground shadow-sm hover:opacity-95"
@@ -709,21 +730,19 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
           {drillLevel === 'villages' && (
             <Button
-              onClick={() => setActiveFormMode(activeFormMode === 'add-village' ? 'none' : 'add-village')}
+              onClick={() => {
+                if (activeFormMode === 'add-village') {
+                  setActiveFormMode('none');
+                } else {
+                  setVillageSaveError('');
+                  setNewVillageName('');
+                  setActiveFormMode('add-village');
+                }
+              }}
               className="gap-1.5 rounded-xl bg-primary text-primary-foreground shadow-sm hover:opacity-95"
             >
               <Plus className="h-4 w-4" />
               <span>Add Village</span>
-            </Button>
-          )}
-
-          {drillLevel === 'schools' && (
-            <Button
-              onClick={() => setActiveFormMode(activeFormMode === 'add-school' ? 'none' : 'add-school')}
-              className="gap-1.5 rounded-xl bg-primary text-primary-foreground shadow-sm hover:opacity-95"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Add School / Hub</span>
             </Button>
           )}
 
@@ -750,22 +769,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       </div>
 
       {/* 2. Navigation Back Button (Matches reference image "← Back to Years") */}
-      {drillLevel !== 'panchayats' && (
+      {drillLevel !== 'panchayats' && drillLevel !== 'clusters' && (
         <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="sm"
             onClick={() => {
-              if (drillLevel === 'students') handleBackToSchools();
-              else if (drillLevel === 'schools') handleBackToVillages();
+              if (drillLevel === 'students') handleBackToVillages();
               else if (drillLevel === 'villages') handleBackToPanchayats();
             }}
             className="gap-1.5 rounded-xl text-xs font-semibold shadow-2xs hover:bg-muted"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             <span>
-              {drillLevel === 'students' && 'Back to Schools'}
-              {drillLevel === 'schools' && 'Back to Villages'}
+              {drillLevel === 'students' && 'Back to Villages'}
               {drillLevel === 'villages' && 'Back to Panchayats'}
             </span>
           </Button>
@@ -782,12 +799,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-foreground">
                 <Home className="h-3 w-3 text-muted-foreground" />
                 {currentVillage.name}
-              </span>
-            )}
-            {selectedSchoolName && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-foreground">
-                <School className="h-3 w-3 text-muted-foreground" />
-                {selectedSchoolName}
               </span>
             )}
           </div>
@@ -839,64 +850,30 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <p className="text-xs text-muted-foreground">Add a village hub under this Panchayat.</p>
             </div>
             <button
+              disabled={isSavingVillage}
               onClick={() => setActiveFormMode('none')}
               className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <X className="h-4 w-4" />
             </button>
           </div>
-          <form onSubmit={handleCreateVillage} className="mt-4 flex flex-col sm:flex-row gap-3">
+          <form onSubmit={handleCreateVillage} className="mt-4 flex flex-col sm:flex-row sm:items-start gap-3">
             <div className="flex-1">
+              {villageSaveError && <p role="alert" className="mb-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">{villageSaveError}</p>}
               <Input
                 placeholder="Enter Village Name (e.g. Thimmarayanahalli)"
                 value={newVillageName}
-                onChange={(e) => setNewVillageName(e.target.value)}
+                onChange={(e) => { setNewVillageName(e.target.value); setVillageSaveError(''); }}
                 className="h-10 text-xs rounded-xl"
                 autoFocus
               />
             </div>
             <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => setActiveFormMode('none')} className="rounded-xl">
+              <Button type="button" variant="outline" disabled={isSavingVillage} onClick={() => { setActiveFormMode('none'); setVillageSaveError(''); }} className="rounded-xl">
                 Cancel
               </Button>
-              <Button type="submit" className="rounded-xl">
-                Save Village
-              </Button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {activeFormMode === 'add-school' && currentVillage && (
-        <div className="rounded-2xl border border-primary/30 bg-card p-6 shadow-sm animate-in fade-in-0 duration-200">
-          <div className="flex items-center justify-between border-b border-border pb-3">
-            <div>
-              <h2 className="text-base font-bold text-foreground">Add School / Learning Center in {currentVillage.name}</h2>
-              <p className="text-xs text-muted-foreground">Register an institution or learning point under this village.</p>
-            </div>
-            <button
-              onClick={() => setActiveFormMode('none')}
-              className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-          <form onSubmit={handleCreateSchool} className="mt-4 flex flex-col sm:flex-row gap-3">
-            <div className="flex-1">
-              <Input
-                placeholder="Enter School Name (e.g. Govt Higher Secondary School, Model School)"
-                value={newSchoolName}
-                onChange={(e) => setNewSchoolName(e.target.value)}
-                className="h-10 text-xs rounded-xl"
-                autoFocus
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" onClick={() => setActiveFormMode('none')} className="rounded-xl">
-                Cancel
-              </Button>
-              <Button type="submit" className="rounded-xl">
-                Create & Proceed
+              <Button type="submit" disabled={isSavingVillage || !newVillageName.trim()} className="rounded-xl">
+                {isSavingVillage ? 'Saving…' : 'Save Village'}
               </Button>
             </div>
           </form>
@@ -944,7 +921,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-foreground">
-                  Standard <span className="text-destructive">* (Starts from 5th)</span>
+                  Standard <span className="text-destructive">* (Grades 9–12)</span>
                 </label>
                 <Select
                   value={studentForm.standard}
@@ -997,18 +974,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
               <div>
                 <label className="mb-1 block text-xs font-semibold text-foreground">
-                  School / Learning Center
-                </label>
-                <Input
-                  placeholder="School Name"
-                  value={studentForm.schoolName}
-                  onChange={(e) => setStudentForm({ ...studentForm, schoolName: e.target.value })}
-                  className="h-10 text-xs rounded-xl"
-                />
-              </div>
-
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-foreground">
                   Parent / Guardian Name <span className="text-muted-foreground font-normal">(Optional)</span>
                 </label>
                 <Input
@@ -1049,7 +1014,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <p className="text-xs text-muted-foreground">
                 Importing into <span className="font-semibold text-foreground">{currentPanchayat.name}</span> &gt;{' '}
                 <span className="font-semibold text-foreground">{currentVillage.name}</span>
-                {selectedSchoolName ? ` &gt; ${selectedSchoolName}` : ''}. Mobile number is optional; Name & Standard (5-12) are required.
+                . The sheet needs only Name, Standard (9-12), and Village; village names must belong to this Panchayat.
               </p>
             </div>
             <button
@@ -1078,7 +1043,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 )}
               </p>
               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                Standard starting from 5th. Mobile number is optional.
+                Required columns: Name, Standard (9-12), Village.
               </p>
               <div className="mt-4 flex items-center gap-3">
                 <Button
@@ -1123,10 +1088,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       <tr>
                         <th className="p-2.5">Name</th>
                         <th className="p-2.5">Std</th>
-                        <th className="p-2.5">Gender</th>
-                        <th className="p-2.5">Phone (Optional)</th>
-                        <th className="p-2.5">School</th>
-                        <th className="p-2.5">Status</th>
+                        <th className="p-2.5">Village</th>
+                        <th className="p-2.5">Validation</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -1134,9 +1097,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         <tr key={i} className={r.isValid ? '' : 'bg-destructive/10'}>
                           <td className="p-2.5 font-medium text-foreground">{r.name || '—'}</td>
                           <td className="p-2.5">Std {r.standard}</td>
-                          <td className="p-2.5 capitalize">{r.gender}</td>
-                          <td className="p-2.5 font-mono text-[11px] text-muted-foreground">{r.phone || '—'}</td>
-                          <td className="p-2.5 text-muted-foreground">{r.schoolName || '—'}</td>
+                          <td className="p-2.5 text-muted-foreground">{r.villageName || '—'}</td>
                           <td className="p-2.5">
                             {r.isValid ? (
                               <span className="text-emerald-600 font-medium">Ready</span>
@@ -1155,8 +1116,50 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
+      {isSuperAdmin && drillLevel === 'clusters' && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search clusters..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-10 pl-9 text-xs rounded-xl bg-card"
+              />
+            </div>
+            <div className="text-xs text-muted-foreground font-medium">
+              Click any cluster to view panchayats and villages
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {clusterGroups
+              .filter((cluster) => !search || cluster.name.toLowerCase().includes(search.toLowerCase()))
+              .map((cluster) => (
+                <div
+                  key={cluster.id}
+                  onClick={() => handleSelectCluster(cluster.id)}
+                  className="group relative flex min-h-[140px] flex-col items-center justify-center rounded-2xl border border-border bg-card p-6 text-center shadow-xs transition-all hover:border-primary/60 hover:shadow-md cursor-pointer"
+                >
+                  <h3 className="text-xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
+                    {cluster.name}
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground font-medium">
+                    {cluster.panchayats.length} panchayats • {cluster.villageCount} villages • {cluster.studentCount} students
+                  </p>
+                  <div className="mt-2 text-[11px] font-semibold text-primary/80 group-hover:text-primary flex items-center gap-0.5">
+                    <span>View Panchayats</span>
+                    <ChevronRight className="h-3 w-3" />
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+
       {/* 4. LEVEL 1: PANCHAYATS CARDS (Minimalist, Rounded Cards matching Reference Image) */}
-      {drillLevel === 'panchayats' && (
+      {!isSuperAdmin && drillLevel === 'panchayats' && (
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="relative w-full max-w-xs">
@@ -1219,6 +1222,52 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </div>
                     )}
 
+                    <h3 className="text-xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
+                      {p.name}
+                    </h3>
+                    <p className="mt-1 text-xs text-muted-foreground font-medium">
+                      {vCount} {vCount === 1 ? 'village' : 'villages'} • {sCount} {sCount === 1 ? 'student' : 'students'}
+                    </p>
+                    <div className="mt-2 text-[11px] font-semibold text-primary/80 group-hover:text-primary flex items-center gap-0.5">
+                      <span>View Villages</span>
+                      <ChevronRight className="h-3 w-3" />
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
+      {isSuperAdmin && drillLevel === 'panchayats' && selectedClusterId && currentCluster && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="relative w-full max-w-xs">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder={`Search panchayats in ${currentCluster.name}...`}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="h-10 pl-9 text-xs rounded-xl bg-card"
+              />
+            </div>
+            <div className="text-xs text-muted-foreground font-medium">
+              Click any Panchayat card to view villages
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {currentCluster.panchayats
+              .filter((p) => !search || p.name.toLowerCase().includes(search.toLowerCase()))
+              .map((p) => {
+                const sCount = getPanchayatStudentCount(p);
+                const vCount = p.villagesCount || p.villages.length;
+                return (
+                  <div
+                    key={p.id}
+                    onClick={() => handleSelectPanchayat(p)}
+                    className="group relative flex min-h-[140px] flex-col items-center justify-center rounded-2xl border border-border bg-card p-6 text-center shadow-xs transition-all hover:border-primary/60 hover:shadow-md cursor-pointer"
+                  >
                     <h3 className="text-xl font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
                       {p.name}
                     </h3>
@@ -1306,7 +1355,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       {sCount} {sCount === 1 ? 'student enrolled' : 'students enrolled'}
                     </p>
                     <div className="mt-2 text-[11px] font-semibold text-primary/80 group-hover:text-primary flex items-center gap-0.5">
-                      <span>View Schools</span>
+                      <span>View Students</span>
                       <ChevronRight className="h-3 w-3" />
                     </div>
                   </div>
@@ -1316,81 +1365,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
-      {/* 6. LEVEL 3: SCHOOLS / LEARNING CENTERS CARDS (Under Selected Village) */}
-      {drillLevel === 'schools' && currentPanchayat && currentVillage && (
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="relative w-full max-w-xs">
-              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder={`Search schools in ${currentVillage.name}...`}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-10 pl-9 text-xs rounded-xl bg-card"
-              />
-            </div>
-            <div className="text-xs text-muted-foreground font-medium">
-              Click a School to manage student roster & import
-            </div>
-          </div>
-
-          {villageSchools.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center">
-              <School className="mx-auto h-8 w-8 text-muted-foreground" />
-              <h2 className="mt-3 text-base font-semibold text-foreground">No schools registered in this village</h2>
-              <p className="mt-1 text-sm text-muted-foreground">No school will be shown until one is actually registered.</p>
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                <Button type="button" variant="outline" onClick={() => handleSelectSchool('all')}>
-                  View all students
-                </Button>
-                <Button type="button" onClick={() => setActiveFormMode('add-school')}>
-                  <Plus className="mr-1 h-4 w-4" /> Add School / Hub
-                </Button>
-              </div>
-            </div>
-          ) : (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {/* All Schools in Village Summary */}
-            <div
-              onClick={() => handleSelectSchool('all')}
-              className="group flex min-h-[140px] flex-col items-center justify-center rounded-2xl border border-border bg-card p-6 text-center shadow-xs transition-all hover:border-primary/60 hover:shadow-md cursor-pointer"
-            >
-              <h3 className="text-xl font-bold tracking-tight text-primary">All Schools</h3>
-              <p className="mt-1 text-xs text-muted-foreground font-medium">
-                {getVillageStudentCount(currentPanchayat.id, currentVillage)} total students in {currentVillage.name}
-              </p>
-              <div className="mt-2 text-[11px] font-semibold text-primary/80 group-hover:text-primary flex items-center gap-0.5">
-                <span>View All Students</span>
-                <ChevronRight className="h-3 w-3" />
-              </div>
-            </div>
-
-            {villageSchools
-              .filter((sch) => !search || sch.name.toLowerCase().includes(search.toLowerCase()))
-              .map((sch) => (
-                <div
-                  key={sch.name}
-                  onClick={() => handleSelectSchool(sch.name)}
-                  className="group flex min-h-[140px] flex-col items-center justify-center rounded-2xl border border-border bg-card p-6 text-center shadow-xs transition-all hover:border-primary/60 hover:shadow-md cursor-pointer"
-                >
-                  <h3 className="text-lg font-bold tracking-tight text-foreground group-hover:text-primary transition-colors">
-                    {sch.name}
-                  </h3>
-                  <p className="mt-1 text-xs text-muted-foreground font-medium">
-                    {sch.studentCount} {sch.studentCount === 1 ? 'student enrolled' : 'students enrolled'}
-                  </p>
-                  <div className="mt-2 text-[11px] font-semibold text-primary/80 group-hover:text-primary flex items-center gap-0.5">
-                    <span>Manage Roster</span>
-                    <ChevronRight className="h-3 w-3" />
-                  </div>
-                </div>
-              ))}
-          </div>
-          )}
-        </div>
-      )}
-
-      {/* 7. LEVEL 4: STUDENTS CARDS (Card-Based Format replacing flat table) */}
+      {/* LEVEL 3: STUDENTS CARDS (directly under the selected village) */}
       {drillLevel === 'students' && currentPanchayat && currentVillage && (
         <div className="space-y-4">
           {/* Minimalist Filter Bar */}
@@ -1405,21 +1380,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               />
             </div>
 
-            <div className="w-36">
-              <Select value={selectedStd} onValueChange={setSelectedStd}>
-                <SelectTrigger className="h-9 text-xs rounded-xl">
-                  <SelectValue placeholder="All Standards" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Standards (5-12)</SelectItem>
-                  {STANDARDS.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      Standard {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {selectedStd !== 'all' && <Button variant="outline" size="sm" onClick={() => setSelectedStd('all')} className="h-9 rounded-xl text-xs">← All standards</Button>}
 
             <div className="w-32">
               <Select value={selectedGender} onValueChange={(v) => setSelectedGender(v as any)}>
@@ -1450,106 +1411,62 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             )}
           </div>
 
-          {/* Student Cards Grid (NO FLAT TABLE) */}
-          {currentStudents.length === 0 ? (
+          {selectedStd === 'all' ? (
+            standardOptions.length === 0 ? (
             <div className="rounded-2xl border border-border bg-card p-12 text-center">
               <EmptyState
                 icon={Users}
-                title="No students found in this school"
-                description="No student records match your criteria. Register a new student or use bulk import."
+                title="No students found in this village"
+                description="No student records match these filters. Register a student or use bulk import."
                 actionLabel="+ Register Student"
                 onAction={handleOpenAddStudent}
               />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-              {currentStudents.map((st) => (
-                <div
-                  key={st.id}
-                  className="group relative flex flex-col justify-between rounded-2xl border border-border bg-card p-5 shadow-xs transition-all hover:border-primary/50 hover:shadow-md"
-                >
-                  <div>
-                    {/* Top Row: Standard Badge & Status */}
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center rounded-lg border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-                        Std {st.standard}
-                      </span>
-                      <Badge variant={st.status === 'active' ? 'success' : 'secondary'} size="sm">
-                        {st.status === 'active' ? 'Active' : 'Inactive'}
-                      </Badge>
-                    </div>
-
-                    {/* Student Avatar & Name */}
-                    <div className="mt-4 flex items-center gap-3">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                        {st.avatarLetter || st.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="overflow-hidden">
-                        <h4
-                          onClick={() => setViewingStudent(st)}
-                          className="truncate text-base font-bold text-foreground hover:text-primary cursor-pointer transition-colors"
-                        >
-                          {st.name}
-                        </h4>
-                        <p className="truncate font-mono text-[11px] text-muted-foreground">{st.code || 'ID: —'}</p>
-                      </div>
-                    </div>
-
-                    {/* Info Lines */}
-                    <div className="mt-4 space-y-1.5 text-xs text-muted-foreground">
-                      <div className="flex items-center justify-between">
-                        <span>Gender:</span>
-                        <span className="capitalize font-medium text-foreground">{st.gender}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Contact:</span>
-                        <span className="font-mono font-medium text-foreground">
-                          {st.phone ? st.phone : <span className="italic text-muted-foreground">Not provided</span>}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>School:</span>
-                        <span className="truncate max-w-[140px] font-medium text-foreground" title={st.schoolName || 'Govt High School'}>
-                          {st.schoolName || 'Govt High School'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Card Bottom Actions */}
-                  <div className="mt-5 flex items-center justify-between border-t border-border pt-3">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => setViewingStudent(st)}
-                      className="h-8 gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      <span>Details</span>
-                    </Button>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleOpenEditStudent(st)}
-                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                        title="Edit Student"
-                      >
-                        <Edit3 className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setStudentToDelete(st)}
-                        className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                        title="Delete Student"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              {standardOptions.map(([grade, count]) => (
+                <div key={grade} className="rounded-2xl border border-border bg-card p-5 text-left shadow-xs transition hover:border-primary/50 hover:shadow-md">
+                  <button type="button" onClick={() => setSelectedStd(grade)} className="w-full text-left">
+                    <div className="flex items-center justify-between"><span className="inline-flex rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">Standard {grade}</span><GraduationCap className="h-5 w-5 text-primary" /></div>
+                    <p className="mt-4 text-2xl font-bold text-foreground">{count}</p><p className="text-xs text-muted-foreground">students</p>
+                    <p className="mt-3 text-xs font-semibold text-primary">View student list →</p>
+                  </button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={count === 0 || attendancePdfStandard === grade}
+                    onClick={() => void downloadAttendancePdf(grade)}
+                    className="mt-3 w-full gap-1.5 rounded-xl text-xs"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    {attendancePdfStandard === grade ? 'Preparing PDF…' : 'Download Attendance'}
+                  </Button>
                 </div>
               ))}
+            </div>
+          )) : currentStudents.length === 0 ? (
+            <div className="rounded-2xl border border-border bg-card p-12 text-center"><EmptyState icon={Users} title={`No students in Standard ${selectedStd}`} description="No students match the selected standard and filters." actionLabel="Back to standards" onAction={() => setSelectedStd('all')} /></div>
+          ) : (
+            <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-xs">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead className="bg-muted/50 text-muted-foreground"><tr><th className="w-14 px-4 py-3">S.No</th><th className="px-4 py-3">Student</th><th className="px-4 py-3">Standard</th><th className="px-4 py-3">Gender</th><th className="px-4 py-3">Mobile Number</th><th className="px-4 py-3">Status</th><th className="px-4 py-3 text-right">Actions</th></tr></thead>
+                <tbody className="divide-y divide-border">
+                  {paginatedStudents.map((student, index) => <tr key={student.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-3 tabular-nums text-muted-foreground">{(studentPage - 1) * studentPageSize + index + 1}</td><td className="px-4 py-3 font-semibold text-foreground">{student.name}</td><td className="px-4 py-3">Standard {standardKey(student.standard)}</td><td className="px-4 py-3 capitalize">{student.gender}</td><td className="px-4 py-3">{student.phone || '—'}</td><td className="px-4 py-3"><Badge variant={student.status === 'active' ? 'success' : 'secondary'} size="sm">{student.status === 'active' ? 'Active' : 'Inactive'}</Badge></td>
+                    <td className="px-4 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" onClick={() => setViewingStudent(student)} title="View details"><Eye className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" onClick={() => handleOpenEditStudent(student)} title="Edit student"><Edit3 className="h-3.5 w-3.5" /></Button><Button variant="ghost" size="icon" onClick={() => setStudentToDelete(student)} title="Delete student"><Trash2 className="h-3.5 w-3.5" /></Button></div></td>
+                  </tr>)}
+                </tbody>
+              </table>
+              {currentStudents.length > studentPageSize && (
+                <div className="flex flex-col gap-3 border-t border-border px-4 py-3 text-xs sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-muted-foreground">Showing {(studentPage - 1) * studentPageSize + 1}–{Math.min(studentPage * studentPageSize, currentStudents.length)} of {currentStudents.length} students</span>
+                  <div className="flex items-center justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={studentPage <= 1} onClick={() => setStudentPage((page) => Math.max(1, page - 1))} className="gap-1"><CaretLeft className="h-3.5 w-3.5" />Previous</Button>
+                    <span className="min-w-20 text-center font-semibold">Page {studentPage} of {studentPageCount}</span>
+                    <Button type="button" variant="outline" size="sm" disabled={studentPage >= studentPageCount} onClick={() => setStudentPage((page) => Math.min(studentPageCount, page + 1))} className="gap-1">Next<CaretRight className="h-3.5 w-3.5" /></Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1606,10 +1523,6 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Village:</span>
                   <span className="font-semibold text-foreground">{viewingStudent.villageName || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">School / Hub:</span>
-                  <span className="font-semibold text-foreground">{viewingStudent.schoolName || 'Govt High School'}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Contact Phone:</span>

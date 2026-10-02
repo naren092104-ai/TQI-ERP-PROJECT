@@ -44,7 +44,8 @@ const createDefaultDays = (): DayDraft[] =>
 const resolveSessionName = (dayNumber: number, storedName?: string | null): string => {
   const standardName = ACADEMIC_SESSION_NAMES[dayNumber - 1];
   const normalized = String(storedName || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en');
-  if (!standardName || !normalized) return standardName || '';
+  if (!normalized) return standardName || '';
+  if (!standardName) return String(storedName).trim();
   if (normalized === standardName.toLocaleLowerCase('en')) return standardName;
   if (dayNumber === 1 && normalized === 'can do workshop') return standardName;
   if (dayNumber === 2 && normalized === 'know ur locality') return standardName;
@@ -86,7 +87,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [creationResult, setCreationResult] = useState<{ id: string; name: string } | null>(null);
-  const [setupRows, setSetupRows] = useState<Array<{ day_number: number; academic_year: string; session_name: string | null }>>([]);
+  const [setupRows, setSetupRows] = useState<Array<{ day_number: number; academic_year: string; session_name: string | null; session_date?: string | null }>>([]);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [transferTargetYear, setTransferTargetYear] = useState<AcademicYear | null>(null);
   const [isTransferring, setIsTransferring] = useState(false);
@@ -181,15 +182,13 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
     const matchingRows = setupRows.filter((row) => normalizeAcademicYearName(row.academic_year) === selectedAcademicYearName);
     matchingRows.forEach((row) => {
       const dayIndex = Number(row.day_number || 0) - 1;
-      if (dayIndex >= 0 && dayIndex < DAY_COUNT) {
-        base[dayIndex] = {
-          dayNumber: dayIndex + 1,
-          sessionName: resolveSessionName(dayIndex + 1, row.session_name),
-        };
-      }
+      if (dayIndex < 0) return;
+      const entry = { dayNumber: dayIndex + 1, sessionName: resolveSessionName(dayIndex + 1, row.session_name) || `Session Day ${dayIndex + 1}` };
+      if (dayIndex < base.length) base[dayIndex] = entry;
+      else base.push(entry);
     });
 
-    return base;
+    return base.sort((left, right) => left.dayNumber - right.dayNumber);
   }, [selectedAcademicYearName, setupRows]);
 
   const showYearDrawer = (mode: 'create' | 'edit', initialYear?: AcademicYear | null) => {
@@ -238,6 +237,16 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         sessionName: item.sessionName === 'Session not assigned' ? '' : item.sessionName,
       })),
     });
+    setIsDrawerOpen(true);
+  };
+
+  const addSessionDay = () => {
+    if (!canManageAcademicYears || isSelectedYearReadOnly) return;
+    const nextDayNumber = Math.max(0, ...currentDayEntries.map((day) => day.dayNumber)) + 1;
+    const nextDays = [...currentDayEntries, { dayNumber: nextDayNumber, sessionName: `Session Day ${nextDayNumber}` }];
+    setDrawerMode('day');
+    setIsEditingDay(nextDayNumber);
+    setYearDraft((current) => ({ ...current, days: nextDays }));
     setIsDrawerOpen(true);
   };
 
@@ -330,10 +339,10 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
       }
 
       if (isDayEdit) {
-        const payloadDays = yearDraft.days.map((day, index) => ({
-          dayNumber: index + 1,
+        const payloadDays = yearDraft.days.map((day) => ({
+          dayNumber: day.dayNumber,
           sessionName: (day.sessionName || '').trim(),
-          sessionDate: null,
+          sessionDate: setupRows.find((row) => Number(row.day_number) === day.dayNumber && normalizeAcademicYearName(row.academic_year) === normalizedYearName)?.session_date || null,
         }));
 
         const saveRes = await fetch(apiUrl('/api/academic-setup'), {
@@ -359,6 +368,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
             day_number: day.dayNumber,
             academic_year: normalizedYearName,
             session_name: day.sessionName || null,
+            session_date: day.sessionDate,
           })),
         ]);
       }
@@ -587,7 +597,7 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
           <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             Academic Year — {formatAcademicYearLabel(selectedAcademicYearName)}
           </h1>
-          <p className="mt-2 text-sm text-muted-foreground">Manage the 8 session days for this academic year. Each day contains one session.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Manage {currentDayEntries.length} session days for this academic year. Add more days whenever the programme needs them.</p>
           {isSelectedYearReadOnly && <span className="mt-2 inline-flex rounded-full bg-slate-200 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-700">Read Only · Archived</span>}
         </div>
 
@@ -610,8 +620,14 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
         <div className="flex items-center justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold text-foreground">Session Plan</h2>
-            <p className="mt-1 text-sm text-muted-foreground">8 Days • 1 Session per Day</p>
+            <p className="mt-1 text-sm text-muted-foreground">{currentDayEntries.length} Days • 1 Session per Day</p>
           </div>
+          {canManageAcademicYears && <button
+            type="button"
+            onClick={addSessionDay}
+            disabled={isSelectedYearReadOnly}
+            className="inline-flex items-center gap-1.5 rounded-xl bg-[#0B3D91] px-3 py-2 text-xs font-semibold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-50"
+          ><Plus className="h-4 w-4" />Add Day</button>}
         </div>
 
         {isLoading ? (

@@ -10,8 +10,6 @@ import {
 
 export interface StudentAttendanceRow {
   no: number;
-  id: string;
-  code: string;
   name: string;
   gender?: string;
   standard?: string;
@@ -58,37 +56,26 @@ export interface VillageAttendancePdfProps {
 }
 
 export const formatShortAcademicYear = (yr?: string): string => {
-  if (!yr) return '25-26';
-  const cleaned = yr.replace(/\s+/g, '');
+  const currentDate = new Date();
+  const startYear = currentDate.getMonth() >= 5 ? currentDate.getFullYear() : currentDate.getFullYear() - 1;
+  const academicYear = yr || `${startYear}-${startYear + 1}`;
+  const cleaned = academicYear.replace(/\s+/g, '');
   const parts = cleaned.split(/[-/]/);
   if (parts.length === 2) {
     const y1 = parts[0].slice(-2);
     const y2 = parts[1].slice(-2);
     if (y1 && y2) return `${y1}-${y2}`;
   }
-  return yr;
+  return academicYear;
 };
 
 const MAX_ROWS_PER_PAGE = 18;
-const EXCESS_ROWS_COUNT = 5;
-
-// Column widths matching the official PDF (total = ~805pt)
+// Fixed number column; the name and eight attendance columns share the page width dynamically.
 const COL = {
   no: 32.0,
-  name: 230.0,
-  panchayat: 150.0,
-  d1: 49.3,
-  d2: 49.3,
-  d3: 49.3,
-  d4: 49.3,
-  d5: 49.0,
-  d6: 49.3,
-  d7: 49.3,
-  d8: 48.5,
+  panchayat: 130.0,
 };
-
-// Merged width for No + Name = 262pt
-const MERGED_NO_NAME = COL.no + COL.name;
+const TABLE_WIDTH = 805;
 
 const BORDER_COLOR = '#000000';
 const BORDER_WIDTH = 0.6;
@@ -135,11 +122,19 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     letterSpacing: 0.2,
   },
+  titleDivider: {
+    width: '86%',
+    alignSelf: 'center',
+    borderBottomWidth: 0.6,
+    borderBottomColor: '#8A8A8A',
+    marginTop: 2,
+    marginBottom: 8,
+  },
   clusterStdRow: {
     flexDirection: 'row',
     justifyContent: 'center',
-    alignItems: 'flex-end',
-    gap: 50,
+    alignItems: 'baseline',
+    gap: 30,
   },
   clusterItem: {
     flexDirection: 'row',
@@ -154,11 +149,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica',
     fontSize: 9,
     color: '#000000',
-    borderBottomWidth: 0.75,
-    borderBottomColor: '#000000',
-    minWidth: 160,
     paddingLeft: 4,
-    paddingBottom: 1,
   },
   stdItem: {
     flexDirection: 'row',
@@ -173,12 +164,16 @@ const styles = StyleSheet.create({
     fontFamily: 'Helvetica',
     fontSize: 9,
     color: '#000000',
-    borderBottomWidth: 0.75,
-    borderBottomColor: '#000000',
-    minWidth: 90,
     paddingLeft: 4,
-    paddingBottom: 1,
-    textAlign: 'center',
+  },
+  villageRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  villageLine: {
+    fontFamily: 'Helvetica',
+    fontSize: 9,
+    paddingLeft: 4,
   },
   table: {
     borderTopWidth: BORDER_WIDTH,
@@ -194,15 +189,6 @@ const styles = StyleSheet.create({
     borderColor: BORDER_COLOR,
   },
   cellSessionDate: {
-    width: MERGED_NO_NAME,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRightWidth: BORDER_WIDTH,
-    borderColor: BORDER_COLOR,
-  },
-  cellDdMm: {
-    width: COL.panchayat,
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
@@ -272,29 +258,19 @@ const styles = StyleSheet.create({
     fontSize: 8,
     color: '#000000',
   },
-  // Bottom 4 Official Table Rows
-  bottomRow: {
+  footerRow: {
     flexDirection: 'row',
     height: 19.5,
     backgroundColor: '#FFFFFF',
     borderBottomWidth: BORDER_WIDTH,
     borderColor: BORDER_COLOR,
   },
-  cellBottomMerged: {
-    width: MERGED_NO_NAME,
-    height: '100%',
+  footerLabel: {
     justifyContent: 'center',
     alignItems: 'center',
     borderRightWidth: BORDER_WIDTH,
     borderColor: BORDER_COLOR,
-  },
-  cellBottomCountCol: {
-    width: COL.panchayat,
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRightWidth: BORDER_WIDTH,
-    borderColor: BORDER_COLOR,
+    paddingHorizontal: 3,
   },
   textBottomLabel: {
     fontFamily: 'Helvetica',
@@ -307,6 +283,7 @@ const styles = StyleSheet.create({
 export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data }) => {
   const {
     cluster,
+    village,
     standard,
     academicYear,
     logoUrl,
@@ -331,29 +308,16 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
       ? standard.toUpperCase()
       : (extractedStandards.length > 0 ? extractedStandards.join(', ') : '');
 
-  const dayWidths = [
-    COL.d1,
-    COL.d2,
-    COL.d3,
-    COL.d4,
-    COL.d5,
-    COL.d6,
-    COL.d7,
-    COL.d8,
-  ];
+  const nameColumnWidth = Math.min(220, Math.max(120, ...students.map((student) => String(student.name || '').length * 4.4 + 16)));
+  const dayWidth = (TABLE_WIDTH - COL.no - nameColumnWidth - COL.panchayat) / 8;
+  const dayWidths = Array.from({ length: 8 }, () => dayWidth);
 
-  // Dynamic rows: existing students + exactly 5 excess blank rows
-  const allRows: (StudentAttendanceRow | null)[] = [
-    ...students,
-    ...Array.from({ length: EXCESS_ROWS_COUNT }, () => null),
-  ];
-
-  // Chunk into pages of at most MAX_ROWS_PER_PAGE (18)
-  const totalChunks = Math.max(1, Math.ceil(allRows.length / MAX_ROWS_PER_PAGE));
-  const pagesData: (StudentAttendanceRow | null)[][] = [];
+  // Split any-sized roster into pages of at most 18 student rows.
+  const totalChunks = Math.max(1, Math.ceil(students.length / MAX_ROWS_PER_PAGE));
+  const pagesData: StudentAttendanceRow[][] = [];
 
   for (let i = 0; i < totalChunks; i++) {
-    const chunk = allRows.slice(
+    const chunk = students.slice(
       i * MAX_ROWS_PER_PAGE,
       (i + 1) * MAX_ROWS_PER_PAGE
     );
@@ -365,8 +329,7 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
   return (
     <Document title={`STUDENT HOLISTIC DEVELOPMENT PROGRAMME ${shortYear}`}>
       {pagesData.map((chunk, pageIndex) => {
-        const isFinalPage = pageIndex === pagesData.length - 1;
-
+        const isLastPage = pageIndex === pagesData.length - 1;
         return (
           <Page key={pageIndex} size="A4" orientation="landscape" style={styles.page}>
             {/* Header: Exact replica with logo, dynamic short year, and auto standard */}
@@ -377,6 +340,7 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
                   <Text style={styles.mainTitle}>
                     STUDENT HOLISTIC DEVELOPMENT PROGRAMME {shortYear}
                   </Text>
+                  <View style={styles.titleDivider} />
                   <View style={styles.clusterStdRow}>
                     <View style={styles.clusterItem}>
                       <Text style={styles.clusterLabel}>CLUSTER NAME: </Text>
@@ -390,6 +354,10 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
                         {autoStd || '____________'}
                       </Text>
                     </View>
+                    <View style={styles.villageRow}>
+                      <Text style={styles.stdLabel}>VILLAGE: </Text>
+                      <Text style={styles.villageLine}>{village?.name || ''}</Text>
+                    </View>
                   </View>
                 </View>
                 {/* Right spacer keeps title centered */}
@@ -399,13 +367,10 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
 
             {/* Official Table Grid */}
             <View style={styles.table}>
-              {/* Row 1: SESSION DATE & DD/MM */}
+              {/* Row 1: session dates for each of the eight attendance days */}
               <View style={styles.row1}>
-                <View style={styles.cellSessionDate}>
+                <View style={[styles.cellSessionDate, { width: COL.no + nameColumnWidth + COL.panchayat }]}>
                   <Text style={styles.textHeaderDark}>SESSION DATE</Text>
-                </View>
-                <View style={styles.cellDdMm}>
-                  <Text style={styles.textHeaderDark}>DD/MM</Text>
                 </View>
                 {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => (
                   <View key={d} style={[styles.cellSessionDateDay, { width: dayWidths[dIdx] }]}>
@@ -421,7 +386,7 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
                 <View style={[styles.cellBlue, { width: COL.no }]}>
                   <Text style={styles.textBlueHeader}>No</Text>
                 </View>
-                <View style={[styles.cellBlue, { width: COL.name }]}>
+                <View style={[styles.cellBlue, { width: nameColumnWidth }]}>
                   <Text style={styles.textBlueHeader}>Name</Text>
                 </View>
                 <View style={[styles.cellBlue, { width: COL.panchayat }]}>
@@ -434,21 +399,21 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
                 ))}
               </View>
 
-              {/* Data Rows: Actual students + 5 excess blank rows */}
+              {/* Data Rows: student name only; no student ID/code is printed */}
               {chunk.map((student, rIdx) => {
                 const seq = pageIndex * MAX_ROWS_PER_PAGE + rIdx + 1;
-                const att = student?.attendance || {};
+                const att = student.attendance || {};
 
                 return (
-                  <View key={student?.id || `empty-${rIdx}`} style={styles.dataRow}>
+                  <View key={`${student.no}-${rIdx}`} style={styles.dataRow}>
                     <View style={[styles.cellCenter, { width: COL.no }]}>
                       <Text style={styles.cellText}>{seq}</Text>
                     </View>
-                    <View style={[styles.cellLeft, { width: COL.name }]}>
-                      <Text style={styles.cellText}>{student?.name || ''}</Text>
+                    <View style={[styles.cellLeft, { width: nameColumnWidth }]}>
+                      <Text style={styles.cellText}>{student.name || ''}</Text>
                     </View>
                     <View style={[styles.cellLeft, { width: COL.panchayat }]}>
-                      <Text style={styles.cellText}>{student?.panchayatName || ''}</Text>
+                      <Text style={styles.cellText}>{student.panchayatName || ''}</Text>
                     </View>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => {
                       const val = att[`D${d}`] || '';
@@ -462,54 +427,25 @@ export const VillageAttendancePdf: React.FC<VillageAttendancePdfProps> = ({ data
                 );
               })}
 
-              {/* Rows 19 to 22: Bottom Official Table Rows (on final page) */}
-              {isFinalPage ? (
+              {isLastPage && (
                 <>
-                  {/* Row: Total Students Count (Count cell left blank for manual entry) */}
-                  <View style={styles.bottomRow}>
-                    <View style={styles.cellBottomMerged}>
+                  <View style={styles.footerRow}>
+                    <View style={[styles.footerLabel, { width: COL.no + nameColumnWidth + COL.panchayat }]}>
                       <Text style={styles.textBottomLabel}>Total Students Count</Text>
                     </View>
-                    <View style={styles.cellBottomCountCol} />
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => (
-                      <View key={d} style={[styles.cellCenter, { width: dayWidths[dIdx] }]} />
-                    ))}
+                    {dayWidths.map((width, dayIndex) => <View key={`count-${dayIndex}`} style={[styles.cellCenter, { width }]} />)}
                   </View>
-
-                  {/* Row: TQI Volunteer sign */}
-                  <View style={styles.bottomRow}>
-                    <View style={styles.cellBottomMerged}>
-                      <Text style={styles.textBottomLabel}>TQI Volunteer sign</Text>
+                  {['TQI Volunteer sign', 'Village PRP Sign'].map((label) => (
+                    <View key={label} style={styles.footerRow}>
+                      <View style={[styles.footerLabel, { width: COL.no + nameColumnWidth + COL.panchayat }]}>
+                        <Text style={styles.textBottomLabel}>{label}</Text>
+                      </View>
+                      {dayWidths.map((width, dayIndex) => <View key={`${label}-${dayIndex}`} style={[styles.cellCenter, { width }]} />)}
                     </View>
-                    <View style={styles.cellBottomCountCol} />
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => (
-                      <View key={d} style={[styles.cellCenter, { width: dayWidths[dIdx] }]} />
-                    ))}
-                  </View>
-
-                  {/* Row: Village PRP Sign */}
-                  <View style={styles.bottomRow}>
-                    <View style={styles.cellBottomMerged}>
-                      <Text style={styles.textBottomLabel}>Village PRP Sign</Text>
-                    </View>
-                    <View style={styles.cellBottomCountCol} />
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => (
-                      <View key={d} style={[styles.cellCenter, { width: dayWidths[dIdx] }]} />
-                    ))}
-                  </View>
-
-                  {/* Row: MS CC Sign */}
-                  <View style={styles.bottomRow}>
-                    <View style={styles.cellBottomMerged}>
-                      <Text style={styles.textBottomLabel}>MS CC Sign</Text>
-                    </View>
-                    <View style={styles.cellBottomCountCol} />
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d, dIdx) => (
-                      <View key={d} style={[styles.cellCenter, { width: dayWidths[dIdx] }]} />
-                    ))}
-                  </View>
+                  ))}
                 </>
-              ) : null}
+              )}
+
             </View>
           </Page>
         );

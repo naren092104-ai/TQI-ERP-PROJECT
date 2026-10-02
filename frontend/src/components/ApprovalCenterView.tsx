@@ -16,7 +16,7 @@ interface ApprovalCenterViewProps {
   approvals: ApprovalItem[];
   clusters: Cluster[];
   userRole: 'Super Admin' | 'Cluster Admin';
-  onApprove: (id: string, module: string, recordId: string) => void;
+  onApprove: (id: string, module: string, recordId: string) => Promise<void> | void;
   onRequestCorrection: (id: string, module: string, recordId: string, reason: string) => void;
   onReject: (id: string, module: string, recordId: string, reason: string) => void;
   onNavigate: (tab: TabType, targetId?: string) => void;
@@ -53,6 +53,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   const [correctionReasonInput, setCorrectionReasonInput] = useState<string>('');
   const [showCorrectionForm, setShowCorrectionForm] = useState<boolean>(false);
   const [isRejecting, setIsRejecting] = useState<boolean>(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [approvalError, setApprovalError] = useState('');
 
   const matchesApprovalCategory = (item: ApprovalItem, category: string) => {
     const module = item.module.toLowerCase();
@@ -137,10 +139,18 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
     setIsRejecting(false);
   };
 
-  const handleApproveConfirm = () => {
+  const handleApproveConfirm = async () => {
     if (!reviewItem) return;
-    onApprove(reviewItem.id, reviewItem.module, reviewItem.recordId);
-    setReviewItem(null);
+    setIsApproving(true);
+    setApprovalError('');
+    try {
+      await onApprove(reviewItem.id, reviewItem.module, reviewItem.recordId);
+      setReviewItem(null);
+    } catch (error) {
+      setApprovalError(error instanceof Error ? error.message : 'Unable to approve this submission.');
+    } finally {
+      setIsApproving(false);
+    }
   };
 
   const handleSubmitCorrection = () => {
@@ -427,7 +437,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                           <span className="material-symbols-outlined text-[14px]">visibility</span>
                           Review
                         </button>
-                        {item.status === 'Pending' && (
+                        {item.status === 'Pending' && item.module !== 'Attendance' && (
                           <button
                             onClick={() => onApprove(item.id, item.module, item.recordId)}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
@@ -518,12 +528,31 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                 </h4>
                 {reviewItem.details && (
                   <div className="bg-[#f8fafc] border border-slate-200 rounded-md p-3 space-y-1.5">
-                    {Object.entries(reviewItem.details).map(([key, val]) => (
+                    {Object.entries(reviewItem.details).filter(([key]) => !['records', 'volunteerAttendance'].includes(key)).map(([key, val]) => (
                       <div key={key} className="flex justify-between items-center py-1 border-b border-slate-100 last:border-0">
                         <span className="text-slate-500 capitalize">{key.replace(/([A-Z])/g, ' $1')}:</span>
                         <span className="font-semibold text-slate-800">{String(val)}</span>
                       </div>
                     ))}
+                  </div>
+                )}
+                {reviewItem.module === 'Attendance' && reviewItem.details?.attendanceType !== 'volunteers' && (
+                  <div className="overflow-x-auto rounded-md border border-slate-200">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-100 text-slate-600"><tr><th className="p-2.5">S.No</th><th className="p-2.5">Student</th><th className="p-2.5">Standard</th><th className="p-2.5">Attendance</th><th className="p-2.5">Task</th></tr></thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(reviewItem.details?.records || []).map((record: any, index: number) => <tr key={record.studentId}><td className="p-2.5 tabular-nums text-slate-500">{index + 1}</td><td className="p-2.5 font-semibold text-slate-800">{record.studentName}</td><td className="p-2.5">{record.standard || record.code || '—'}</td><td className={`p-2.5 font-semibold ${record.status === 'Present' ? 'text-emerald-700' : 'text-rose-700'}`}>{record.status}</td><td className="p-2.5">{record.taskStatus || '—'}</td></tr>)}
+                        {!(reviewItem.details?.records || []).length && <tr><td colSpan={5} className="p-5 text-center text-slate-500">No student attendance rows were included.</td></tr>}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {reviewItem.module === 'Attendance' && reviewItem.details?.attendanceType === 'volunteers' && (
+                  <div className="overflow-x-auto rounded-md border border-slate-200">
+                    <table className="w-full text-left text-xs"><thead className="bg-slate-100 text-slate-600"><tr><th className="p-2.5">Volunteer</th><th className="p-2.5">Role</th><th className="p-2.5">Attendance</th></tr></thead><tbody className="divide-y divide-slate-100">
+                      {(reviewItem.details?.volunteerAttendance || []).map((record: any) => <tr key={record.volunteerId}><td className="p-2.5 font-semibold text-slate-800">{record.volunteerName}</td><td className="p-2.5">{record.role || 'Volunteer'}</td><td className="p-2.5">{record.status}</td></tr>)}
+                      {!(reviewItem.details?.volunteerAttendance || []).length && <tr><td colSpan={3} className="p-5 text-center text-slate-500">No volunteer attendance rows were included.</td></tr>}
+                    </tbody></table>
                   </div>
                 )}
               </div>
@@ -589,6 +618,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
               </button>
 
               <div className="flex items-center gap-2">
+                {approvalError && <p role="alert" className="mr-2 text-xs font-semibold text-rose-700">{approvalError}</p>}
                 {!showCorrectionForm && (
                   <>
                     <button
@@ -603,10 +633,11 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                     </button>
                     <button
                       onClick={handleApproveConfirm}
-                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-md text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                      disabled={isApproving}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-1.5 rounded-md text-xs font-bold transition-colors flex items-center gap-1 cursor-pointer shadow-xs disabled:opacity-50"
                     >
                       <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                      Approve Record
+                      {isApproving ? 'Saving…' : 'Approve Record'}
                     </button>
                   </>
                 )}

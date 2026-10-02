@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   CheckCircle2, 
   AlertCircle, 
@@ -13,8 +13,8 @@ import { LottieIllustration } from './LottieIllustration';
 interface NotificationsViewProps {
   notifications: NotificationItem[];
   onNavigate: (tab: TabType, targetId?: string) => void;
-  onMarkAsRead: (id: string) => void;
-  onMarkAllAsRead: () => void;
+  onMarkAsRead: (id: string) => Promise<void> | void;
+  onMarkAllAsRead: () => Promise<void> | void;
 }
 
 export const NotificationsView: React.FC<NotificationsViewProps> = ({
@@ -24,6 +24,13 @@ export const NotificationsView: React.FC<NotificationsViewProps> = ({
   onMarkAllAsRead,
 }) => {
   const [filter, setFilter] = useState<'all' | 'unread' | 'correction' | 'approval'>('all');
+  const hasAutoRead = useRef(false);
+
+  useEffect(() => {
+    if (hasAutoRead.current || !notifications.some((notification) => !notification.isRead)) return;
+    hasAutoRead.current = true;
+    void Promise.resolve(onMarkAllAsRead()).catch((error) => console.error('Unable to auto-read notifications:', error));
+  }, [notifications, onMarkAllAsRead]);
 
   const filtered = notifications.filter((n) => {
     if (filter === 'unread') return !n.isRead;

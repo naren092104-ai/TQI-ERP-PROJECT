@@ -93,9 +93,9 @@ export const Navigation: React.FC<NavigationProps> = ({
       items: [
         ...(!isVolunteer ? [{ id: 'clusters', label: 'Clusters', icon: TreeStructure, superAdminOnly: true }] : []),
         { id: 'panchayats', label: 'Panchayats & Villages', icon: MapPin },
-        { id: 'students', label: 'Students Roster', icon: Student },
-        { id: 'volunteers', label: 'Volunteers Directory', icon: Users },
-        { id: 'attendance', label: 'Attendance', icon: CalendarCheck },
+        { id: 'students', label: 'Students', icon: Student },
+        { id: 'volunteers', label: 'Volunteers', icon: Users },
+        { id: 'attendance', label: 'Students Attendance', icon: CalendarCheck },
         { id: 'volunteer-attendance', label: 'Volunteer Attendance', icon: Users },
         { id: 'sessions', label: 'Session Scheduling', icon: ClipboardText },
         { id: 'session-photos', label: 'Session Photos', icon: Camera },

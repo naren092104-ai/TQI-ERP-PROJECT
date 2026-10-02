@@ -100,23 +100,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   useEffect(() => {
     if (!effectiveAuthToken) return;
 
-    fetch(apiUrl('/api/academic-setup'), {
-      headers: {
-        Authorization: `Bearer ${effectiveAuthToken}`,
-      },
-    })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.success && Array.isArray(data.setup)) {
-          setSetupDays(
-            data.setup.map((s: { day_number: number; session_name: string }) => ({
-              dayNumber: s.day_number,
-              sessionName: s.session_name,
-            }))
-          );
-        }
+    const timeoutId = window.setTimeout(() => {
+      fetch(apiUrl('/api/academic-setup'), {
+        headers: {
+          Authorization: `Bearer ${effectiveAuthToken}`,
+        },
       })
-      .catch(() => {});
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.success && Array.isArray(data.setup)) {
+            setSetupDays(
+              data.setup.map((s: { day_number: number; session_name: string }) => ({
+                dayNumber: s.day_number,
+                sessionName: s.session_name,
+              }))
+            );
+          }
+        })
+        .catch(() => {});
+    }, 2000);
+
+    return () => window.clearTimeout(timeoutId);
   }, [effectiveAuthToken]);
 
   // Real MySQL calculated metrics

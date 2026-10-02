@@ -119,21 +119,21 @@ export const StudentDirectoryView: React.FC<Props> = ({
     setStatusFilter('all');
   };
 
-  const downloadVillageExcel = () => {
+  const downloadStudentExcel = (records: Student[], scope: { clusterName?: string; panchayatName?: string; villageName?: string; filename?: string }) => {
     const rows: (string | number)[][] = [
       ['Talent Quest for India (TQI)'],
-      ['Student Directory — Village Roster'],
+      ['Student Directory'],
       [],
-      ['Academic Year', academicYear || '2025-2026'],
-      ['Cluster', cluster?.name || ''],
-      ['Panchayat', panchayat?.name || ''],
-      ['Village', selectedVillage?.name || ''],
+      ['Academic Year', academicYear || ''],
+      ['Cluster', scope.clusterName || 'All Clusters'],
+      ['Panchayat', scope.panchayatName || 'All Panchayats'],
+      ['Village', scope.villageName || 'All Villages'],
       ['Generated Date', new Date().toLocaleDateString('en-GB')],
       [],
       ['S.No', 'Student Name', 'Standard', 'Gender', 'Contact Number'],
     ];
 
-    filteredVillageStudents.forEach((student, index) => {
+    records.forEach((student, index) => {
       rows.push([
         index + 1,
         student.name,
@@ -146,10 +146,11 @@ export const StudentDirectoryView: React.FC<Props> = ({
     const sheet = XLSX.utils.aoa_to_sheet(rows);
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, 'Students');
-    XLSX.writeFile(book, `TQI_Students_${selectedVillage?.name || 'Village'}_${panchayat?.name || 'Panchayat'}.xlsx`);
+    const safeFilename = (scope.filename || 'All_Students').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    XLSX.writeFile(book, `TQI_Students_${safeFilename}.xlsx`);
   };
 
-  const downloadVillagePdf = async () => {
+  const downloadStudentPdf = async (records: Student[], scope: { clusterName?: string; panchayatName?: string; villageName?: string; filename?: string }) => {
     const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
     const generatedDate = new Date().toLocaleDateString('en-GB');
     let logoData = '';
@@ -187,14 +188,14 @@ export const StudentDirectoryView: React.FC<Props> = ({
     pdf.text('Village', 122, cardY + 7); pdf.text('Generated Date', 122, cardY + 14);
     pdf.setFont('helvetica', 'normal');
     pdf.text(':', 51, cardY + 7); pdf.text(':', 51, cardY + 14); pdf.text(':', 158, cardY + 7); pdf.text(':', 158, cardY + 14);
-    pdf.text(cluster?.name || '', 57, cardY + 7); pdf.text(panchayat?.name || '', 57, cardY + 14);
-    pdf.text(selectedVillage?.name || '', 164, cardY + 7); pdf.text(generatedDate, 164, cardY + 14);
+    pdf.text(scope.clusterName || 'All Clusters', 57, cardY + 7); pdf.text(scope.panchayatName || 'All Panchayats', 57, cardY + 14);
+    pdf.text(scope.villageName || 'All Villages', 164, cardY + 7); pdf.text(generatedDate, 164, cardY + 14);
     pdf.setFillColor(245, 247, 255);
     pdf.setDrawColor(175, 185, 225);
     pdf.roundedRect(55, 70, 100, 9, 2, 2, 'FD');
     pdf.setFont('helvetica', 'bold');
     pdf.setTextColor(35, 55, 90);
-    pdf.text(`Academic Year: ${academicYear || '2025-2026'}`, 105, 76, { align: 'center' });
+    pdf.text(`Academic Year: ${academicYear || '—'}`, 105, 76, { align: 'center' });
 
     const columns = [
       { label: 'S.No', width: 14 }, { label: 'Student Name', width: 62 }, { label: 'Standard', width: 24 },
@@ -212,7 +213,7 @@ export const StudentDirectoryView: React.FC<Props> = ({
       return top + rowHeight;
     };
     let y = drawTableHeader(84);
-    filteredVillageStudents.forEach((student, index) => {
+    records.forEach((student, index) => {
       if (y + rowHeight > 280) { pdf.addPage(); y = drawTableHeader(16); }
       const values = [String(index + 1), student.name || '', `Standard ${standardKey(student.standard)}`, normalGender(student.gender), student.phone || ''];
       let x = tableX;
@@ -221,8 +222,23 @@ export const StudentDirectoryView: React.FC<Props> = ({
     });
     const pageCount = pdf.getNumberOfPages();
     for (let page = 1; page <= pageCount; page += 1) { pdf.setPage(page); pdf.setFontSize(8); pdf.setTextColor(100, 100, 100); pdf.text(`Page ${page} of ${pageCount}`, 200, 288, { align: 'right' }); }
-    pdf.save(`TQI_Student_Directory_${selectedVillage?.name || 'Village'}.pdf`);
+    const safeFilename = (scope.filename || 'All_Students').replace(/[^a-zA-Z0-9_-]+/g, '_');
+    pdf.save(`TQI_Student_Directory_${safeFilename}.pdf`);
   };
+
+  const downloadVillageExcel = () => downloadStudentExcel(filteredVillageStudents, {
+    clusterName: cluster?.name,
+    panchayatName: panchayat?.name,
+    villageName: selectedVillage?.name,
+    filename: `${selectedVillage?.name || 'Village'}_${panchayat?.name || 'Panchayat'}`,
+  });
+
+  const downloadVillagePdf = () => downloadStudentPdf(filteredVillageStudents, {
+    clusterName: cluster?.name,
+    panchayatName: panchayat?.name,
+    villageName: selectedVillage?.name,
+    filename: `${selectedVillage?.name || 'Village'}_${panchayat?.name || 'Panchayat'}`,
+  });
 
   // Breadcrumbs helper with clickable links
   type BreadcrumbEntry = string | { label: string; onClick?: () => void };
@@ -363,6 +379,10 @@ export const StudentDirectoryView: React.FC<Props> = ({
 
         {/* Global Summary KPI */}
         {renderSummary(totalAllStudents)}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => downloadStudentExcel(students, { filename: 'All_Clusters' })} disabled={!students.length} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"><FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />All Students Excel</button>
+          <button type="button" onClick={() => void downloadStudentPdf(students, { filename: 'All_Clusters' })} disabled={!students.length} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50"><Download className="h-3.5 w-3.5 text-blue-600" />All Students PDF</button>
+        </div>
 
         {/* Clusters Grid */}
         <div className="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
@@ -417,14 +437,20 @@ export const StudentDirectoryView: React.FC<Props> = ({
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => onNavigate({ level: 'panchayats', clusterId: item.id })}
-                  className="mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1717B8] hover:bg-[#1313A0] text-white text-xs font-semibold shadow-2xs transition-all active:scale-[0.98] cursor-pointer"
-                >
-                  <span>View Panchayats</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
-                </button>
+                <div className="mt-5 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => onNavigate({ level: 'panchayats', clusterId: item.id })}
+                    className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#1717B8] hover:bg-[#1313A0] text-white text-xs font-semibold shadow-2xs transition-all active:scale-[0.98] cursor-pointer"
+                  >
+                    <span>View Panchayats</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </button>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => downloadStudentExcel(records, { clusterName: item.name, filename: item.name })} disabled={!records.length} className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-semibold text-slate-700 disabled:opacity-50"><FileSpreadsheet className="h-3 w-3 text-emerald-600" />Cluster Excel</button>
+                    <button type="button" onClick={() => void downloadStudentPdf(records, { clusterName: item.name, filename: item.name })} disabled={!records.length} className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-semibold text-slate-700 disabled:opacity-50"><Download className="h-3 w-3 text-blue-600" />Cluster PDF</button>
+                  </div>
+                </div>
               </div>
             );
           })}
@@ -501,6 +527,10 @@ export const StudentDirectoryView: React.FC<Props> = ({
 
         {/* KPI Metrics */}
         {renderSummary(summary)}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => downloadStudentExcel(students.filter((student) => student.clusterId === route.clusterId), { clusterName: cluster?.name, filename: `${cluster?.name || 'Cluster'}_All_Panchayats` })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"><FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />Cluster Excel</button>
+          <button type="button" onClick={() => void downloadStudentPdf(students.filter((student) => student.clusterId === route.clusterId), { clusterName: cluster?.name, filename: `${cluster?.name || 'Cluster'}_All_Panchayats` })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"><Download className="h-3.5 w-3.5 text-blue-600" />Cluster PDF</button>
+        </div>
 
         {/* Panchayats Section */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 overflow-hidden">
@@ -582,6 +612,9 @@ export const StudentDirectoryView: React.FC<Props> = ({
                         {itemStats.active}
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
+                        <div className="inline-flex items-center gap-1">
+                          <button type="button" title="Download Panchayat Excel" onClick={() => downloadStudentExcel(records, { clusterName: cluster?.name, panchayatName: item.name, filename: item.name })} disabled={!records.length} className="rounded-lg border border-slate-200 p-2 text-emerald-700 disabled:opacity-40"><FileSpreadsheet className="h-3.5 w-3.5" /></button>
+                          <button type="button" title="Download Panchayat PDF" onClick={() => void downloadStudentPdf(records, { clusterName: cluster?.name, panchayatName: item.name, filename: item.name })} disabled={!records.length} className="rounded-lg border border-slate-200 p-2 text-blue-700 disabled:opacity-40"><Download className="h-3.5 w-3.5" /></button>
                         <button
                           type="button"
                           onClick={() =>
@@ -596,6 +629,7 @@ export const StudentDirectoryView: React.FC<Props> = ({
                           <span>View Villages</span>
                           <ArrowRight className="h-3.5 w-3.5" />
                         </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -693,6 +727,10 @@ export const StudentDirectoryView: React.FC<Props> = ({
 
         {/* KPI Metrics */}
         {renderSummary(panchayatSummary)}
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={() => downloadStudentExcel(panchayatStudents, { clusterName: cluster?.name, panchayatName: panchayat?.name, filename: `${panchayat?.name || 'Panchayat'}_All_Villages` })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"><FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600" />Panchayat Excel</button>
+          <button type="button" onClick={() => void downloadStudentPdf(panchayatStudents, { clusterName: cluster?.name, panchayatName: panchayat?.name, filename: `${panchayat?.name || 'Panchayat'}_All_Villages` })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700"><Download className="h-3.5 w-3.5 text-blue-600" />Panchayat PDF</button>
+        </div>
 
         {/* Villages List Section */}
         <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 overflow-hidden">
@@ -779,7 +817,9 @@ export const StudentDirectoryView: React.FC<Props> = ({
                         {vStats.active}
                       </td>
                       <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center justify-end">
+                        <div className="inline-flex items-center justify-end gap-1">
+                          <button type="button" title="Download Village Excel" onClick={() => downloadStudentExcel(villageRecords, { clusterName: cluster?.name, panchayatName: panchayat?.name, villageName: vItem.name, filename: vItem.name })} disabled={!villageRecords.length} className="rounded-lg border border-slate-200 p-2 text-emerald-700 disabled:opacity-40"><FileSpreadsheet className="h-3.5 w-3.5" /></button>
+                          <button type="button" title="Download Village PDF" onClick={() => void downloadStudentPdf(villageRecords, { clusterName: cluster?.name, panchayatName: panchayat?.name, villageName: vItem.name, filename: vItem.name })} disabled={!villageRecords.length} className="rounded-lg border border-slate-200 p-2 text-blue-700 disabled:opacity-40"><Download className="h-3.5 w-3.5" /></button>
                           {/* Only View Students at village directory level */}
                           <button
                             type="button"

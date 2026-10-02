@@ -43,12 +43,12 @@ interface SessionsViewProps {
   userRole?: string;
   dateChangeRequests?: DateChangeRequest[];
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
-  onAddSession: (newSession: Omit<Session, 'id'>) => void;
-  onUpdateSession: (id: string, updated: Partial<Session>) => void;
+  onAddSession: (newSession: Omit<Session, 'id'>) => Promise<void> | void;
+  onUpdateSession: (id: string, updated: Partial<Session>) => Promise<void> | void;
   onDeleteSession?: (id: string) => Promise<void> | void;
   onRequestDateChange?: (sessionId: string, originalDate: string, newDate: string, reason: string) => Promise<void>;
   onReviewDateChange?: (requestId: string, action: 'approve' | 'reject', remarks: string) => Promise<void>;
-  onFixSessionDate?: (sessionId: string, date: string) => Promise<void>;
+  onApproveSessionDate?: (session: Session, date: string) => Promise<void>;
   canManageSchedule?: boolean;
 }
 
@@ -65,7 +65,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   onDeleteSession,
   onRequestDateChange,
   onReviewDateChange,
-  onFixSessionDate,
+  onApproveSessionDate,
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
   const isClusterAdmin = userRole === 'Cluster Admin';
@@ -94,13 +94,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const [dateChangeSession, setDateChangeSession] = useState<Session | null>(null);
   const [reviewingRequest, setReviewingRequest] = useState<DateChangeRequest | null>(null);
   const [reviewRemarks, setReviewRemarks] = useState('');
-  const [dateFixSession, setDateFixSession] = useState<Session | null>(null);
-  const [dateFixValue, setDateFixValue] = useState('');
+  const [sessionProposalDates, setSessionProposalDates] = useState<Record<string, string>>({});
+  const [sessionProposalLocations, setSessionProposalLocations] = useState<Record<string, { panchayatId: string; villageId: string }>>({});
+  const [approvingSessionId, setApprovingSessionId] = useState<string | null>(null);
   const [newDateValue, setNewDateValue] = useState('');
   const [dateChangeReason, setDateChangeReason] = useState('');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isSavingSchedule, setIsSavingSchedule] = useState(false);
 
-  // Scheduling Type: 'single' vs 'date-range' (From Date to To Date for multi-day 7 or 8 days cycle)
+  // Scheduling Type: 'single' vs 'date-range' for multi-day academic cycles.
   const [scheduleType, setScheduleType] = useState<'single' | 'date-range'>('date-range');
   const [rangeFromDate, setRangeFromDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [rangeToDate, setRangeToDate] = useState<string>(() => {
@@ -130,6 +132,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     'Environmental Science & Ecology',
     'Career Guidance & Mentorship',
   ];
+  const configuredDayCount = Math.max(8, ...sessions.map((session) => Number(session.dayNumber || 0)));
+  const cycleDayOptions = Array.from(
+    new Set([7, 8, ...Array.from({ length: configuredDayCount - 8 }, (_, index) => index + 9)]),
+  );
 
   // Form State
   const [formData, setFormData] = useState({
@@ -140,16 +146,28 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     module: 'Spoken English & Communication',
     panchayatId: panchayats[0]?.id || '',
     villageName: panchayats[0]?.villages[0]?.name || '',
-    volunteerId: volunteers[0]?.id || '',
-    status: 'Scheduled' as Session['status'],
     description: '',
   });
+  const [selectedPanchayatIds, setSelectedPanchayatIds] = useState<string[]>([]);
+  const [selectedVillageTargets, setSelectedVillageTargets] = useState<Array<{ panchayatId: string; villageId: string; villageName: string }>>([]);
+  const [targetLocationReason, setTargetLocationReason] = useState('');
+
+  const formPanchayats = useMemo(
+    () => panchayats.filter((panchayat) => !formData.clusterId || panchayat.clusterId === formData.clusterId),
+    [panchayats, formData.clusterId],
+  );
 
   const formVillages = useMemo(() => {
-    if (!formData.panchayatId) return [];
-    const p = panchayats.find((item) => item.id === formData.panchayatId);
-    return p?.villages || [];
-  }, [panchayats, formData.panchayatId]);
+    return selectedPanchayatIds.flatMap((panchayatId) => {
+      const panchayat = panchayats.find((item) => item.id === panchayatId);
+      return (panchayat?.villages || []).map((village) => ({
+        panchayatId,
+        panchayatName: panchayat?.name || '',
+        villageId: village.id || village.name,
+        villageName: village.name,
+      }));
+    });
+  }, [panchayats, selectedPanchayatIds]);
 
   // KPI Calculations
   const stats = useMemo(() => {
@@ -213,6 +231,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       const toDate = sortedDates[sortedDates.length - 1] || 'Not scheduled';
       const completed = clusterSessions.filter((session) => session.status === 'Completed').length;
       const upcoming = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'In Progress').length;
+      const volunteersCount = volunteers.filter((volunteer) =>
+        (!volunteer.clusterId || volunteer.clusterId === cluster.id) &&
+        String(volunteer.status || 'Active').toLowerCase() === 'active'
+      ).length;
       const pendingReschedule = dateChangeRequests.filter(
         (r) => r.clusterId === cluster.id && r.status === 'PENDING'
       ).length;
@@ -222,28 +244,36 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         sessionsCount: clusterSessions.length,
         completed,
         upcoming,
+        volunteersCount,
         fromDate,
         toDate,
         pendingReschedule,
       };
     });
-  }, [clusters, sessions, dateChangeRequests]);
+  }, [clusters, sessions, dateChangeRequests, volunteers]);
 
   const handleOpenAdd = () => {
     setEditingSession(null);
-    const p = panchayats[0];
+    const initialClusterId = clusters[0]?.id || '';
+    const initialPanchayats = panchayats.filter((panchayat) => panchayat.clusterId === initialClusterId);
+    const initialTargets = initialPanchayats.flatMap((panchayat) => (panchayat.villages || []).map((village) => ({
+      panchayatId: panchayat.id,
+      villageId: village.id || village.name,
+      villageName: village.name,
+    })));
     setFormData({
       name: '',
-      clusterId: clusters[0]?.id || '',
+      clusterId: initialClusterId,
       dayNumber: 1,
       date: new Date().toISOString().split('T')[0],
       module: 'Spoken English & Communication',
-      panchayatId: p?.id || '',
-      villageName: p?.villages[0]?.name || '',
-      volunteerId: volunteers[0]?.id || '',
-      status: 'Scheduled',
+      panchayatId: initialPanchayats[0]?.id || '',
+      villageName: initialTargets[0]?.villageName || '',
       description: '',
     });
+    setSelectedPanchayatIds(initialPanchayats.map((panchayat) => panchayat.id));
+    setSelectedVillageTargets(initialTargets);
+    setTargetLocationReason('');
     setScheduleType('date-range');
     setIsModalOpen(true);
   };
@@ -251,6 +281,16 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   const handleOpenEdit = (session: Session) => {
     setEditingSession(session);
     setScheduleType('single');
+    const targets = session.targetLocations?.length
+      ? session.targetLocations.map((target) => ({ panchayatId: target.panchayatId, villageId: target.villageId || target.villageName, villageName: target.villageName }))
+      : (() => {
+        const panchayat = panchayats.find((item) => item.id === session.panchayatId);
+        const village = panchayat?.villages.find((item) => item.id === session.villageId || item.name === session.villageName);
+        return session.panchayatId && session.villageName ? [{ panchayatId: session.panchayatId, villageId: village?.id || session.villageName, villageName: session.villageName }] : [];
+      })();
+    setSelectedPanchayatIds([...new Set(targets.map((target) => target.panchayatId))]);
+    setSelectedVillageTargets(targets);
+    setTargetLocationReason(session.targetLocationReason || '');
     setFormData({
       name: session.name || session.title || '',
       clusterId: session.clusterId || clusters[0]?.id || '',
@@ -259,11 +299,61 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
       module: session.module || 'Spoken English & Communication',
       panchayatId: session.panchayatId || (panchayats[0]?.id || ''),
       villageName: session.villageName || '',
-      volunteerId: session.volunteerId || '',
-      status: session.status || 'Scheduled',
       description: session.description || '',
     });
     setIsModalOpen(true);
+  };
+
+  const handleApproveSessionDate = async (session: Session, date: string) => {
+    if (!date) return;
+    setApprovingSessionId(session.id);
+    try {
+      if (onApproveSessionDate) await onApproveSessionDate(session, date);
+      else await onUpdateSession(session.id, { date, dateFixed: true, status: 'Scheduled' });
+      showToast('Session date approved. Cluster Admin will now see it as Confirmed.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to approve session date.');
+    } finally {
+      setApprovingSessionId(null);
+    }
+  };
+
+  const handleProposeSessionDate = async (session: Session, panchayatId: string, villageId: string) => {
+    const date = sessionProposalDates[session.id] ?? session.date ?? '';
+    if (!date || !panchayatId || !villageId) return;
+    try {
+      const panchayat = panchayats.find((item) => item.id === panchayatId);
+      const village = panchayat?.villages.find((item) => item.id === villageId || item.name === villageId);
+      if (!panchayat || !village) throw new Error('Select a valid Panchayat and Village.');
+      const currentTargets = session.targetLocations?.length
+        ? session.targetLocations
+        : session.panchayatId && session.villageId
+          ? [{ panchayatId: session.panchayatId, panchayatName: session.panchayatName, villageId: session.villageId, villageName: session.villageName }]
+          : [];
+      const selectedTarget = {
+        panchayatId,
+        panchayatName: panchayat.name,
+        villageId: village.id || village.name,
+        villageName: village.name,
+      };
+      const targets = currentTargets.length
+        ? [selectedTarget, ...currentTargets.slice(1)]
+        : [selectedTarget];
+      await onUpdateSession(session.id, {
+        date,
+        dateFixed: false,
+        status: 'Scheduled',
+        panchayatId: selectedTarget.panchayatId,
+        panchayatName: selectedTarget.panchayatName,
+        villageId: selectedTarget.villageId,
+        villageName: selectedTarget.villageName,
+        targetLocations: targets,
+      });
+      setSessionProposalDates((previous) => ({ ...previous, [session.id]: date }));
+      showToast('Proposed date saved and sent to Super Admin for approval.');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save proposed session date.');
+    }
   };
 
   // Helper to generate dates between From and To dates
@@ -298,12 +388,30 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     return result;
   };
 
-  const handleSaveSession = (e: React.FormEvent) => {
+  const handleSaveSession = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!formData.clusterId) {
+      showToast('Select a cluster before scheduling sessions.');
+      return;
+    }
+    if (!selectedVillageTargets.length) {
+      showToast('Select at least one village for this session.');
+      return;
+    }
+    if (formPanchayats.length > selectedPanchayatIds.length && !targetLocationReason.trim()) {
+      showToast('Add a reason when scheduling only selected panchayats.');
+      return;
+    }
     const p = panchayats.find((item) => item.id === formData.panchayatId) || panchayats[0];
-    const v = volunteers.find((item) => item.id === formData.volunteerId) || volunteers[0];
     const c = clusters.find((item) => item.id === formData.clusterId) || clusters[0];
+    const targetLocations = selectedVillageTargets.map((target) => ({
+      ...target,
+      panchayatName: panchayats.find((item) => item.id === target.panchayatId)?.name || '',
+    }));
+    const primaryTarget = targetLocations[0];
 
+    setIsSavingSchedule(true);
+    try {
     if (editingSession) {
       const payload: Partial<Session> = {
         name: formData.name.trim() || `Day ${formData.dayNumber} Session`,
@@ -313,24 +421,26 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         dayNumber: formData.dayNumber,
         day: `Day ${formData.dayNumber}`,
         date: formData.date,
+        dateFixed: isSuperAdmin ? Boolean(formData.date) : Boolean(editingSession.dateFixed),
+        status: formData.date ? 'Scheduled' : 'Draft',
         module: formData.module,
-        panchayatId: formData.panchayatId,
-        panchayatName: p?.name || editingSession.panchayatName || 'Panchayat',
-        villageName: formData.villageName || p?.villages[0]?.name || '',
-        volunteerId: formData.volunteerId,
-        volunteerName: v?.name || editingSession.volunteerName || 'Unassigned',
-        status: formData.status,
+        panchayatId: primaryTarget.panchayatId,
+        panchayatName: primaryTarget.panchayatName || p?.name || editingSession.panchayatName || 'Panchayat',
+        villageId: primaryTarget.villageId,
+        villageName: primaryTarget.villageName,
+        targetLocations,
+        targetLocationReason: targetLocationReason.trim(),
         description: formData.description,
       };
-      onUpdateSession(editingSession.id, payload);
+      await onUpdateSession(editingSession.id, payload);
       showToast(`Updated session: ${formData.name}`);
     } else if (scheduleType === 'date-range') {
       // Create multi-day academic cycle from From Date to To Date
       const generatedDates = generateDates(rangeFromDate, rangeToDate, totalCycleDays);
-      generatedDates.forEach((dateStr, idx) => {
+      for (const [idx, dateStr] of generatedDates.entries()) {
         const dayNum = idx + 1;
         const modName = moduleOptions[(dayNum - 1) % moduleOptions.length];
-        onAddSession({
+        const payload: Omit<Session, 'id'> = {
           name: formData.name.trim() ? `${formData.name.trim()} - Day ${dayNum}` : `Day ${dayNum} Academic Session`,
           title: formData.name.trim() ? `${formData.name.trim()} - Day ${dayNum}` : `Day ${dayNum} Academic Session`,
           code: `SES-${Math.floor(100 + Math.random() * 900)}`,
@@ -340,18 +450,24 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
           day: `Day ${dayNum}`,
           date: dateStr,
           module: modName,
-          panchayatId: formData.panchayatId,
-          panchayatName: p?.name || 'Panchayat',
-          villageName: formData.villageName || p?.villages[0]?.name || 'Main Hub',
-          volunteerId: formData.volunteerId,
-          volunteerName: v?.name || 'Assigned Mentor',
+          panchayatId: primaryTarget.panchayatId,
+          panchayatName: primaryTarget.panchayatName || 'Panchayat',
+          villageId: primaryTarget.villageId,
+          villageName: primaryTarget.villageName,
+          targetLocations,
+          targetLocationReason: targetLocationReason.trim(),
+          volunteerId: '',
+          volunteerName: 'Unassigned',
           status: 'Scheduled',
           description: `Scheduled academic term session from ${rangeFromDate} to ${rangeToDate}`,
-        });
-      });
+        };
+        const existing = sessions.find((session) => session.clusterId === formData.clusterId && Number(session.dayNumber) === dayNum);
+        if (existing) await onUpdateSession(existing.id, payload);
+        else await onAddSession(payload);
+      }
       showToast(`Successfully scheduled ${totalCycleDays}-Day academic session cycle (${rangeFromDate} to ${rangeToDate})!`);
     } else {
-      onAddSession({
+      const payload: Omit<Session, 'id'> = {
         name: formData.name.trim() || `Day ${formData.dayNumber} Session`,
         title: formData.name.trim() || `Day ${formData.dayNumber} Session`,
         code: `SES-${Math.floor(100 + Math.random() * 900)}`,
@@ -361,19 +477,30 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         day: `Day ${formData.dayNumber}`,
         date: formData.date,
         module: formData.module,
-        panchayatId: formData.panchayatId,
-        panchayatName: p?.name || 'Panchayat',
-        villageName: formData.villageName,
-        volunteerId: formData.volunteerId,
-        volunteerName: v?.name || 'Unassigned',
-        status: formData.status,
+        panchayatId: primaryTarget.panchayatId,
+        panchayatName: primaryTarget.panchayatName || 'Panchayat',
+        villageId: primaryTarget.villageId,
+        villageName: primaryTarget.villageName,
+        targetLocations,
+        targetLocationReason: targetLocationReason.trim(),
+        volunteerId: '',
+        volunteerName: 'Unassigned',
+        status: 'Scheduled',
         description: formData.description,
-      });
+      };
+      const existing = sessions.find((session) => session.clusterId === formData.clusterId && Number(session.dayNumber) === formData.dayNumber);
+      if (existing) await onUpdateSession(existing.id, payload);
+      else await onAddSession(payload);
       showToast(`Scheduled new session: ${formData.name}`);
     }
 
     setIsModalOpen(false);
     setEditingSession(null);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to save session schedule.');
+    } finally {
+      setIsSavingSchedule(false);
+    }
   };
 
   const handleConfirmDelete = () => {
@@ -434,14 +561,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     try {
       if (onReviewDateChange) {
         await onReviewDateChange(reviewingRequest.id, action, reviewRemarks);
-      }
-      // Also update session date directly if approved
-      if (action === 'approve') {
-        onUpdateSession(reviewingRequest.sessionId, {
-          date: reviewingRequest.requestedDate,
-          dateFixed: true,
-          status: 'Scheduled',
-        });
       }
       showToast(`Reschedule request ${action === 'approve' ? 'Approved' : 'Rejected'}!`);
       setReviewingRequest(null);
@@ -524,7 +643,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </div>
 
                 {/* Progress Stats */}
-                <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
                   <div className="rounded-xl bg-muted/40 p-2">
                     <strong className="block text-base text-foreground">{cluster.sessionsCount}</strong>
                     <span className="text-[11px] text-muted-foreground">Sessions</span>
@@ -536,6 +655,10 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   <div className="rounded-xl bg-muted/40 p-2">
                     <strong className="block text-base text-primary">{cluster.upcoming}</strong>
                     <span className="text-[11px] text-muted-foreground">Upcoming</span>
+                  </div>
+                  <div className="rounded-xl bg-muted/40 p-2">
+                    <strong className="block text-base text-primary">{cluster.volunteersCount}</strong>
+                    <span className="text-[11px] text-muted-foreground">Volunteers</span>
                   </div>
                 </div>
               </div>
@@ -835,136 +958,72 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             )}
           </div>
 
-          {/* Sessions Table */}
-          <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="border-b border-border bg-muted/40 font-semibold text-muted-foreground">
-                  <tr>
-                    <th className="w-14 px-4 py-3 text-center">S.No</th>
-                    <th className="px-4 py-3 text-center">Cycle Day</th>
-                    <th className="px-4 py-3">Scheduled Session Date</th>
-                    <th className="px-4 py-3">Module &amp; Curriculum</th>
-                    <th className="px-4 py-3">Location &amp; Volunteer</th>
-                    <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {paginatedSessions.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-12">
-                        <EmptyState
-                          icon={Calendar}
-                          title="No sessions scheduled"
-                          description="Schedule teaching sessions using From Date to To Date to populate the academic cycle."
-                          actionLabel="+ Schedule Session Cycle"
-                          onAction={handleOpenAdd}
-                        />
-                      </td>
-                    </tr>
-                  ) : (
-                    paginatedSessions.map((session, idx) => {
-                      const sNo = (currentPage - 1) * pageSize + idx + 1;
-                      const dayNum = session.dayNumber || parseInt(session.day?.replace(/\D/g, '') || '1', 10);
-                      const displayStatus = session.dateFixed ? 'Scheduled' : session.status;
-
-                      return (
-                        <tr key={session.id} className="transition-colors hover:bg-muted/30">
-                          <td className="px-4 py-3 text-center font-mono text-muted-foreground">{sNo}</td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge variant="default" size="sm">Day {dayNum}</Badge>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="font-mono text-xs font-semibold text-foreground flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-primary" />
-                              <span>{session.date || 'Not Fixed'}</span>
-                              {session.dateFixed && <Badge variant="success" size="sm">✓ Confirmed</Badge>}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="font-semibold text-foreground">{session.name || session.title || 'Academic Session'}</div>
-                            <div className="text-[11px] text-muted-foreground">{session.module || 'Spoken English & Communication'}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="text-foreground font-medium">{session.panchayatName || 'Panchayat'}</div>
-                            <div className="text-[11px] text-muted-foreground flex items-center gap-1">
-                              <Users className="h-3 w-3" />
-                              <span>{session.volunteerName || 'Volunteer'}</span>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-center">
-                            <Badge
-                              variant={
-                                displayStatus === 'Completed'
-                                  ? 'success'
-                                  : displayStatus === 'In Progress'
-                                  ? 'info'
-                                  : displayStatus === 'Needs Attention' || displayStatus === 'Action Req.'
-                                  ? 'warning'
-                                  : 'secondary'
-                              }
-                              size="sm"
-                            >
-                              {displayStatus}
-                            </Badge>
-                          </td>
-                          <td className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                onClick={() => setViewingSession(session)}
-                                title="View Details"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </Button>
-
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                                onClick={() => handleOpenEdit(session)}
-                                title="Edit Session"
-                              >
-                                <Edit3 className="h-3.5 w-3.5" />
-                              </Button>
-
-                              {/* Reschedule Option: Can't go -> provide reason */}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleOpenDateChange(session)}
-                                className="h-7 text-xs font-semibold text-amber-500 hover:bg-amber-500/10 gap-1"
-                                title="Reschedule Session Date"
-                              >
-                                <CalendarCheck className="h-3.5 w-3.5" />
-                                <span>Reschedule</span>
-                              </Button>
-
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 text-destructive hover:bg-destructive/10"
-                                onClick={() => setSessionToDelete(session)}
-                                title="Delete Session"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+          {paginatedSessions.length === 0 ? (
+            <div className="rounded-2xl border border-border bg-card py-12">
+              <EmptyState icon={Calendar} title="No sessions scheduled" description="Schedule teaching sessions using From Date to To Date to populate the academic cycle." actionLabel="+ Schedule Session Cycle" onAction={handleOpenAdd} />
             </div>
+          ) : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {paginatedSessions.map((session, idx) => {
+              const sNo = (currentPage - 1) * pageSize + idx + 1;
+              const dayNum = session.dayNumber || parseInt(session.day?.replace(/\D/g, '') || '1', 10);
+              const displayStatus = session.dateFixed ? 'Scheduled' : session.status;
+              const sessionVolunteersCount = volunteers.filter((volunteer) =>
+                (!volunteer.clusterId || volunteer.clusterId === session.clusterId) &&
+                String(volunteer.status || 'Active').toLowerCase() === 'active'
+              ).length;
+              const proposalPanchayats = panchayats.filter((panchayat) => panchayat.clusterId === session.clusterId);
+              const proposalPanchayatId = sessionProposalLocations[session.id]?.panchayatId
+                || session.targetLocations?.[0]?.panchayatId
+                || session.panchayatId
+                || proposalPanchayats[0]?.id
+                || '';
+              const proposalPanchayat = proposalPanchayats.find((panchayat) => panchayat.id === proposalPanchayatId);
+              const proposalVillageId = sessionProposalLocations[session.id]?.villageId
+                || session.targetLocations?.[0]?.villageId
+                || session.villageId
+                || proposalPanchayat?.villages[0]?.id
+                || proposalPanchayat?.villages[0]?.name
+                || '';
+              const proposalVillages = proposalPanchayat?.villages || [];
+              return <article key={session.id} className="rounded-2xl border border-border bg-card p-5 shadow-xs transition hover:border-primary/40 hover:shadow-md">
+                <div className="flex items-start justify-between gap-3"><span className="inline-flex items-center gap-2"><span className="text-xs font-mono text-muted-foreground">#{sNo}</span><Badge variant="default" size="sm">Day {dayNum}</Badge></span><Badge variant={displayStatus === 'Completed' ? 'success' : displayStatus === 'In Progress' ? 'info' : displayStatus === 'Needs Attention' || displayStatus === 'Action Req.' ? 'warning' : 'secondary'} size="sm">{displayStatus}</Badge></div>
+                <h2 className="mt-4 text-base font-bold text-foreground">{session.name || session.title || 'Academic Session'}</h2>
+                <p className="mt-1 text-xs text-muted-foreground">{session.module || 'Spoken English & Communication'}</p>
+                <div className="mt-4 space-y-2 border-t border-border pt-3 text-xs">
+                  <div className="flex items-center gap-2 font-medium text-foreground"><Calendar className="h-3.5 w-3.5 text-primary" />{session.date || 'Date not set'} {session.dateFixed ? <Badge variant="success" size="sm">Confirmed</Badge> : session.date ? <Badge variant="warning" size="sm">Pending approval</Badge> : null}</div>
+                  {isClusterAdmin && !session.dateFixed && <>
+                    <Input aria-label={`Propose date for Day ${dayNum}`} type="date" value={sessionProposalDates[session.id] ?? session.date ?? ''} onChange={(event) => setSessionProposalDates((previous) => ({ ...previous, [session.id]: event.target.value }))} className="h-8 rounded-lg text-xs" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="space-y-1 text-[10px] font-semibold text-muted-foreground">Panchayat
+                        <select value={proposalPanchayatId} onChange={(event) => {
+                          const nextPanchayat = proposalPanchayats.find((item) => item.id === event.target.value);
+                          const nextVillageId = nextPanchayat?.villages[0]?.id || nextPanchayat?.villages[0]?.name || '';
+                          setSessionProposalLocations((previous) => ({ ...previous, [session.id]: { panchayatId: event.target.value, villageId: nextVillageId } }));
+                        }} className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground">
+                          <option value="">Select Panchayat</option>
+                          {proposalPanchayats.map((panchayat) => <option key={panchayat.id} value={panchayat.id}>{panchayat.name}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-[10px] font-semibold text-muted-foreground">Village
+                        <select value={proposalVillageId} onChange={(event) => setSessionProposalLocations((previous) => ({ ...previous, [session.id]: { panchayatId: proposalPanchayatId, villageId: event.target.value } }))} disabled={!proposalVillages.length} className="h-8 w-full rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground disabled:opacity-50">
+                          <option value="">Select Village</option>
+                          {proposalVillages.map((village) => <option key={village.id || village.name} value={village.id || village.name}>{village.name}</option>)}
+                        </select>
+                      </label>
+                    </div>
+                  </>}
+                  <p className="flex items-center gap-2 text-muted-foreground"><MapPin className="h-3.5 w-3.5" />{session.panchayatName || 'Panchayat'} · {session.villageName || 'Village'}</p>
+                  <p className="flex items-center gap-2 text-muted-foreground"><Users className="h-3.5 w-3.5" />{sessionVolunteersCount} active volunteers</p>
+                  <p className="text-[11px] text-muted-foreground">{session.clusterName || clusters.find((cluster) => cluster.id === session.clusterId)?.name || 'Cluster'}</p>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-1 border-t border-border pt-3"><Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingSession(session)} title="View details"><Eye className="h-3.5 w-3.5" /></Button>{isClusterAdmin && !session.dateFixed && <Button variant="ghost" size="sm" disabled={!(sessionProposalDates[session.id] ?? session.date) || !proposalPanchayatId || !proposalVillageId} onClick={() => void handleProposeSessionDate(session, proposalPanchayatId, proposalVillageId)} className="h-8 gap-1 text-xs font-semibold text-primary disabled:opacity-40"><CalendarCheck className="h-3.5 w-3.5" />Save Date</Button>}{isSuperAdmin && !session.dateFixed && <Button variant="ghost" size="sm" disabled={!session.date || approvingSessionId === session.id} onClick={() => void handleApproveSessionDate(session, session.date)} className="h-8 gap-1 text-xs font-semibold text-emerald-700 disabled:opacity-40" title="Approve session date"><CheckCircle2 className="h-3.5 w-3.5" />{approvingSessionId === session.id ? 'Approving…' : 'Approve'}</Button>}{isClusterAdmin && session.dateFixed && <Button variant="ghost" size="sm" onClick={() => handleOpenDateChange(session)} className="h-8 gap-1 text-xs font-semibold text-amber-600"><CalendarCheck className="h-3.5 w-3.5" />Reschedule</Button>}{isSuperAdmin && <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10" onClick={() => setSessionToDelete(session)} title="Delete session"><Trash2 className="h-3.5 w-3.5" /></Button>}</div>
+              </article>;
+            })}
+          </div>}
 
-            {/* Table Pagination */}
-            {filteredSessions.length > 0 && (
-              <div className="flex flex-col items-center justify-between gap-3 border-t border-border px-4 py-3 sm:flex-row text-xs">
+          {/* Card Pagination */}
+          {filteredSessions.length > 0 && (
+              <div className="flex flex-col items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 sm:flex-row text-xs">
                 <div className="text-muted-foreground">
                   Showing <span className="font-semibold text-foreground">{(currentPage - 1) * pageSize + 1}</span> to{' '}
                   <span className="font-semibold text-foreground">{Math.min(currentPage * pageSize, filteredSessions.length)}</span> of{' '}
@@ -993,8 +1052,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                   </Button>
                 </div>
               </div>
-            )}
-          </div>
+          )}
         </>
       )}
 
@@ -1050,25 +1108,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </div>
               )}
 
-              {/* Cluster Selector */}
-              <div>
-                <label className="mb-1 block text-xs font-semibold text-foreground">Target Cluster *</label>
-                <Select
-                  value={formData.clusterId}
-                  onValueChange={(val) => setFormData({ ...formData, clusterId: val })}
-                >
-                  <SelectTrigger className="h-9 text-xs rounded-xl">
-                    <SelectValue placeholder="Select Cluster" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {clusters.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} ({c.collegeName || 'Partner College'})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isSuperAdmin ? <fieldset className="space-y-2"><legend className="mb-1 text-xs font-semibold text-foreground">Target Cluster *</legend><div className="grid gap-2 sm:grid-cols-2">{clusters.map((cluster) => <label key={cluster.id} className={`flex cursor-pointer items-start gap-2 rounded-xl border p-3 transition ${formData.clusterId === cluster.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}><input type="checkbox" checked={formData.clusterId === cluster.id} onChange={(event) => { const nextClusterId = event.target.checked ? cluster.id : ''; setFormData((current) => ({ ...current, clusterId: nextClusterId, panchayatId: '', villageName: '' })); setSelectedPanchayatIds([]); setSelectedVillageTargets([]); }} className="mt-0.5 accent-primary" /><span><span className="block font-semibold text-foreground">{cluster.name}</span><span className="text-[11px] text-muted-foreground">{cluster.collegeName || 'Partner College'}</span></span></label>)}</div></fieldset> : <div className="rounded-xl border border-primary/20 bg-primary/5 p-3"><p className="text-[10px] font-semibold uppercase text-muted-foreground">Target Cluster</p><p className="mt-1 font-semibold text-foreground">{clusters.find((cluster) => cluster.id === formData.clusterId)?.name || 'Your cluster'}</p></div>}
 
               {/* DATE RANGE INPUTS (From Date to To Date) */}
               {scheduleType === 'date-range' && !editingSession ? (
@@ -1110,9 +1150,13 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="7">7 Days Cycle (Day 1 - Day 7)</SelectItem>
-                        <SelectItem value="8">8 Days Cycle (Day 1 - Day 8)</SelectItem>
-                        <SelectItem value="10">10 Days Custom Cycle</SelectItem>
+                        {cycleDayOptions.map((dayCount) => (
+                          <SelectItem key={dayCount} value={String(dayCount)}>
+                            {dayCount === 7 || dayCount === 8
+                              ? `${dayCount} Days Cycle (Day 1 - Day ${dayCount})`
+                              : `${dayCount} Days Custom Cycle`}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </div>
@@ -1120,7 +1164,9 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
               ) : (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Session Date *</label>
+                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                      {editingSession && isSuperAdmin && !editingSession.dateFixed ? 'Session Date to Approve *' : 'Session Date *'}
+                    </label>
                     <Input
                       type="date"
                       required
@@ -1129,106 +1175,13 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                       className="h-9 text-xs rounded-xl"
                     />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-semibold text-foreground">Cycle Day *</label>
-                    <Select
-                      value={String(formData.dayNumber)}
-                      onValueChange={(val) => setFormData({ ...formData, dayNumber: parseInt(val, 10) || 1 })}
-                    >
-                      <SelectTrigger className="h-9 text-xs rounded-xl">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                          <SelectItem key={d} value={String(d)}>Day {d}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  <div><label className="mb-1 block text-xs font-semibold text-foreground">Cycle Day</label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-xs font-semibold text-foreground">Day {formData.dayNumber} · fixed by Academic Setup</div></div>
                 </div>
               )}
 
-              {/* Panchayat & Village */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Target Panchayat *</label>
-                  <Select
-                    value={formData.panchayatId}
-                    onValueChange={(val) => {
-                      const targetPan = panchayats.find((p) => p.id === val);
-                      setFormData({
-                        ...formData,
-                        panchayatId: val,
-                        villageName: targetPan?.villages[0]?.name || '',
-                      });
-                    }}
-                  >
-                    <SelectTrigger className="h-9 text-xs rounded-xl">
-                      <SelectValue placeholder="Select Panchayat" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {panchayats.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <fieldset className="space-y-2"><legend className="mb-1 text-xs font-semibold text-foreground">Target Panchayats * <span className="font-normal text-muted-foreground">(select all or specific panchayats)</span></legend><label className="flex cursor-pointer items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"><input type="checkbox" checked={formPanchayats.length > 0 && selectedPanchayatIds.length === formPanchayats.length} onChange={(event) => { const nextIds = event.target.checked ? formPanchayats.map((panchayat) => panchayat.id) : []; const nextTargets = event.target.checked ? formPanchayats.flatMap((panchayat) => (panchayat.villages || []).map((village) => ({ panchayatId: panchayat.id, villageId: village.id || village.name, villageName: village.name }))) : []; setSelectedPanchayatIds(nextIds); setSelectedVillageTargets(nextTargets); setFormData((current) => ({ ...current, panchayatId: nextIds[0] || '', villageName: nextTargets[0]?.villageName || '' })); }} className="accent-primary" /><span className="text-xs font-semibold text-primary">Select all panchayats ({formPanchayats.length})</span></label><div className="grid max-h-36 gap-2 overflow-y-auto sm:grid-cols-2">{formPanchayats.map((panchayat) => <label key={panchayat.id} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition ${selectedPanchayatIds.includes(panchayat.id) ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}><input type="checkbox" checked={selectedPanchayatIds.includes(panchayat.id)} onChange={(event) => { const nextIds = event.target.checked ? [...selectedPanchayatIds, panchayat.id] : selectedPanchayatIds.filter((id) => id !== panchayat.id); const nextTargets = event.target.checked ? [...selectedVillageTargets, ...(panchayat.villages || []).map((village) => ({ panchayatId: panchayat.id, villageId: village.id || village.name, villageName: village.name }))] : selectedVillageTargets.filter((target) => target.panchayatId !== panchayat.id); setSelectedPanchayatIds(nextIds); setSelectedVillageTargets(nextTargets); setFormData((current) => ({ ...current, panchayatId: nextIds[0] || '', villageName: nextTargets[0]?.villageName || '' })); }} className="accent-primary" /><span className="text-xs font-medium text-foreground">{panchayat.name}</span></label>)}</div>{!formPanchayats.length && <p className="text-xs text-muted-foreground">Select a cluster to view its panchayats.</p>}</fieldset>
 
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Target Village *</label>
-                  <Select
-                    value={formData.villageName}
-                    onValueChange={(val) => setFormData({ ...formData, villageName: val })}
-                  >
-                    <SelectTrigger className="h-9 text-xs rounded-xl">
-                      <SelectValue placeholder="Select Village" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {formVillages.map((v) => (
-                        <SelectItem key={v.id || v.name} value={v.name}>{v.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              {/* Volunteer & Status */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Assigned Mentor</label>
-                  <Select
-                    value={formData.volunteerId}
-                    onValueChange={(val) => setFormData({ ...formData, volunteerId: val })}
-                  >
-                    <SelectTrigger className="h-9 text-xs rounded-xl">
-                      <SelectValue placeholder="Select Volunteer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {volunteers.map((vol) => (
-                        <SelectItem key={vol.id} value={vol.id}>{vol.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-foreground">Status</label>
-                  <Select
-                    value={formData.status}
-                    onValueChange={(val: any) => setFormData({ ...formData, status: val })}
-                  >
-                    <SelectTrigger className="h-9 text-xs rounded-xl">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Scheduled">Scheduled</SelectItem>
-                      <SelectItem value="In Progress">In Progress</SelectItem>
-                      <SelectItem value="Completed">Completed</SelectItem>
-                      <SelectItem value="Needs Attention">Needs Attention</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <fieldset className="space-y-2"><legend className="mb-1 text-xs font-semibold text-foreground">Target Villages * <span className="font-normal text-muted-foreground">(choose the villages to schedule)</span></legend><label className="flex cursor-pointer items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2"><input type="checkbox" checked={formVillages.length > 0 && selectedVillageTargets.length === formVillages.length} onChange={(event) => { const nextTargets = event.target.checked ? formVillages.map(({ panchayatId, villageId, villageName }) => ({ panchayatId, villageId, villageName })) : []; setSelectedVillageTargets(nextTargets); setFormData((current) => ({ ...current, panchayatId: nextTargets[0]?.panchayatId || '', villageName: nextTargets[0]?.villageName || '' })); }} className="accent-primary" /><span className="text-xs font-semibold text-primary">Select all villages ({formVillages.length})</span></label><div className="grid max-h-44 gap-2 overflow-y-auto sm:grid-cols-2">{formVillages.map((village) => { const checked = selectedVillageTargets.some((target) => target.panchayatId === village.panchayatId && target.villageId === village.villageId); return <label key={`${village.panchayatId}-${village.villageId}`} className={`flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition ${checked ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/40'}`}><input type="checkbox" checked={checked} onChange={(event) => { const nextTargets = event.target.checked ? [...selectedVillageTargets, { panchayatId: village.panchayatId, villageId: village.villageId, villageName: village.villageName }] : selectedVillageTargets.filter((target) => !(target.panchayatId === village.panchayatId && target.villageId === village.villageId)); setSelectedVillageTargets(nextTargets); setFormData((current) => ({ ...current, panchayatId: nextTargets[0]?.panchayatId || '', villageName: nextTargets[0]?.villageName || '' })); }} className="accent-primary" /><span className="text-xs"><span className="block font-medium text-foreground">{village.villageName}</span><span className="text-[10px] text-muted-foreground">{village.panchayatName}</span></span></label>; })}</div>{selectedPanchayatIds.length > 0 && selectedPanchayatIds.length < formPanchayats.length && <label className="block space-y-1.5 text-xs font-semibold text-foreground">Reason for scheduling only selected panchayats *<textarea required value={targetLocationReason} onChange={(event) => setTargetLocationReason(event.target.value)} rows={2} placeholder="Explain why the remaining panchayats are not included" className="w-full rounded-xl border border-border bg-background px-3 py-2 text-xs font-normal" /></label>}{!selectedVillageTargets.length && <p className="text-xs text-muted-foreground">Select at least one village.</p>}</fieldset>
 
               <div className="flex justify-end gap-2 border-t border-border pt-4">
                 <Button type="button" variant="outline" onClick={() => setIsModalOpen(false)} className="rounded-xl">
@@ -1236,7 +1189,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </Button>
                 <Button type="submit" className="rounded-xl bg-primary text-primary-foreground">
                   {editingSession
-                    ? 'Save Changes'
+                    ? isSuperAdmin && !editingSession.dateFixed ? 'Approve & Confirm Date' : 'Save Changes'
                     : scheduleType === 'date-range'
                     ? `Schedule ${totalCycleDays} Days Cycle`
                     : 'Schedule Session'}

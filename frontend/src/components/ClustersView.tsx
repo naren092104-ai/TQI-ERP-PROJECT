@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Archive,
   Building2,
   CheckCircle2,
   ClipboardList,
@@ -37,7 +36,6 @@ interface ClustersViewProps {
   onUpdateCluster?: (id: string, cluster: Partial<Cluster>) => void | Promise<void | boolean>;
   onResendCredentials?: (id: string) => Promise<{ emailSent: boolean; temporaryPassword: string; loginEmail: string; clusterName: string }>;
   onDeleteCluster?: (id: string) => Promise<void>;
-  onArchiveCluster?: (id: string, archived: boolean) => void | Promise<void>;
 }
 
 interface CredentialDisplay {
@@ -87,7 +85,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   onUpdateCluster,
   onResendCredentials,
   onDeleteCluster,
-  onArchiveCluster,
 }) => {
   const isSuperAdmin = !userRole || userRole === 'Super Admin' || userRole.toLowerCase().includes('super');
   const [clusters, setClusters] = useState<Cluster[]>(initialClusters);
@@ -98,7 +95,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const [collegeFilter, setCollegeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [showArchived, setShowArchived] = useState(false);
   const [drawerMode, setDrawerMode] = useState<'create' | 'edit' | null>(null);
   const [editingCluster, setEditingCluster] = useState<Cluster | null>(null);
   const [draft, setDraft] = useState<ClusterDraft>(emptyDraft);
@@ -141,7 +137,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   }, [toast]);
 
   const activeClusters = useMemo(() => clusters.filter((cluster) => cluster.status !== 'Inactive'), [clusters]);
-  const visibleBase = showArchived ? clusters.filter((cluster) => cluster.status === 'Inactive') : activeClusters;
+  const visibleBase = activeClusters;
   const districtOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.district).filter(Boolean))].sort(), [activeClusters]);
   const collegeOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.collegeName).filter(Boolean))].sort(), [activeClusters]);
 
@@ -192,7 +188,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       collegeName: cluster.collegeName || '',
       collegeDistrict: cluster.collegeDistrict || cluster.district || '',
       spocName: cluster.spocName || cluster.adminName || '',
-      spocMobile: cluster.spocMobile || cluster.adminPhone || '',
+      spocMobile: String(cluster.spocMobile || cluster.adminPhone || '').replace(/\D/g, '').slice(-10),
       adminEmail: cluster.adminEmail || '',
     });
     setFormError('');
@@ -217,7 +213,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const saveCluster = async (event: React.FormEvent) => {
     event.preventDefault();
     setFormError('');
-    const mobile = draft.spocMobile.trim();
+    const mobile = draft.spocMobile.replace(/\D/g, '').slice(-10);
     const email = draft.adminEmail.trim().toLowerCase();
     if (!selectedAcademicYearId) {
       setFormError('Select an academic year before saving a cluster.');
@@ -231,7 +227,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       setFormError('Select the college location.');
       return;
     }
-    if (drawerMode === 'create' && !/^\d{10}$/.test(mobile)) {
+    if (!/^\d{10}$/.test(mobile)) {
       setFormError('SPOC mobile number must contain exactly 10 digits.');
       return;
     }
@@ -324,18 +320,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     }
   };
 
-  const archiveCluster = async (cluster: Cluster, archived: boolean) => {
-    const verb = archived ? 'archive' : 'restore';
-    if (!window.confirm(`Are you sure you want to ${verb} ${cluster.name}?`)) return;
-    try {
-      await onArchiveCluster?.(cluster.id, archived);
-      await loadClusters();
-      setToast(archived ? 'Cluster archived.' : 'Cluster restored.');
-    } catch (error: any) {
-      setToast(error?.message || `Unable to ${verb} cluster.`);
-    }
-  };
-
   const copyClusterDetails = async (cluster: Cluster) => {
     const details = [cluster.name, `${cluster.district} District`, cluster.collegeName, cluster.collegeDistrict, cluster.spocName || cluster.adminName, cluster.spocMobile || cluster.adminPhone, cluster.adminEmail].filter(Boolean).join('\n');
     try {
@@ -389,7 +373,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
               <button type="button" aria-label="Grid view" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} className={`flex flex-1 items-center justify-center rounded-lg p-1.5 ${viewMode === 'grid' ? 'bg-[#0B3D91] text-white' : 'text-slate-500 hover:bg-slate-100'}`}><GridFour className="h-4 w-4" /></button>
               <button type="button" aria-label="List view" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} className={`flex flex-1 items-center justify-center rounded-lg p-1.5 ${viewMode === 'list' ? 'bg-[#0B3D91] text-white' : 'text-slate-500 hover:bg-slate-100'}`}><Rows className="h-4 w-4" /></button>
             </div>
-            {isSuperAdmin && <button type="button" onClick={() => setShowArchived((value) => !value)} className={`col-span-2 inline-flex items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold sm:col-span-1 ${showArchived ? 'border-[#0B3D91] bg-blue-50 text-[#0B3D91]' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}><Archive className="h-4 w-4" />{showArchived ? 'Archived' : 'Archive'}</button>}
           </div>
         </div>
       </section>
@@ -401,9 +384,9 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
         {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-[285px] animate-pulse rounded-2xl border border-slate-200 bg-white"><div className="h-20 rounded-t-2xl bg-slate-100" /><div className="space-y-4 p-4"><div className="h-4 w-1/2 rounded bg-slate-100" /><div className="h-14 rounded bg-slate-50" /><div className="h-12 rounded bg-slate-50" /><div className="h-9 rounded bg-slate-100" /></div></div>)}
       </div> : filteredClusters.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#0B3D91]"><Building2 className="h-7 w-7" /></span>
-        <h2 className="mt-4 text-lg font-bold text-[#10234E]">{showArchived ? 'No Archived Clusters' : 'No Clusters Found'}</h2>
-        <p className="mt-1 text-sm text-slate-500">{showArchived ? 'Archived clusters for this academic year will appear here.' : 'No clusters have been added for this academic year yet.'}</p>
-        {!showArchived && isSuperAdmin && <button type="button" onClick={openCreate} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Add Cluster</button>}
+        <h2 className="mt-4 text-lg font-bold text-[#10234E]">No Clusters Found</h2>
+        <p className="mt-1 text-sm text-slate-500">No clusters have been added for this academic year yet.</p>
+        {isSuperAdmin && <button type="button" onClick={openCreate} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Add Cluster</button>}
       </div> : <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 2xl:grid-cols-3' : 'grid-cols-1'}`}>
         {filteredClusters.map((cluster, index) => {
           const numbers = getClusterNumbers(cluster);
@@ -416,7 +399,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className={`relative flex min-h-[78px] items-center gap-3 border-b bg-gradient-to-r px-4 py-3 ${accent} ${viewMode === 'list' ? 'lg:h-full lg:border-b-0 lg:border-r' : ''}`}>
               <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80 shadow-sm"><MapPin className="h-5 w-5" /></span>
               <div className="min-w-0 flex-1"><h2 className="truncate text-[15px] font-bold text-[#10234E]">{cluster.name}</h2><p className="mt-0.5 truncate text-xs text-slate-600">{cluster.district} District</p></div>
-              {cluster.status === 'Inactive' && <span className="rounded-full bg-slate-700/10 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-600">Archived</span>}
               <button type="button" onClick={() => void copyClusterDetails(cluster)} title="Copy cluster details" aria-label={`Copy ${cluster.name} details`} className="rounded-lg p-2 text-slate-500 transition hover:bg-white/70 hover:text-[#0B3D91]"><ClipboardList className="h-4 w-4" /></button>
             </div>
             <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-4 lg:border-b-0">
@@ -427,14 +409,11 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
               <div className="min-w-0"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">College</p><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-[#0B3D91]" /><div className="min-w-0"><p className="line-clamp-2 text-xs font-semibold text-slate-800">{cluster.collegeName || 'College not assigned'}</p><p className="truncate text-[11px] text-slate-500">{cluster.collegeDistrict || cluster.district}</p></div></div></div>
             </div>
             <div className={`flex flex-wrap items-center gap-2 px-4 py-3 ${viewMode === 'list' ? 'lg:justify-end' : ''}`}>
-              {cluster.status === 'Inactive' ? <button type="button" onClick={() => void archiveCluster(cluster, false)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><RefreshCw className="h-3.5 w-3.5" />Restore</button> : <>
-                <a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} aria-disabled={!phone} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${phone ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Phone className="h-3.5 w-3.5" />Call</a>
-                <a href={email ? `mailto:${email}` : undefined} aria-disabled={!email} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${email ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Mail className="h-3.5 w-3.5" />Email</a>
-                {isSuperAdmin && <button type="button" onClick={() => openEdit(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B3D91] px-2 py-2 text-xs font-semibold text-white hover:bg-[#082f70]"><Pencil className="h-3.5 w-3.5" />Edit</button>}
-                {isSuperAdmin && onResendCredentials && <button type="button" disabled={resettingCredentialsFor === cluster.id} onClick={() => void resetClusterCredentials(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-xs font-semibold text-[#0B3D91] hover:bg-blue-100 disabled:opacity-60" title="Generate and email a new temporary password"><RefreshCw className={`h-3.5 w-3.5 ${resettingCredentialsFor === cluster.id ? 'animate-spin' : ''}`} />{resettingCredentialsFor === cluster.id ? 'Sending…' : 'Reset Login'}</button>}
-                {isSuperAdmin && <button type="button" onClick={() => void archiveCluster(cluster, true)} title="Archive cluster" aria-label={`Archive ${cluster.name}`} className="rounded-xl border border-slate-200 p-2 text-slate-500 hover:border-orange-200 hover:bg-orange-50 hover:text-[#FF7A00]"><Archive className="h-4 w-4" /></button>}
-                {isSuperAdmin && onDeleteCluster && <button type="button" onClick={() => void deleteCluster(cluster)} title={`Delete ${cluster.name}`} aria-label={`Delete ${cluster.name}`} className="rounded-xl border border-red-200 p-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}
-              </>}
+              <a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} aria-disabled={!phone} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${phone ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Phone className="h-3.5 w-3.5" />Call</a>
+              <a href={email ? `mailto:${email}` : undefined} aria-disabled={!email} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${email ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Mail className="h-3.5 w-3.5" />Email</a>
+              {isSuperAdmin && <button type="button" onClick={() => openEdit(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B3D91] px-2 py-2 text-xs font-semibold text-white hover:bg-[#082f70]"><Pencil className="h-3.5 w-3.5" />Edit</button>}
+              {isSuperAdmin && onResendCredentials && <button type="button" disabled={resettingCredentialsFor === cluster.id} onClick={() => void resetClusterCredentials(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-xs font-semibold text-[#0B3D91] hover:bg-blue-100 disabled:opacity-60" title="Generate and email a new temporary password"><RefreshCw className={`h-3.5 w-3.5 ${resettingCredentialsFor === cluster.id ? 'animate-spin' : ''}`} />{resettingCredentialsFor === cluster.id ? 'Sending…' : 'Reset Login'}</button>}
+              {isSuperAdmin && onDeleteCluster && <button type="button" onClick={() => void deleteCluster(cluster)} title={`Delete ${cluster.name}`} aria-label={`Delete ${cluster.name}`} className="rounded-xl border border-red-200 p-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}
             </div>
           </article>;
         })}

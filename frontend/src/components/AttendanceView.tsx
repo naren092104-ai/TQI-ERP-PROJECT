@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { pdf } from '@react-pdf/renderer';
 import {
   AttendanceSession,
   Student,
@@ -19,24 +20,13 @@ import {
   ChevronRight,
   ArrowLeft,
   Users,
-  Plus,
-  School,
-  FileText,
-  Clock,
-  Sparkles,
-  ChevronDown,
   Download,
 } from './ui/icons';
-import { exportAttendanceMatrixExcel, exportAttendanceMatrixPdf } from '../utils/exportUtils';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
+import { exportAttendanceRosterExcel, exportVolunteerAttendanceRosterExcel, triggerFileDownload } from '../utils/exportUtils';
+import { AttendanceDownloadContext, AttendanceDownloadRow, AttendanceRosterPdf } from '../utils/pdf/AttendanceRosterPdf';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
+import { SuperAdminAttendanceReviewView } from './SuperAdminAttendanceReviewView';
 
 interface AttendanceViewProps {
   attendanceSessions: AttendanceSession[];
@@ -45,11 +35,14 @@ interface AttendanceViewProps {
   panchayats: Panchayat[];
   clusters?: Cluster[];
   sessions?: Session[];
+  academicYear?: string;
   userRole?: string;
   draftId?: string;
   initialSubject?: 'students' | 'volunteers';
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
-  onSaveAttendance: (session: AttendanceSession) => void;
+  onSaveAttendance: (session: AttendanceSession) => Promise<void> | void;
+  onReviewAttendance?: (attendanceId: string, action: 'approve' | 'request-resubmission' | 'approve-edit' | 'deny-edit', remarks: string) => Promise<void>;
+  onRequestAttendanceEdit?: (attendanceId: string, reason: string) => Promise<void>;
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
@@ -59,15 +52,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   panchayats,
   clusters = [],
   sessions = [],
+  academicYear = '',
   userRole = 'Cluster Admin',
   initialSubject = 'students',
   onNavigate,
   onSaveAttendance,
+  onReviewAttendance,
+  onRequestAttendanceEdit,
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
 
-  // Screen View Mode: 'day-cards' (Landing), 'marking' (Panchayat -> Village -> School -> Roster), 'matrix-report' (7-Day Detailed Overview)
-  const [viewMode, setViewMode] = useState<'day-cards' | 'marking' | 'matrix-report'>('day-cards');
+  // Attendance flow: scheduled days, then location/standard cards and roster.
+  const [viewMode, setViewMode] = useState<'day-cards' | 'marking'>('day-cards');
 
   // Selected Day & Session Context
   const [selectedDayNumber, setSelectedDayNumber] = useState<number>(1);
@@ -75,10 +71,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   const [sessionTitle, setSessionTitle] = useState<string>('Day 1 Session');
   const [taskTopic, setTaskTopic] = useState<string>('Module Activity & Practice');
 
-  // Hierarchy Selection (Panchayat -> Village -> School)
+  // Hierarchy Selection (Panchayat -> Village -> Standard)
   const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('');
   const [selectedVillageId, setSelectedVillageId] = useState<string>('all');
-  const [selectedSchool, setSelectedSchool] = useState<string>('all');
+  const [selectedStandard, setSelectedStandard] = useState<string>('');
+  const [markingStep, setMarkingStep] = useState<'panchayats' | 'villages' | 'standards' | 'roster'>('panchayats');
 
   // Subject Mode: Students vs Volunteers
   const [subjectMode, setSubjectMode] = useState<'students' | 'volunteers'>(initialSubject);
@@ -89,16 +86,31 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   const [volunteerRecordsMap, setVolunteerRecordsMap] = useState<Record<string, 'Present' | 'Absent'>>({});
 
   const [saveSuccessMsg, setSaveSuccessMsg] = useState('');
+  const [isSavingAttendance, setIsSavingAttendance] = useState(false);
+  const [showEditRequest, setShowEditRequest] = useState(false);
+  const [editRequestReason, setEditRequestReason] = useState('');
+  const [isRequestingEdit, setIsRequestingEdit] = useState(false);
+  const [isDownloadingRosterPdf, setIsDownloadingRosterPdf] = useState(false);
 
-  // Generate or align scheduled days (Day 1 to Day 7 / 8)
+  useEffect(() => {
+    setSubjectMode(initialSubject);
+  }, [initialSubject]);
+
+  // Use the days configured for this academic year rather than a fixed list.
   const scheduledDays = useMemo(() => {
-    const days = [1, 2, 3, 4, 5, 6, 7];
+    const configuredDayNumbers = sessions
+      .map((session) => Number(session.dayNumber))
+      .filter((dayNumber) => Number.isInteger(dayNumber) && dayNumber > 0);
+    const recordedDayNumbers = attendanceSessions
+      .map((attendance) => Number(attendance.dayNumber))
+      .filter((dayNumber) => Number.isInteger(dayNumber) && dayNumber > 0);
+    const days = [...new Set([...configuredDayNumbers, ...recordedDayNumbers])].sort((a, b) => a - b);
     return days.map((dayNum) => {
       // Find matching session in scheduling
-      const foundSession = sessions.find((s) => s.dayNumber === dayNum || s.day?.includes(String(dayNum)));
+      const foundSession = sessions.find((s) => Number(s.dayNumber) === dayNum || s.day === `Day ${dayNum}`);
       // Find attendance sessions recorded for this day
       const existingAttendance = attendanceSessions.filter(
-        (a) => a.dayNumber === dayNum || a.day?.includes(`Day ${dayNum}`)
+          (a) => a.dayNumber === dayNum || a.day?.includes(`Day ${dayNum}`)
       );
       const isCompleted = existingAttendance.some((a) => a.status === 'Submitted' || a.status === 'Approved');
       const isDraft = existingAttendance.some((a) => a.status === 'Draft');
@@ -136,14 +148,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   // Available Panchayats
   const availablePanchayats = panchayats;
 
-  useEffect(() => {
-    if (availablePanchayats.length > 0 && !selectedPanchayatId) {
-      setSelectedPanchayatId(availablePanchayats[0].id);
-    }
-  }, [availablePanchayats, selectedPanchayatId]);
-
   const currentPanchayat = useMemo(
-    () => availablePanchayats.find((p) => p.id === selectedPanchayatId) || availablePanchayats[0],
+    () => availablePanchayats.find((p) => p.id === selectedPanchayatId),
     [availablePanchayats, selectedPanchayatId]
   );
   const availableVillages = currentPanchayat?.villages || [];
@@ -154,22 +160,15 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     return availableVillages.find((v) => v.id === selectedVillageId || v.name === selectedVillageId) || null;
   }, [availableVillages, selectedVillageId]);
 
-  // Distinct Schools in selected Panchayat & Village
-  const availableSchools = useMemo(() => {
+  const standardKey = (value?: string) => String(value || '').match(/\d+/)?.[0] || String(value || '').trim();
+  const availableStandards = useMemo(() => {
     if (!currentPanchayat) return [];
-    const villageStudents = students.filter((s) => {
-      const matchP = s.panchayatId === currentPanchayat.id;
-      const matchV = selectedVillageId === 'all' || s.villageId === selectedVillageId || s.villageName === currentVillage?.name;
-      return matchP && matchV;
-    });
-    const schoolsSet = new Set<string>();
-    villageStudents.forEach((st) => {
-      if (st.schoolName?.trim()) {
-        schoolsSet.add(st.schoolName.trim());
-      }
-    });
-    return Array.from(schoolsSet);
-  }, [students, currentPanchayat, selectedVillageId, currentVillage]);
+    return [...new Set(students
+      .filter((student) => student.panchayatId === currentPanchayat.id && (selectedVillageId === 'all' || student.villageId === currentVillage?.id || student.villageName === currentVillage?.name))
+      .map((student) => standardKey(student.standard))
+      .filter(Boolean))]
+      .sort((first, second) => Number(first) - Number(second) || first.localeCompare(second));
+  }, [students, currentPanchayat, currentVillage, selectedVillageId]);
 
   // Filtered Students for Attendance Marking
   const filteredStudents = useMemo(() => {
@@ -179,13 +178,10 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       const matchVillage = selectedVillageId === 'all' || s.villageId === selectedVillageId || s.villageName === currentVillage?.name;
       if (!matchPanchayat || !matchVillage) return false;
 
-      if (selectedSchool !== 'all') {
-        const sch = s.schoolName?.trim() || '';
-        if (sch.toLowerCase() !== selectedSchool.toLowerCase()) return false;
-      }
+      if (selectedStandard && standardKey(s.standard) !== selectedStandard) return false;
       return true;
     });
-  }, [students, currentPanchayat, selectedVillageId, currentVillage, selectedSchool]);
+  }, [students, currentPanchayat, selectedVillageId, currentVillage, selectedStandard]);
 
   // Filtered Volunteers for Attendance Marking
   const filteredVolunteers = useMemo(() => {
@@ -199,6 +195,17 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       return true;
     });
   }, [volunteers, selectedPanchayatId, selectedVillageId]);
+
+  const currentSavedAttendance = useMemo(() => attendanceSessions.find((attendance) =>
+    attendance.clusterId === (currentPanchayat?.clusterId || filteredVolunteers[0]?.clusterId) &&
+    attendance.panchayatId === selectedPanchayatId &&
+    (attendance.villageId || 'all') === selectedVillageId &&
+    Number(attendance.dayNumber) === selectedDayNumber &&
+    (attendance.attendanceType || 'students') === subjectMode
+  ), [attendanceSessions, currentPanchayat, filteredVolunteers, selectedPanchayatId, selectedVillageId, selectedDayNumber, subjectMode]);
+  const canEditAttendance = !currentSavedAttendance || ['Draft', 'Resubmission', 'Edit Approved'].includes(currentSavedAttendance.status);
+  const editApprovalPending = currentSavedAttendance?.status === 'Edit Requested';
+  const canRequestEdit = Boolean(currentSavedAttendance && ['Submitted', 'Approved'].includes(currentSavedAttendance.status));
 
   // Seed student records
   useEffect(() => {
@@ -236,8 +243,27 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     });
   }, [filteredVolunteers]);
 
+  useEffect(() => {
+    if (!currentSavedAttendance) return;
+    setRecordsMap((previous) => ({
+      ...previous,
+      ...(currentSavedAttendance.records || []).reduce<Record<string, AttendanceRecord>>((records, record) => {
+        records[record.studentId] = record;
+        return records;
+      }, {}),
+    }));
+    setVolunteerRecordsMap((previous) => ({
+      ...previous,
+      ...(currentSavedAttendance.volunteerAttendance || []).reduce<Record<string, 'Present' | 'Absent'>>((records, record) => {
+        records[record.volunteerId] = record.status;
+        return records;
+      }, {}),
+    }));
+  }, [currentSavedAttendance]);
+
   // Circular toggle for Student attendance (Present / Absent)
   const handleToggleStudentAttendance = (studentId: string, status: 'Present' | 'Absent') => {
+    if (!canEditAttendance) return;
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
         studentId,
@@ -261,6 +287,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   // Circular toggle for Task completion (Completed / Not Completed)
   const handleToggleStudentTask = (studentId: string, taskStatus: 'Completed' | 'Not Completed') => {
+    if (!canEditAttendance) return;
     setRecordsMap((prev) => {
       const current = prev[studentId] || {
         studentId,
@@ -283,6 +310,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   // Circular toggle for Volunteer attendance
   const handleToggleVolunteerAttendance = (volunteerId: string, status: 'Present' | 'Absent') => {
+    if (!canEditAttendance) return;
     setVolunteerRecordsMap((prev) => ({
       ...prev,
       [volunteerId]: status,
@@ -291,6 +319,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   // Batch marking
   const handleBatchMarkStudents = (status: 'Present' | 'Absent') => {
+    if (!canEditAttendance) return;
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
@@ -314,6 +343,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   };
 
   const handleBatchMarkTasks = (taskStatus: 'Completed' | 'Not Completed') => {
+    if (!canEditAttendance) return;
     setRecordsMap((prev) => {
       const updated = { ...prev };
       filteredStudents.forEach((st) => {
@@ -333,6 +363,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   };
 
   const handleBatchMarkVolunteers = (status: 'Present' | 'Absent') => {
+    if (!canEditAttendance) return;
     setVolunteerRecordsMap((prev) => {
       const updated = { ...prev };
       filteredVolunteers.forEach((v) => {
@@ -377,98 +408,228 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   const volPresentCount = currentVolunteerRecordsList.filter((r) => r.status === 'Present').length;
   const volAbsentCount = currentVolunteerRecordsList.filter((r) => r.status === 'Absent').length;
+  const canShowRoster = markingStep === 'roster' && (subjectMode === 'volunteers' || (Boolean(currentPanchayat) && Boolean(selectedStandard)));
+
+  const attendanceExportContext: AttendanceDownloadContext = {
+    kind: subjectMode,
+    academicYear: academicYear || `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`,
+    cluster: clusters.find((cluster) => cluster.id === (currentPanchayat?.clusterId || filteredVolunteers[0]?.clusterId || sessions.find((session) => Number(session.dayNumber) === selectedDayNumber)?.clusterId))?.name || 'Cluster',
+    panchayat: subjectMode === 'students' ? currentPanchayat?.name || '—' : currentPanchayat?.name || 'All Panchayats',
+    village: selectedVillageId === 'all' ? 'All Villages' : currentVillage?.name || 'Village',
+    day: `Day ${selectedDayNumber}`,
+    date: sessionDate,
+    standard: selectedStandard ? `Standard ${selectedStandard}` : 'All Standards',
+  };
+
+  const getAttendanceExportRows = (): AttendanceDownloadRow[] => subjectMode === 'students'
+    ? currentRecordsList.map((record) => ({
+        name: record.studentName,
+        standard: `Standard ${standardKey(record.standard)}`,
+        village: record.villageName || currentVillage?.name || attendanceExportContext.village,
+        attendance: record.status,
+        taskStatus: record.taskStatus,
+      }))
+    : currentVolunteerRecordsList.map((record) => ({
+        name: record.volunteerName,
+        role: record.role || 'Volunteer',
+        village: attendanceExportContext.village,
+        attendance: record.status,
+      }));
+
+  const handleExportAttendanceExcel = () => {
+    if (subjectMode === 'students') {
+      exportAttendanceRosterExcel(getAttendanceExportRows().map((row) => ({
+        name: row.name,
+        standard: row.standard || '',
+        village: row.village,
+        attendance: row.attendance,
+        taskStatus: row.taskStatus,
+      })), {
+        cluster: attendanceExportContext.cluster,
+        panchayat: attendanceExportContext.panchayat,
+        village: attendanceExportContext.village,
+        day: attendanceExportContext.day,
+        date: attendanceExportContext.date,
+        standard: attendanceExportContext.standard || '',
+      });
+      return;
+    }
+    exportVolunteerAttendanceRosterExcel(getAttendanceExportRows().map((row) => ({
+      name: row.name,
+      role: row.role || 'Volunteer',
+      attendance: row.attendance,
+    })), {
+      cluster: attendanceExportContext.cluster,
+      panchayat: attendanceExportContext.panchayat,
+      village: attendanceExportContext.village,
+      day: attendanceExportContext.day,
+      date: attendanceExportContext.date,
+      academicYear: attendanceExportContext.academicYear,
+    });
+  };
+
+  const handleDownloadAttendancePdf = async () => {
+    const rows = getAttendanceExportRows();
+    if (!rows.length) return;
+    setIsDownloadingRosterPdf(true);
+    try {
+      let logoDataUrl: string | undefined;
+      try {
+        const response = await fetch('/logo.png');
+        if (response.ok) {
+          const blob = await response.blob();
+          logoDataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+        }
+      } catch {
+        // Keep the branded organization name if the logo cannot be embedded.
+      }
+      const context = { ...attendanceExportContext, logoDataUrl };
+      const pdfDocument = React.createElement(AttendanceRosterPdf, { rows, context }) as unknown as Parameters<typeof pdf>[0];
+      const blob = await pdf(pdfDocument).toBlob();
+      const safeLocation = `${context.village}_${context.standard || 'Volunteers'}_${context.day}`.replace(/[^a-zA-Z0-9_-]+/g, '_');
+      triggerFileDownload(blob, `TQI_${subjectMode === 'students' ? 'Student' : 'Volunteer'}_Attendance_${safeLocation}.pdf`);
+    } catch (error) {
+      console.error('Unable to generate attendance PDF:', error);
+      alert('Unable to generate the attendance PDF. Please try again.');
+    } finally {
+      setIsDownloadingRosterPdf(false);
+    }
+  };
 
   // Open Day Card
   const handleOpenDayAttendance = (dayNum: number, date: string, title: string) => {
     setSelectedDayNumber(dayNum);
     setSessionDate(date);
     setSessionTitle(title || `Day ${dayNum} Session`);
+    setSelectedPanchayatId('');
+    setSelectedVillageId('all');
+    setSelectedStandard('');
+    setMarkingStep(subjectMode === 'volunteers' ? 'roster' : 'panchayats');
     setViewMode('marking');
   };
 
+  const handleSelectPanchayat = (panchayatId: string) => {
+    setSelectedPanchayatId(panchayatId);
+    setSelectedVillageId('all');
+    setSelectedStandard('');
+    setMarkingStep('villages');
+  };
+
+  const handleSelectVillage = (villageId: string) => {
+    setSelectedVillageId(villageId);
+    setSelectedStandard('');
+    setMarkingStep(subjectMode === 'students' ? 'standards' : 'roster');
+  };
+
+  const handleSelectStandard = (standard: string) => {
+    setSelectedStandard(standard);
+    setMarkingStep('roster');
+  };
+
   // Save Attendance
-  const handleSave = (isFinal: boolean) => {
+  const handleRequestEdit = async () => {
+    if (!currentSavedAttendance || !editRequestReason.trim() || !onRequestAttendanceEdit) return;
+    setIsRequestingEdit(true);
+    try {
+      await onRequestAttendanceEdit(currentSavedAttendance.id, editRequestReason.trim());
+      setShowEditRequest(false);
+      setEditRequestReason('');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to request attendance edit approval.');
+    } finally {
+      setIsRequestingEdit(false);
+    }
+  };
+
+  const handleSave = async (isFinal: boolean) => {
     const isVol = subjectMode === 'volunteers';
+    if (!canEditAttendance) {
+      alert('This attendance submission is locked. Request and receive edit approval before changing it.');
+      return;
+    }
+    if (!isVol && !selectedStandard) {
+      alert('Select a student standard before saving attendance.');
+      return;
+    }
     if (!isVol && filteredStudents.length === 0) {
       alert('No students selected in this school/village.');
       return;
     }
+    if (isVol && filteredVolunteers.length === 0) {
+      alert('No volunteers are registered in this cluster.');
+      return;
+    }
 
+    const selectedClusterId = currentPanchayat?.clusterId || filteredVolunteers[0]?.clusterId;
+    const scheduledSession = sessions.find((session) =>
+      session.clusterId === selectedClusterId && Number(session.dayNumber) === selectedDayNumber
+    );
+    if (!scheduledSession) {
+      alert('This day is not configured in Academic Setup for the selected cluster.');
+      return;
+    }
+    const preservedRecords = isVol ? [] : (currentSavedAttendance?.records || []).filter((record) =>
+      !currentRecordsList.some((currentRecord) => currentRecord.studentId === record.studentId)
+    );
+    const submittedStudentRecords = isVol ? [] : [...preservedRecords, ...currentRecordsList];
+    const submittedStudentPresent = submittedStudentRecords.filter((record) => record.status === 'Present').length;
     const newSession: AttendanceSession = {
-      id: `att-day${selectedDayNumber}-${Date.now()}`,
-      sessionId: `ses-day${selectedDayNumber}`,
+      id: currentSavedAttendance?.id || `att-day${selectedDayNumber}-${subjectMode}-${Date.now()}`,
+      sessionId: scheduledSession.id,
+      attendanceType: subjectMode,
+      clusterId: selectedClusterId,
+      clusterName: clusters.find((cluster) => cluster.id === selectedClusterId)?.name,
       sessionName: sessionTitle || `Day ${selectedDayNumber} Session`,
-      panchayatId: selectedPanchayatId,
-      panchayatName: currentPanchayat?.name || 'Panchayat',
-      villageId: selectedVillageId,
-      villageName: selectedVillageId === 'all' ? 'All Villages' : (currentVillage?.name || 'Village'),
+      panchayatId: isVol ? '' : selectedPanchayatId,
+      panchayatName: isVol ? 'All Panchayats' : (currentPanchayat?.name || 'Panchayat'),
+      villageId: isVol ? '' : selectedVillageId,
+      villageName: isVol ? 'All Villages' : (currentVillage?.name || 'Village'),
       date: sessionDate,
       day: `Day ${selectedDayNumber}`,
       dayNumber: selectedDayNumber,
       taskTopic,
-      totalCount: isVol ? filteredVolunteers.length : filteredStudents.length,
-      presentCount: isVol ? volPresentCount : presentCount,
-      absentCount: isVol ? volAbsentCount : absentCount,
-      tasksCompletedCount: isVol ? 0 : tasksDoneCount,
+      totalCount: isVol ? filteredVolunteers.length : submittedStudentRecords.length,
+      presentCount: isVol ? volPresentCount : submittedStudentPresent,
+      absentCount: isVol ? volAbsentCount : submittedStudentRecords.length - submittedStudentPresent,
+      tasksCompletedCount: isVol ? 0 : submittedStudentRecords.filter((record) => record.taskStatus === 'Completed').length,
       status: isFinal ? 'Submitted' : 'Draft',
       lastSaved: isFinal ? 'Submitted just now' : 'Saved draft',
-      records: currentRecordsList,
-      volunteerAttendance: currentVolunteerRecordsList,
+      records: submittedStudentRecords,
+      volunteerAttendance: isVol ? currentVolunteerRecordsList : [],
     };
 
-    onSaveAttendance(newSession);
-    setSaveSuccessMsg(
-      isFinal
+    setIsSavingAttendance(true);
+    try {
+      await onSaveAttendance(newSession);
+      setSaveSuccessMsg(isFinal
         ? `Day ${selectedDayNumber} attendance successfully submitted!`
-        : `Day ${selectedDayNumber} attendance saved as draft.`
-    );
-    setTimeout(() => setSaveSuccessMsg(''), 4000);
+        : `Day ${selectedDayNumber} attendance saved as draft.`);
+      setTimeout(() => setSaveSuccessMsg(''), 4000);
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to save attendance.');
+    } finally {
+      setIsSavingAttendance(false);
+    }
   };
 
-  // 7-Day History Matrix Rows: Day-wise based on scheduled sessions, only Present and Absent
-  const historyMatrix = useMemo(() => {
-    // Collect 7 scheduled days
-    const dayCols = scheduledDays.slice(0, 7);
-
-    // List students in the current view or top students in the panchayat/village
-    const studentsToDisplay = filteredStudents.length > 0 ? filteredStudents.slice(0, 20) : students.slice(0, 15);
-
-    return studentsToDisplay.map((student, idx) => {
-      const dayStatuses = dayCols.map((col) => {
-        // Check if there is an actual attendance record for this student on this day
-        const matchedSession = attendanceSessions.find(
-          (a) => a.dayNumber === col.dayNumber || a.day?.includes(`Day ${col.dayNumber}`)
-        );
-        const record = matchedSession?.records?.find((r) => r.studentId === student.id || r.studentName === student.name);
-
-        let status: 'P' | 'AB' = 'P';
-        if (record) {
-          status = record.status === 'Absent' ? 'AB' : 'P';
-        } else {
-          // If no recorded data, determine mock status based on student index and day
-          status = (idx + col.dayNumber) % 6 === 0 ? 'AB' : 'P';
-        }
-
-        return {
-          dayNumber: col.dayNumber,
-          date: col.date,
-          status,
-          label: col.module || `Day ${col.dayNumber}`,
-          color: status === 'P' ? 'text-emerald-500 font-bold' : 'text-rose-500 font-bold',
-        };
-      });
-
-      return {
-        studentId: student.id,
-        studentName: student.name,
-        code: student.code,
-        standard: student.standard,
-        villageName: student.villageName,
-        schoolName: student.schoolName || 'Govt High School',
-        dayStatuses,
-      };
-    });
-  }, [scheduledDays, filteredStudents, students, attendanceSessions]);
+  if (isSuperAdmin) {
+    return (
+      <SuperAdminAttendanceReviewView
+        attendanceSessions={attendanceSessions}
+        clusters={clusters}
+        panchayats={panchayats}
+        sessions={sessions}
+        subject={initialSubject}
+        academicYear={academicYear}
+        onReviewAttendance={onReviewAttendance || (async () => undefined)}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -496,81 +657,24 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 <span className="text-foreground font-bold">Day {selectedDayNumber} Marking</span>
               </>
             )}
-            {viewMode === 'matrix-report' && (
-              <>
-                <ChevronRight className="h-3 w-3" />
-                <span className="text-foreground font-bold">7-Day Detailed History Matrix</span>
-              </>
-            )}
           </div>
 
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
             {viewMode === 'day-cards' && 'Session Attendance Days'}
             {viewMode === 'marking' && `Mark Attendance — Day ${selectedDayNumber}`}
-            {viewMode === 'matrix-report' && '7-Day Attendance Detailed Report'}
           </h1>
           <p className="mt-0.5 text-xs text-muted-foreground">
-            {viewMode === 'day-cards' && 'Select any scheduled session day card to mark attendance or view the 7-day completion report.'}
-            {viewMode === 'marking' && 'Choose Panchayat, Village, and School to mark circle-based attendance and task completions.'}
-            {viewMode === 'matrix-report' && 'Detailed session tracking matrix for completed 7-day program cycle.'}
+            {viewMode === 'day-cards' && 'Select a scheduled day to mark student attendance.'}
+            {viewMode === 'marking' && (subjectMode === 'volunteers' ? 'Mark volunteer attendance for this cluster and day.' : 'Choose a panchayat, village, and standard before marking student attendance.')}
           </p>
         </div>
 
-        {/* Top Actions: 7-Day History Matrix button */}
-        <div className="flex flex-wrap items-center gap-2">
-          {viewMode !== 'matrix-report' ? (
-            <Button
-              variant="outline"
-              onClick={() => setViewMode('matrix-report')}
-              className="gap-1.5 rounded-xl border-border bg-card hover:bg-muted text-xs font-semibold"
-            >
-              <FileText className="h-4 w-4 text-primary" />
-              <span>7-Day History Matrix</span>
-            </Button>
-          ) : (
-            <Button
-              variant="outline"
-              onClick={() => setViewMode('day-cards')}
-              className="gap-1.5 rounded-xl border-border bg-card hover:bg-muted text-xs font-semibold"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span>Back to Scheduled Days</span>
-            </Button>
-          )}
-
-          {viewMode === 'marking' && (
-            <div className="inline-flex rounded-xl bg-muted/60 p-1 border border-border">
-              <button
-                type="button"
-                onClick={() => setSubjectMode('students')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  subjectMode === 'students'
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Students ({filteredStudents.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setSubjectMode('volunteers')}
-                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                  subjectMode === 'volunteers'
-                    ? 'bg-primary text-primary-foreground shadow-xs'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Volunteers ({filteredVolunteers.length})
-              </button>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* 2. MODE: SCHEDULED ATTENDANCE DAY CARDS (LANDING SCREEN) */}
       {viewMode === 'day-cards' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {scheduledDays.length ? <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {scheduledDays.map((day) => {
               const isDone = day.status === 'Completed';
               const isDraft = day.status === 'In Draft';
@@ -619,28 +723,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                 </div>
               );
             })}
-          </div>
+          </div> : <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center"><Calendar className="mx-auto h-8 w-8 text-primary" /><h2 className="mt-3 font-bold text-foreground">No attendance days configured</h2><p className="mt-1 text-sm text-muted-foreground">Configure the session days for this academic year in Academic Setup first.</p></div>}
 
-          {/* Quick Summary Banner */}
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div>
-              <h3 className="text-base font-bold text-foreground">Complete Session Cycle Overview</h3>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Once sessions reach 7 days, check the full 7-day attendance history matrix with daily status and subject codes.
-              </p>
-            </div>
-            <Button
-              onClick={() => setViewMode('matrix-report')}
-              className="rounded-xl bg-primary text-primary-foreground shadow-xs gap-1.5"
-            >
-              <FileText className="h-4 w-4" />
-              <span>Open 7-Day Matrix Report</span>
-            </Button>
-          </div>
         </div>
       )}
 
-      {/* 3. MODE: MARKING ATTENDANCE (Panchayat -> Village -> School Drill-down + Circle Form) */}
+      {/* Student attendance drilldown: Panchayat -> Village -> Standard -> Roster */}
       {viewMode === 'marking' && (
         <div className="space-y-6">
           {/* Back button */}
@@ -659,165 +747,67 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
             </span>
           </div>
 
-          {/* Hierarchical Selection Bar: Panchayat -> Village -> School */}
-          <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {/* Panchayat Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-foreground">
-                  1. Select Panchayat
-                </label>
-                <Select
-                  value={selectedPanchayatId}
-                  onValueChange={(val) => {
-                    setSelectedPanchayatId(val);
-                    setSelectedVillageId('all');
-                    setSelectedSchool('all');
-                  }}
-                >
-                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
-                    <SelectValue placeholder="Choose Panchayat" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availablePanchayats.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          <div className="space-y-4">
+            {subjectMode === 'students' && <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <button type="button" onClick={() => { setSelectedPanchayatId(''); setSelectedVillageId('all'); setSelectedStandard(''); setMarkingStep('panchayats'); }} className={`rounded-full px-3 py-1.5 ${markingStep === 'panchayats' ? 'bg-primary/10 font-semibold text-primary' : 'hover:text-primary'}`}>Panchayats</button>
+              {currentPanchayat && <><ChevronRight className="h-3 w-3" /><button type="button" onClick={() => { setSelectedVillageId('all'); setSelectedStandard(''); setMarkingStep('villages'); }} className={`rounded-full px-3 py-1.5 ${markingStep === 'villages' ? 'bg-primary/10 font-semibold text-primary' : 'hover:text-primary'}`}>{currentPanchayat.name}</button></>}
+              {currentPanchayat && selectedVillageId === 'all' && markingStep === 'standards' && <><ChevronRight className="h-3 w-3" /><span className="rounded-full bg-primary/10 px-3 py-1.5 font-semibold text-primary">All Villages</span></>}
+              {currentVillage && <><ChevronRight className="h-3 w-3" /><button type="button" onClick={() => { setSelectedStandard(''); setMarkingStep(subjectMode === 'students' ? 'standards' : 'roster'); }} className={`rounded-full px-3 py-1.5 ${markingStep === 'standards' ? 'bg-primary/10 font-semibold text-primary' : 'hover:text-primary'}`}>{currentVillage.name}</button></>}
+              {markingStep === 'roster' && subjectMode === 'students' && <><ChevronRight className="h-3 w-3" /><span className="rounded-full bg-primary/10 px-3 py-1.5 font-semibold text-primary">Standard {selectedStandard}</span></>}
+              {markingStep !== 'panchayats' && <Button variant="outline" size="sm" onClick={() => {
+                if (markingStep === 'roster') setMarkingStep(subjectMode === 'students' ? 'standards' : 'villages');
+                else if (markingStep === 'standards') { setSelectedVillageId('all'); setMarkingStep('villages'); }
+                else { setSelectedPanchayatId(''); setSelectedVillageId('all'); setMarkingStep('panchayats'); }
+              }} className="ml-auto h-8 gap-1 rounded-lg text-xs"><ArrowLeft className="h-3.5 w-3.5" />Back</Button>}
+            </div>}
 
-              {/* Village Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-foreground">
-                  2. Select Village
-                </label>
-                <Select
-                  value={selectedVillageId}
-                  onValueChange={(val) => {
-                    setSelectedVillageId(val);
-                    setSelectedSchool('all');
-                  }}
-                >
-                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
-                    <SelectValue placeholder="All Villages" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Villages in {currentPanchayat?.name || 'Panchayat'}</SelectItem>
-                    {availableVillages.map((v) => (
-                      <SelectItem key={v.id || v.name} value={v.id || v.name}>
-                        {v.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            {subjectMode === 'students' && markingStep === 'panchayats' && <section className="space-y-3"><h2 className="text-lg font-bold text-foreground">Select a Panchayat</h2><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{availablePanchayats.map((panchayat) => {
+              const studentCount = students.filter((student) => student.panchayatId === panchayat.id).length;
+              return <button key={panchayat.id} type="button" onClick={() => handleSelectPanchayat(panchayat.id)} className="rounded-2xl border border-border bg-card p-5 text-left shadow-xs transition hover:border-primary/50 hover:shadow-md"><div className="flex items-center justify-between"><div><h3 className="font-bold text-foreground">{panchayat.name}</h3><p className="mt-1 text-xs text-muted-foreground">{panchayat.villages?.length || 0} villages · {studentCount} students</p></div><MapPin className="h-5 w-5 text-primary" /></div><p className="mt-4 border-t border-border pt-3 text-xs font-semibold text-primary">Open villages <ChevronRight className="inline h-3 w-3" /></p></button>;
+            })}{!availablePanchayats.length && <p className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No panchayats are configured for this cluster.</p>}</div></section>}
 
-              {/* School Selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-semibold text-foreground">
-                  3. Select School / Center
-                </label>
-                <Select value={selectedSchool} onValueChange={setSelectedSchool}>
-                  <SelectTrigger className="h-10 text-xs rounded-xl bg-card border-border">
-                    <SelectValue placeholder="All Schools" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Schools & Centers</SelectItem>
-                    {availableSchools.map((sch) => (
-                      <SelectItem key={sch} value={sch}>
-                        {sch}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            {subjectMode === 'students' && markingStep === 'villages' && currentPanchayat && <section className="space-y-3"><h2 className="text-lg font-bold text-foreground">All villages in {currentPanchayat.name}</h2><p className="text-xs text-muted-foreground">Choose one village or open the entire panchayat roster.</p><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><button type="button" onClick={() => handleSelectVillage('all')} className="rounded-2xl border border-primary/30 bg-primary/5 p-5 text-left shadow-xs transition hover:border-primary/60 hover:shadow-md"><div className="flex items-center justify-between"><div><h3 className="font-bold text-foreground">All Villages</h3><p className="mt-1 text-xs text-muted-foreground">{students.filter((student) => student.panchayatId === currentPanchayat.id).length} students across {availableVillages.length} villages</p></div><Users className="h-5 w-5 text-primary" /></div><p className="mt-4 border-t border-primary/10 pt-3 text-xs font-semibold text-primary">Open all villages <ChevronRight className="inline h-3 w-3" /></p></button>{availableVillages.map((village) => {
+              const studentCount = students.filter((student) => student.panchayatId === currentPanchayat.id && (student.villageId === village.id || student.villageName === village.name)).length;
+              const volunteerCount = volunteers.filter((volunteer) => (!volunteer.panchayatId || volunteer.panchayatId === currentPanchayat.id) && (!volunteer.villageId || volunteer.villageId === village.id || volunteer.villageName === village.name)).length;
+              return <button key={village.id || village.name} type="button" onClick={() => handleSelectVillage(village.id || village.name)} className="rounded-2xl border border-border bg-card p-5 text-left shadow-xs transition hover:border-primary/50 hover:shadow-md"><div className="flex items-center justify-between"><div><h3 className="font-bold text-foreground">{village.name}</h3><p className="mt-1 text-xs text-muted-foreground">{studentCount} students · {volunteerCount} volunteers</p></div><MapPin className="h-5 w-5 text-primary" /></div><p className="mt-4 border-t border-border pt-3 text-xs font-semibold text-primary">Select village <ChevronRight className="inline h-3 w-3" /></p></button>;
+            })}{!availableVillages.length && <p className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No villages are configured for this panchayat.</p>}</div></section>}
 
-            {/* Quick Batch Marking Action Bar */}
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs">
-              <div className="flex items-center gap-2">
-                <span className="font-semibold text-muted-foreground">Quick Mark:</span>
-                {subjectMode === 'students' ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleBatchMarkStudents('Present')}
-                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-500 hover:bg-emerald-500/20 transition-colors"
-                    >
-                      All Present
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBatchMarkStudents('Absent')}
-                      className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-500 hover:bg-rose-500/20 transition-colors"
-                    >
-                      All Absent
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBatchMarkTasks('Completed')}
-                      className="rounded-lg border border-border bg-muted/60 px-3 py-1 font-medium text-foreground hover:bg-muted transition-colors"
-                    >
-                      All Tasks Done
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => handleBatchMarkVolunteers('Present')}
-                      className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 font-semibold text-emerald-500 hover:bg-emerald-500/20 transition-colors"
-                    >
-                      All Volunteers Present
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleBatchMarkVolunteers('Absent')}
-                      className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 font-semibold text-rose-500 hover:bg-rose-500/20 transition-colors"
-                    >
-                      All Volunteers Absent
-                    </button>
-                  </>
-                )}
-              </div>
+            {subjectMode === 'students' && markingStep === 'standards' && currentPanchayat && <section className="space-y-3"><h2 className="text-lg font-bold text-foreground">Select a standard · {currentVillage?.name || 'All Villages'}</h2><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{availableStandards.map((standard) => {
+              const count = students.filter((student) => student.panchayatId === currentPanchayat.id && (selectedVillageId === 'all' || student.villageId === currentVillage?.id || student.villageName === currentVillage?.name) && standardKey(student.standard) === standard).length;
+              return <button key={standard} type="button" onClick={() => handleSelectStandard(standard)} className="rounded-2xl border border-border bg-card p-5 text-left shadow-xs transition hover:border-primary/50 hover:shadow-md"><div className="flex items-center justify-between"><span className="rounded-lg bg-primary/10 px-2.5 py-1 text-xs font-bold text-primary">Standard {standard}</span><Users className="h-5 w-5 text-primary" /></div><p className="mt-4 text-2xl font-bold text-foreground">{count}</p><p className="text-xs text-muted-foreground">students</p><p className="mt-4 border-t border-border pt-3 text-xs font-semibold text-primary">Mark attendance <ChevronRight className="inline h-3 w-3" /></p></button>;
+            })}{!availableStandards.length && <p className="col-span-full rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">No students are registered in this village.</p>}</div></section>}
 
-              {/* Status Metrics */}
-              <div className="flex items-center gap-4 text-xs font-semibold">
-                {subjectMode === 'students' ? (
-                  <>
-                    <span className="text-foreground">Enrolled: {filteredStudents.length}</span>
-                    <span className="text-emerald-500">Present: {presentCount}</span>
-                    <span className="text-rose-500">Absent: {absentCount}</span>
-                    <span className="text-primary">Tasks Done: {tasksDoneCount}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-foreground">Volunteers: {filteredVolunteers.length}</span>
-                    <span className="text-emerald-500">Present: {volPresentCount}</span>
-                    <span className="text-rose-500">Absent: {volAbsentCount}</span>
-                  </>
-                )}
-              </div>
-            </div>
+            {canShowRoster && <div className="rounded-2xl border border-border bg-card p-4 shadow-xs">
+              <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-bold text-foreground">{subjectMode === 'students' ? `Standard ${selectedStandard} · ` : ''}{currentVillage?.name || 'All Villages'} attendance</h2><p className="text-xs text-muted-foreground">{currentPanchayat?.name} · Day {selectedDayNumber}</p></div><div className="flex flex-wrap items-center gap-2"><span className="text-xs font-semibold text-muted-foreground">Quick Mark:</span>{subjectMode === 'students' ? <><button type="button" disabled={!canEditAttendance} onClick={() => handleBatchMarkStudents('Present')} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 disabled:opacity-50">All Present</button><button type="button" disabled={!canEditAttendance} onClick={() => handleBatchMarkStudents('Absent')} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-600 disabled:opacity-50">All Absent</button><button type="button" disabled={!canEditAttendance} onClick={() => handleBatchMarkTasks('Completed')} className="rounded-lg border border-border bg-muted/60 px-3 py-1 text-xs disabled:opacity-50">All Tasks Done</button></> : <><button type="button" disabled={!canEditAttendance} onClick={() => handleBatchMarkVolunteers('Present')} className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 disabled:opacity-50">All Present</button><button type="button" disabled={!canEditAttendance} onClick={() => handleBatchMarkVolunteers('Absent')} className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1 text-xs font-semibold text-rose-600 disabled:opacity-50">All Absent</button></>}</div></div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3 text-xs font-semibold"><div className="flex flex-wrap gap-4">{subjectMode === 'students' ? <><span>Enrolled: {filteredStudents.length}</span><span className="text-emerald-600">Present: {presentCount}</span><span className="text-rose-600">Absent: {absentCount}</span><span className="text-primary">Tasks done: {tasksDoneCount}</span></> : <><span>Volunteers: {filteredVolunteers.length}</span><span className="text-emerald-600">Present: {volPresentCount}</span><span className="text-rose-600">Absent: {volAbsentCount}</span></>}</div>{subjectMode === 'students' && <div className="flex gap-2">
+  <Button type="button" variant="outline" size="sm" onClick={handleExportAttendanceExcel} disabled={!getAttendanceExportRows().length}>
+    <Download className="h-4 w-4" />Excel
+  </Button>
+  <Button type="button" variant="outline" size="sm" onClick={() => void handleDownloadAttendancePdf()} disabled={!getAttendanceExportRows().length || isDownloadingRosterPdf}>
+    <Download className="h-4 w-4" />{isDownloadingRosterPdf ? 'Preparing PDF…' : 'PDF'}
+  </Button>
+</div>}</div>
+            </div>}
+            {canShowRoster && subjectMode === 'volunteers' && <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={handleExportAttendanceExcel} disabled={!filteredVolunteers.length}>
+                <Download className="h-4 w-4" />Excel
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={() => void handleDownloadAttendancePdf()} disabled={!filteredVolunteers.length || isDownloadingRosterPdf}>
+                <Download className="h-4 w-4" />{isDownloadingRosterPdf ? 'Preparing PDF…' : 'PDF'}
+              </Button>
+            </div>}
+            {canShowRoster && !canEditAttendance && canRequestEdit && <div className="flex justify-end">
+              <Button type="button" onClick={() => { setEditRequestReason(''); setShowEditRequest(true); }} className="rounded-xl bg-amber-700 text-white hover:bg-amber-800">Request Edit Approval</Button>
+            </div>}
           </div>
 
-          {/* Student Roster with Circle Controls */}
-          {subjectMode === 'students' && (
-            <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
-              <div className="border-b border-border bg-muted/30 px-6 py-3.5 flex items-center justify-between text-xs font-semibold text-muted-foreground">
-                <span>STUDENT ROSTER & CIRCLE ATTENDANCE</span>
-                <span>TASK COMPLETION</span>
-              </div>
-
-              {filteredStudents.length === 0 ? (
-                <div className="p-12 text-center text-xs text-muted-foreground">
-                  No students found for this Panchayat, Village, and School combination.
-                </div>
-              ) : (
-                <div className="divide-y divide-border">
-                  {filteredStudents.map((st) => {
+          {/* Standard-filtered student attendance table */}
+          {subjectMode === 'students' && canShowRoster && (
+            <div className="overflow-x-auto rounded-2xl border border-border bg-card shadow-xs">
+              <table className="w-full min-w-[850px] text-left text-xs">
+                <thead className="bg-muted/40 text-muted-foreground"><tr><th className="w-14 px-4 py-3">S.No</th><th className="px-4 py-3">Student</th><th className="px-4 py-3">Standard</th><th className="px-4 py-3">Attendance</th><th className="px-4 py-3">Task completion</th></tr></thead>
+                <tbody className="divide-y divide-border">
+                  {filteredStudents.map((st, index) => {
                     const rec = recordsMap[st.id] || {
                       studentId: st.id,
                       studentName: st.name,
@@ -831,39 +821,17 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                     const isTaskDone = rec.taskStatus === 'Completed';
 
                     return (
-                      <div
-                        key={st.id}
-                        className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4.5 transition-colors ${
-                          !isPresent ? 'bg-rose-500/5' : 'hover:bg-muted/30'
-                        }`}
-                      >
-                        {/* Student Details */}
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-sm font-bold text-primary">
-                            {st.avatarLetter || st.name.charAt(0).toUpperCase()}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="text-sm font-bold text-foreground">{st.name}</h4>
-                              <span className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] font-bold text-foreground">
-                                Std {st.standard}
-                              </span>
-                            </div>
-                            <div className="mt-0.5 text-xs text-muted-foreground flex items-center gap-2">
-                              <span>{st.villageName}</span>
-                              <span>•</span>
-                              <span>{st.schoolName || 'Govt High School'}</span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Circle Form Buttons for Attendance & Tasks */}
-                        <div className="flex items-center gap-6 self-end sm:self-center">
+                      <tr key={st.id} className={!isPresent ? 'bg-rose-500/5' : 'hover:bg-muted/30'}>
+                        <td className="px-4 py-3 tabular-nums text-muted-foreground">{index + 1}</td>
+                        <td className="px-4 py-3"><div className="font-semibold text-foreground">{st.name}</div><div className="mt-0.5 text-[11px] text-muted-foreground">{st.villageName} · {st.schoolName || 'School not set'}</div></td>
+                        <td className="px-4 py-3">Standard {standardKey(st.standard)}</td>
+                        <td className="px-4 py-3">
                           {/* Present / Absent Circle Form Controls */}
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             {/* Circle Present Button */}
                             <button
                               type="button"
+                              disabled={!canEditAttendance}
                               onClick={() => handleToggleStudentAttendance(st.id, 'Present')}
                               className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
                                 isPresent
@@ -882,6 +850,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                             {/* Circle Absent Button */}
                             <button
                               type="button"
+                              disabled={!canEditAttendance}
                               onClick={() => handleToggleStudentAttendance(st.id, 'Absent')}
                               className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
                                 !isPresent
@@ -897,11 +866,12 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                               <span>Absent</span>
                             </button>
                           </div>
-
+                        </td>
+                        <td className="px-4 py-3">
                           {/* Task Check Circle Toggle */}
-                          <div className="border-l border-border pl-4">
                             <button
                               type="button"
+                              disabled={!canEditAttendance}
                               onClick={() => handleToggleStudentTask(st.id, isTaskDone ? 'Not Completed' : 'Completed')}
                               className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold transition-all ${
                                 isTaskDone
@@ -918,18 +888,18 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                               </span>
                               <span>{isTaskDone ? 'Task Done' : 'Task Pending'}</span>
                             </button>
-                          </div>
-                        </div>
-                      </div>
+                        </td>
+                      </tr>
                     );
                   })}
-                </div>
-              )}
+                  {!filteredStudents.length && <tr><td colSpan={5} className="p-10 text-center text-muted-foreground">No students found in Standard {selectedStandard} for this village.</td></tr>}
+                </tbody>
+              </table>
             </div>
           )}
 
           {/* Volunteer Roster with Circle Controls */}
-          {subjectMode === 'volunteers' && (
+          {subjectMode === 'volunteers' && canShowRoster && (
             <div className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden">
               <div className="border-b border-border bg-muted/30 px-6 py-3.5 flex items-center justify-between text-xs font-semibold text-muted-foreground">
                 <span>REGISTERED VOLUNTEERS</span>
@@ -972,6 +942,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
                         <div className="flex items-center gap-2">
                           <button
                             type="button"
+                            disabled={!canEditAttendance}
                             onClick={() => handleToggleVolunteerAttendance(vol.id, 'Present')}
                             className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
                               isPresent
@@ -989,6 +960,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
                           <button
                             type="button"
+                            disabled={!canEditAttendance}
                             onClick={() => handleToggleVolunteerAttendance(vol.id, 'Absent')}
                             className={`flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-bold transition-all ${
                               !isPresent
@@ -1012,141 +984,41 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
             </div>
           )}
 
-          {/* Action Footer */}
-          <div className="flex items-center justify-end gap-3 pt-2">
+          {/* Submit once; later changes require explicit Super Admin permission. */}
+          {canShowRoster && canEditAttendance && <div className="flex items-center justify-end gap-3 pt-2">
             <Button
               type="button"
               variant="outline"
-              onClick={() => handleSave(false)}
+              onClick={() => void handleSave(false)}
+              disabled={isSavingAttendance}
               className="rounded-xl"
             >
               Save Draft
             </Button>
             <Button
               type="button"
-              onClick={() => handleSave(true)}
+              onClick={() => void handleSave(true)}
+              disabled={isSavingAttendance}
               className="rounded-xl bg-primary text-primary-foreground shadow-xs"
             >
               Submit Day {selectedDayNumber} Attendance
             </Button>
-          </div>
+          </div>}
+          {canShowRoster && !canEditAttendance && <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+            <p className="font-semibold">{editApprovalPending ? 'Edit approval is pending' : `Attendance ${currentSavedAttendance?.status === 'Approved' ? 'approved' : 'submitted'} and locked`}</p>
+            <p className="mt-1">{currentSavedAttendance?.editReason || currentSavedAttendance?.reviewRemarks || 'To change this attendance, request edit approval from the Super Admin.'}</p>
+          </div>}
         </div>
       )}
 
-      {/* 4. MODE: 7-DAY DETAILED REPORT MATRIX (Inspired by Reference Image) */}
-      {viewMode === 'matrix-report' && (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-border bg-card p-6 shadow-xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4">
-              <div>
-                <span className="inline-block h-4 w-1.5 bg-emerald-500 rounded-full mr-2 align-middle" />
-                <span className="text-lg font-bold text-foreground align-middle">Attendance Detailed Report</span>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  7-Day session completion overview across active learning hubs.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => exportAttendanceMatrixExcel(scheduledDays, historyMatrix, currentPanchayat?.name || 'Dharmapuri')}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
-                  title="Export 7-Day matrix to Excel (.xlsx)"
-                >
-                  <Download className="h-4 w-4 text-emerald-600" />
-                  <span>Excel</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => exportAttendanceMatrixPdf(scheduledDays, historyMatrix, currentPanchayat?.name || 'Dharmapuri')}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted transition"
-                  title="Export 7-Day matrix to PDF"
-                >
-                  <Download className="h-4 w-4 text-brand-500" />
-                  <span>PDF</span>
-                </button>
-                <div className="w-48">
-                  <Select defaultValue="detailed">
-                    <SelectTrigger className="h-9 text-xs rounded-xl bg-card border-border">
-                      <SelectValue placeholder="Select Report Type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="detailed">Detailed Report (7 Days)</SelectItem>
-                      <SelectItem value="summary">Summary Report</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            </div>
-
-            {/* Matrix Table: Day-wise based on scheduled sessions */}
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30 text-muted-foreground font-semibold">
-                    <th className="p-3.5 min-w-[150px]">Student Details</th>
-                    {scheduledDays.slice(0, 7).map((day) => (
-                      <th key={day.dayNumber} className="p-3.5 text-center min-w-[100px]">
-                        <div className="font-bold text-foreground">{day.dayLabel}</div>
-                        <div className="text-[10px] font-mono text-muted-foreground font-normal">{day.date}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {historyMatrix.map((row, idx) => (
-                    <tr key={idx} className="hover:bg-muted/20 transition-colors">
-                      <td className="p-3.5">
-                        <div className="font-bold text-foreground">{row.studentName}</div>
-                        <div className="text-[11px] text-muted-foreground">
-                          Std {row.standard} • {row.schoolName}
-                        </div>
-                      </td>
-                      {row.dayStatuses.map((cell, cIdx) => (
-                        <td key={cIdx} className="p-3.5 text-center">
-                          <div
-                            className={`inline-flex items-center justify-center h-7 w-7 rounded-full text-xs font-bold ${
-                              cell.status === 'P'
-                                ? 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/30'
-                                : 'bg-rose-500/15 text-rose-500 border border-rose-500/30'
-                            }`}
-                          >
-                            {cell.status}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-1 truncate max-w-[80px] mx-auto">
-                            {cell.label}
-                          </div>
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center justify-between gap-4 border-t border-border pt-4 text-xs text-muted-foreground">
-              <div className="flex items-center gap-4">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span className="font-semibold text-foreground">P: Present</span>
-                </span>
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                  <span className="font-semibold text-foreground">AB: Absent</span>
-                </span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => window.print()}
-                className="rounded-xl"
-              >
-                Print / Export Report
-              </Button>
-            </div>
-          </div>
+      {showEditRequest && <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+          <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-900">Request Edit Approval</h2><p className="mt-1 text-xs text-slate-500">The submitted attendance stays locked until the Super Admin reviews this request.</p></div><button type="button" onClick={() => setShowEditRequest(false)} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100"><X className="h-4 w-4" /></button></div>
+          <label className="mt-4 block text-xs font-semibold text-slate-700">Reason for editing<textarea autoFocus value={editRequestReason} onChange={(event) => setEditRequestReason(event.target.value)} rows={4} className="mt-1.5 w-full rounded-xl border border-slate-200 p-3 text-sm outline-none focus:border-primary" placeholder="Explain why this attendance needs to be changed" /></label>
+          <div className="mt-5 flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setShowEditRequest(false)} disabled={isRequestingEdit}>Cancel</Button><Button type="button" onClick={() => void handleRequestEdit()} disabled={isRequestingEdit || !editRequestReason.trim()} className="bg-primary text-primary-foreground">{isRequestingEdit ? 'Requesting…' : 'Send Request'}</Button></div>
         </div>
-      )}
+      </div>}
+
     </div>
   );
 };

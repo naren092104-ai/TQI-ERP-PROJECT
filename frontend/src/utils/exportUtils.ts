@@ -391,6 +391,114 @@ export function exportAttendanceMatrixExcel(
   XLSX.writeFile(wb, `TQI_Attendance_7Day_${clusterName.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`);
 }
 
+export interface AttendanceRosterExportRow {
+  name: string;
+  standard: string;
+  village: string;
+  attendance: string;
+  taskStatus?: string;
+}
+
+export function exportAttendanceRosterExcel(
+  rows: AttendanceRosterExportRow[],
+  context: { cluster: string; panchayat: string; village: string; day: string; date: string; standard: string },
+) {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['TQI STUDENT ATTENDANCE'],
+    ['Cluster', context.cluster, 'Panchayat', context.panchayat],
+    ['Village', context.village, 'Day', context.day, 'Date', context.date],
+    ['Standard', context.standard],
+    [],
+    ['S.No', 'Student Name', 'Standard', 'Village', 'Attendance', 'Task Completion'],
+    ...rows.map((row, index) => [index + 1, row.name, row.standard, row.village, row.attendance, row.taskStatus || '—']),
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Attendance');
+  const safeName = `${context.day}_${context.village}_${context.standard}`.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  XLSX.writeFile(workbook, `TQI_Attendance_${safeName}.xlsx`);
+}
+
+export interface VolunteerAttendanceExportRow {
+  name: string;
+  role: string;
+  attendance: string;
+}
+
+export function exportVolunteerAttendanceRosterExcel(
+  rows: VolunteerAttendanceExportRow[],
+  context: { cluster: string; panchayat: string; village: string; day: string; date: string; academicYear: string },
+) {
+  const workbook = XLSX.utils.book_new();
+  const sheet = XLSX.utils.aoa_to_sheet([
+    ['TALENT QUEST FOR INDIA — VOLUNTEER ATTENDANCE'],
+    ['Academic Year', context.academicYear],
+    ['Cluster', context.cluster, 'Panchayat', context.panchayat],
+    ['Village', context.village, 'Day', context.day, 'Date', context.date],
+    [],
+    ['S.No', 'Volunteer Name', 'Role', 'Attendance'],
+    ...rows.map((row, index) => [index + 1, row.name, row.role, row.attendance]),
+  ]);
+  sheet['!cols'] = [{ wch: 8 }, { wch: 30 }, { wch: 22 }, { wch: 18 }];
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Volunteer Attendance');
+  const safeName = `${context.day}_${context.village}_${context.cluster}`.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  XLSX.writeFile(workbook, `TQI_Volunteer_Attendance_${safeName}.xlsx`);
+}
+
+export interface SuperAdminAttendanceExportRow {
+  name: string;
+  cluster: string;
+  panchayat: string;
+  village: string;
+  day: string;
+  date: string;
+  standard?: string;
+  role?: string;
+  attendance: string;
+  taskStatus?: string;
+}
+
+export function exportSuperAdminAttendanceExcel(
+  rows: SuperAdminAttendanceExportRow[],
+  context: { subject: 'students' | 'volunteers'; academicYear: string; scope: string },
+) {
+  const workbook = XLSX.utils.book_new();
+  const isStudents = context.subject === 'students';
+  const detailRows = rows.map((row, index) => isStudents
+    ? [index + 1, row.name, row.standard || '—', row.cluster, row.panchayat, row.village, row.day, row.date, row.attendance, row.taskStatus || '—']
+    : [index + 1, row.name, row.role || 'Volunteer', row.cluster, row.panchayat, row.village, row.day, row.date, row.attendance]);
+  const headers = isStudents
+    ? ['S.No', 'Student Name', 'Standard', 'Cluster', 'Panchayat', 'Village', 'Day', 'Date', 'Attendance', 'Task Completion']
+    : ['S.No', 'Volunteer Name', 'Role', 'Cluster', 'Panchayat', 'Village', 'Day', 'Date', 'Attendance'];
+  const sheet = XLSX.utils.aoa_to_sheet([
+    [`TALENT QUEST FOR INDIA — ${isStudents ? 'STUDENT' : 'VOLUNTEER'} ATTENDANCE`],
+    ['Academic Year', context.academicYear],
+    ['Export Scope', context.scope],
+    [],
+    headers,
+    ...detailRows,
+  ]);
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Attendance Details');
+  const safeScope = context.scope.replace(/[^a-zA-Z0-9_-]+/g, '_');
+  XLSX.writeFile(workbook, `TQI_${isStudents ? 'Student' : 'Volunteer'}_Attendance_${safeScope}.xlsx`);
+}
+
+export function exportAttendanceRosterPdf(
+  rows: AttendanceRosterExportRow[],
+  context: { cluster: string; panchayat: string; village: string; day: string; date: string; standard: string },
+) {
+  const printWindow = window.open('', '_blank');
+  if (!printWindow) {
+    window.print();
+    return;
+  }
+  const escape = (value: string) => value.replace(/[&<>"']/g, (character) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[character] || character);
+  const rowsHtml = rows.map((row, index) => `<tr><td>${index + 1}</td><td>${escape(row.name)}</td><td>${escape(row.standard)}</td><td>${escape(row.village)}</td><td>${escape(row.attendance)}</td><td>${escape(row.taskStatus || '—')}</td></tr>`).join('');
+  printWindow.document.write(`<!doctype html><html><head><title>TQI Attendance ${escape(context.day)}</title><style>body{font-family:Arial,sans-serif;color:#172033;margin:32px}h1{text-align:center;color:#153b78;font-size:20px}.meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:20px 0;padding:14px;background:#f3f6fb;border-radius:8px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#153b78;color:#fff;text-align:left}th,td{border:1px solid #ccd5e2;padding:8px}tbody tr:nth-child(even){background:#f7f9fc}@media print{body{margin:12mm}}</style></head><body><h1>Talent Quest for India · Student Attendance</h1><div class="meta"><span><b>Cluster:</b> ${escape(context.cluster)}</span><span><b>Panchayat:</b> ${escape(context.panchayat)}</span><span><b>Village:</b> ${escape(context.village)}</span><span><b>Standard:</b> ${escape(context.standard)}</span><span><b>Day:</b> ${escape(context.day)}</span><span><b>Date:</b> ${escape(context.date)}</span></div><table><thead><tr><th>S.No</th><th>Student Name</th><th>Standard</th><th>Village</th><th>Attendance</th><th>Task Completion</th></tr></thead><tbody>${rowsHtml}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`);
+  printWindow.document.close();
+}
+
 export function exportAttendanceMatrixPdf(
   scheduledDays: Array<{ dayNumber: number; date: string; dayLabel?: string }>,
   matrixRows: Array<{

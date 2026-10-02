@@ -52,6 +52,47 @@ interface SessionPhotosViewProps {
   onRoleChange?: (role: 'Cluster Admin' | 'Super Admin') => void;
 }
 
+const AuthenticatedPhoto: React.FC<{ src?: string; alt: string; className: string; authToken?: string; loading?: 'lazy' | 'eager' }> = ({
+  src,
+  alt,
+  className,
+  authToken,
+  loading,
+}) => {
+  const [imageSrc, setImageSrc] = useState('/logo.png');
+
+  useEffect(() => {
+    if (!src) {
+      setImageSrc('/logo.png');
+      return;
+    }
+    let objectUrl = '';
+    let cancelled = false;
+    fetch(apiUrl(src), {
+      cache: 'no-store',
+      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error('Photo could not be loaded.');
+        return response.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setImageSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setImageSrc('/logo.png');
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src, authToken]);
+
+  return <img src={imageSrc} alt={alt} className={className} loading={loading} />;
+};
+
 export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
   panchayats = [],
   clusters = [],
@@ -274,8 +315,14 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     const filterCluster = userRole === 'Cluster Admin' ? currentCluster : selectedCluster;
     const isAll = filterCluster === 'all';
 
-    if (programDays.length > 0) {
-      return programDays.map((pd) => {
+    const daysToRender = programDays.length > 0
+      ? programDays
+      : Object.keys(academicSetupMap).length > 0
+        ? Object.keys(academicSetupMap).map((dayNumber) => ({ id: `day-${dayNumber}`, day_number: Number(dayNumber), day_name: academicSetupMap[Number(dayNumber)] }))
+        : Array.from({ length: 8 }, (_, index) => ({ id: `day-${index + 1}`, day_number: index + 1, day_name: `Day ${index + 1}` }));
+
+    if (daysToRender.length > 0) {
+      return daysToRender.map((pd) => {
         const statusInfo = dayStatuses[pd.day_number];
         const dayPhotos = photos.filter((p) => {
           const matchCluster =
@@ -289,36 +336,16 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
           dayNumber: pd.day_number,
           dayName: pd.day_name || `Day ${pd.day_number}`,
           sessionName: academicSetupMap[pd.day_number] || pd.day_name || `Session Day ${pd.day_number}`,
-          photosCount: actualCount,
+          photosCount: statusInfo?.count ?? actualCount,
           status: (statusInfo?.status || 'DRAFT').toUpperCase(),
-          isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(
+          isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED', 'CHANGES REQUESTED'].includes(
             (statusInfo?.status || 'DRAFT').toUpperCase()
           ),
         };
       });
     }
 
-    // Default fallback if program days not yet loaded
-    return [1, 2, 3, 4, 5, 6, 7, 8].map((d) => {
-      const statusInfo = dayStatuses[d];
-      const dayPhotos = photos.filter((p) => {
-        const matchCluster =
-          isAll ||
-          (p.clusterId || '').toLowerCase() === filterCluster.toLowerCase() ||
-          (p.clusterName || '').toLowerCase() === filterCluster.toLowerCase();
-        return matchCluster && p.dayNumber === d;
-      });
-      return {
-        dayNumber: d,
-        dayName: `Day ${d}`,
-        sessionName: academicSetupMap[d] || `Session Day ${d}`,
-        photosCount: dayPhotos.length,
-        status: (statusInfo?.status || 'DRAFT').toUpperCase(),
-        isLocked: ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(
-          (statusInfo?.status || 'DRAFT').toUpperCase()
-        ),
-      };
-    });
+    return [];
   }, [programDays, academicSetupMap, dayStatuses, photos, userRole, currentCluster, selectedCluster]);
 
   // Current active day config (when inside dedicated Day view)
@@ -638,6 +665,28 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     }
   };
 
+  const handleApprovePhotoEdits = async (clusterIdToApprove: string, dayNum: number) => {
+    setIsProcessingAction(true);
+    try {
+      const res = await fetch(apiUrl('/api/session-photos/submissions/approve-edits'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        },
+        body: JSON.stringify({ clusterId: clusterIdToApprove, dayNumber: dayNum, academicYearId: selectedAcademicYearId }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Unable to approve photo changes.');
+      await fetchDayStatuses();
+      alert(`Cluster Admin can now revise Day ${dayNum} photos.`);
+    } catch (err: any) {
+      alert(err.message || 'Unable to approve photo changes.');
+    } finally {
+      setIsProcessingAction(false);
+    }
+  };
+
   // Request Photo Delete Workflow
   const handleConfirmDeleteRequest = async () => {
     if (!deleteRequestTarget) return;
@@ -805,10 +854,13 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
     formData.append('sessionTitle', uploadTitle);
     formData.append('dayNumber', String(currentDay));
     formData.append('date', uploadDate);
+    formData.append('photoType', uploadPhotoType);
     formData.append('academicYearId', selectedAcademicYearId || '');
     formData.append('panchayatId', uploadPanchayat);
-
     const foundP = panchayats.find((p) => p.id === uploadPanchayat || p.name === uploadPanchayat);
+    const foundVillage = foundP?.villages?.find((village) => village.id === uploadVillage || village.name === uploadVillage);
+    formData.append('villageId', foundVillage?.id || '');
+
     formData.append('panchayatName', foundP ? foundP.name : uploadPanchayat);
     formData.append('villageName', uploadVillage);
     formData.append('uploadedBy', uploadUploader);
@@ -1011,7 +1063,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             <span>{downloadingZipKey === 'filtered' ? 'Preparing ZIP...' : 'Download ZIP'}</span>
           </Button>
 
-          {(userRole === 'Super Admin' || (userRole === 'Cluster Admin' && activeDayNumber !== null && !activeDayConfig?.isLocked)) && (
+          {userRole === 'Cluster Admin' && activeDayNumber !== null && !activeDayConfig?.isLocked && (
             <Button
               size="sm"
               onClick={() => {
@@ -1110,13 +1162,11 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                   className="flex flex-col justify-between overflow-hidden rounded-lg border border-border bg-card shadow-xs transition hover:shadow-md"
                 >
                   <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
-                    <img
-                      src={req.fileUrl || '/logo.png'}
+                    <AuthenticatedPhoto
+                      src={req.fileUrl}
                       alt={req.fileName}
                       className="h-full w-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLElement).style.display = 'none';
-                      }}
+                      authToken={authToken}
                     />
                     <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
                       <Badge variant="default" size="sm" className="bg-black/60 text-white border-white/20">
@@ -1210,16 +1260,18 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                       variant="default"
                       size="sm"
                       className={`text-xs font-semibold ${
-                        activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW'
+                        activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW' || activeDayConfig.status === 'CHANGES REQUESTED'
                           ? 'bg-amber-100 text-amber-900 border-amber-300'
                           : activeDayConfig.status === 'APPROVED'
                           ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-                          : activeDayConfig.status === 'EDIT_APPROVED'
+                          : activeDayConfig.status === 'EDIT APPROVED'
                           ? 'bg-blue-100 text-blue-900 border-blue-300'
                           : 'bg-muted text-muted-foreground'
                       }`}
                     >
-                      {activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW' ? (
+                      {activeDayConfig.status === 'CHANGES REQUESTED' ? (
+                        <span className="flex items-center gap-1"><Lock className="h-3 w-3" /><span>Change request pending Super Admin approval</span></span>
+                      ) : activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW' ? (
                         <span className="flex items-center gap-1">
                           <Lock className="h-3 w-3" />
                           <span>Submitted — Pending Review</span>
@@ -1229,7 +1281,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                           <CheckCircle2 className="h-3 w-3" />
                           <span>Approved</span>
                         </span>
-                      ) : activeDayConfig.status === 'EDIT_APPROVED' ? (
+                      ) : activeDayConfig.status === 'EDIT APPROVED' ? (
                         <span className="flex items-center gap-1">
                           <CheckCircle2 className="h-3 w-3 text-blue-700" />
                           <span>Edit Approved — Editable</span>
@@ -1256,13 +1308,20 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                 </div>
 
                 {/* Super Admin Action Controls */}
-                {userRole === 'Super Admin' && (activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW') && (
+                {userRole === 'Super Admin' && (activeDayConfig.status === 'SUBMITTED' || activeDayConfig.status === 'PENDING REVIEW' || activeDayConfig.status === 'CHANGES REQUESTED') && (
                   <div className="flex items-center gap-2">
+                    {activeDayConfig.status === 'CHANGES REQUESTED' && <Button
+                      size="sm"
+                      disabled={isProcessingAction}
+                      onClick={() => handleApprovePhotoEdits(selectedCluster, activeDayConfig.dayNumber)}
+                      className="gap-1.5 text-xs font-semibold bg-blue-600 text-white hover:bg-blue-700 shadow-xs"
+                    ><CheckCircle2 className="h-3.5 w-3.5" /><span>Approve Photo Changes</span></Button>}
                     <Button
                       size="sm"
                       disabled={isProcessingAction}
                       onClick={() => handleApproveDaySubmission(selectedCluster, activeDayConfig.dayNumber)}
                       className="gap-1.5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs"
+                      hidden={activeDayConfig.status === 'CHANGES REQUESTED'}
                     >
                       <CheckCircle2 className="h-3.5 w-3.5" />
                       <span>Approve Day Collection</span>
@@ -1502,14 +1561,12 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                     }`}
                   >
                     <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
-                      <img
-                        src={photo.fileUrl || '/logo.png'}
+                      <AuthenticatedPhoto
+                        src={photo.fileUrl}
                         alt={photo.caption || photo.sessionTitle}
                         loading="lazy"
                         className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
+                        authToken={authToken}
                       />
 
                       <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
@@ -1818,7 +1875,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                       <div className="mt-4 space-y-3 text-xs text-muted-foreground">
                         <div className="flex items-center justify-between">
                           <span>Submitted Days</span>
-                          <span className="font-bold text-foreground">{submittedCount} / 8</span>
+                          <span className="font-bold text-foreground">{submittedCount} / {configuredDays.length}</span>
                         </div>
 
                         {/* Visit Dates in Month */}
@@ -1890,7 +1947,7 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                 const summary = clusterSummaries.find(
                   (cs) => cs.clusterId.toLowerCase() === c.id.toLowerCase() || cs.clusterName.toLowerCase() === c.name.toLowerCase()
                 );
-                const totalPhotos = summary?.totalPhotos || photos.filter((p) => p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()).length;
+                const totalPhotos = photos.filter((p) => p.clusterId?.toLowerCase() === c.id.toLowerCase() || p.clusterName?.toLowerCase() === c.name.toLowerCase()).length;
                 const submittedCount = summary?.submittedDaysCount || 0;
 
                 return (
@@ -1921,13 +1978,14 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                             submittedCount > 0 ? 'bg-amber-100 text-amber-900 border-amber-300' : 'bg-muted text-muted-foreground'
                           }`}
                         >
-                          {submittedCount} / 8 Days Submitted
+                          {submittedCount} / {configuredDays.length} Days Submitted
                         </Badge>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 pt-1">
-                      {[1, 2, 3, 4, 5, 6, 7, 8].map((dayNum) => {
+                      {configuredDays.map((day) => {
+                        const dayNum = day.dayNumber;
                         const daySummary = summary?.days?.find((d) => d.dayNumber === dayNum);
                         const dayPhotos = photos.filter(
                           (p) =>
@@ -1936,9 +1994,9 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                         );
                         const photoCount = daySummary ? daySummary.photoCount : dayPhotos.length;
                         const status = (daySummary?.status || 'DRAFT').toUpperCase();
-                        const isSubmitted = ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED'].includes(status);
+                        const isSubmitted = ['SUBMITTED', 'PENDING REVIEW', 'APPROVED', 'EDIT_REQUESTED', 'CHANGES REQUESTED'].includes(status);
                         const isApproved = status === 'APPROVED';
-                        const sessionName = academicSetupMap[dayNum] || `Session Day ${dayNum}`;
+                        const sessionName = academicSetupMap[dayNum] || day.sessionName || `Session Day ${dayNum}`;
 
                         return (
                           <div
@@ -2242,8 +2300,6 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                 icon={ImageIcon}
                 title="No photographs found"
                 description="No session photographs matched your filters."
-                actionLabel="+ Upload First Photo"
-                onAction={() => setShowUploadModal(true)}
               />
             </div>
           ) : (
@@ -2260,14 +2316,12 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                     }`}
                   >
                     <div className="relative aspect-video w-full overflow-hidden bg-muted/40">
-                      <img
-                        src={photo.fileUrl || '/logo.png'}
+                      <AuthenticatedPhoto
+                        src={photo.fileUrl}
                         alt={photo.caption || photo.sessionTitle}
                         loading="lazy"
                         className="h-full w-full object-cover transition duration-300 group-hover:scale-105"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
+                        authToken={authToken}
                       />
 
                       <div className="absolute inset-x-0 top-0 flex items-center justify-between p-2 bg-gradient-to-b from-black/60 to-transparent">
@@ -2390,10 +2444,11 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
                 </>
               )}
 
-              <img
-                src={previewPhoto.fileUrl || '/logo.png'}
+              <AuthenticatedPhoto
+                src={previewPhoto.fileUrl}
                 alt={previewPhoto.caption || previewPhoto.sessionTitle}
                 className="max-h-[80vh] max-w-full w-auto object-contain"
+                authToken={authToken}
               />
             </div>
 
@@ -2770,10 +2825,11 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
             <div className="mt-4 space-y-3.5 text-xs">
               <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-2.5">
                 <div className="h-14 w-18 overflow-hidden rounded border border-border bg-muted shrink-0">
-                  <img
-                    src={deleteRequestTarget.fileUrl || '/logo.png'}
+                  <AuthenticatedPhoto
+                    src={deleteRequestTarget.fileUrl}
                     alt={deleteRequestTarget.originalFilename}
                     className="h-full w-full object-cover"
+                    authToken={authToken}
                   />
                 </div>
                 <div className="space-y-0.5 overflow-hidden">

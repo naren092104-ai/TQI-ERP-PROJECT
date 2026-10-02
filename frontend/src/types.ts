@@ -124,6 +124,7 @@ export interface VolunteerSessionHistory {
 export interface Volunteer {
   id: string;
   name: string;
+  gender?: 'male' | 'female' | 'other';
   email: string;
   phone: string;
   college?: string;
@@ -170,12 +171,15 @@ export interface Session {
   panchayatName: string;
   villageId?: string;
   villageName: string;
+  targetLocations?: Array<{ panchayatId: string; panchayatName: string; villageId?: string; villageName: string }>;
+  targetLocationReason?: string;
   volunteerId?: string;
   volunteerName: string;
   status: 'Pending' | 'Scheduled' | 'In Progress' | 'Completed' | 'Cancelled' | 'Needs Attention' | 'Draft' | 'Action Req.' | 'Submitted' | 'Pending Review' | 'Approved' | 'Resubmission Required';
   sessionType?: 'Academic' | 'Life Skills' | 'Assessment' | 'Orientation';
   description?: string;
   lessonPlanId?: string;
+  hasSavedSchedule?: boolean;
   spoc?: string;
   financer?: string;
   photos?: string[];
@@ -564,6 +568,7 @@ export interface AttendanceRecord {
 
 export interface AttendanceSession {
   id: string;
+  attendanceType?: 'students' | 'volunteers';
   sessionId?: string;
   sessionName?: string;
   clusterId?: string;
@@ -758,15 +763,35 @@ export interface SessionReport {
   clusterName?: string;
   dayNumber?: number;
   sessionSummary: string;
-  studentCount: number;
+  studentCount: number | null;
   attendanceSummary: string;
   activities: string;
+  outcome?: string;
   issues: string;
   remarks: string;
   status: 'DRAFT' | 'SUBMITTED' | 'APPROVED';
+  academicYearId?: string;
+  photos?: SessionReportPhoto[];
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export interface SessionReportPhoto {
+  id: string;
+  sessionReportId: string;
+  originalFilename: string;
+  mimeType: string;
+  fileSize: number;
+  fileUrl: string;
+  createdAt?: string;
+}
+
+export interface SessionReportActivity {
+  topic: string;
+  details: string;
+  lessonPlanId?: string;
+  moduleId?: string;
 }
 
 export interface SessionSubmission {

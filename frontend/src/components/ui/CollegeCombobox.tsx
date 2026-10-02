@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Search } from 'lucide-react';
 import { apiUrl } from '../../utils/api';
 
-interface CollegeOption {
+export interface CollegeOption {
   id: string;
   name: string;
   district: string;
@@ -11,8 +11,6 @@ interface CollegeOption {
   collegeType?: string;
   institutionCategory?: string;
 }
-
-type CollegeCategory = 'all' | 'engineering' | 'arts' | 'medical';
 
 const normalizeForSearch = (value: string) => value
   .normalize('NFD')
@@ -62,11 +60,10 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
   const [directoryError, setDirectoryError] = useState('');
   const directoryLoadingRef = useRef(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
-  const [category, setCategory] = useState<CollegeCategory>('all');
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!isOpen || (category === 'all' && query.trim().length < 2) || directory || directoryLoadingRef.current) return;
+    if (!isOpen || query.trim().length < 2 || directory || directoryLoadingRef.current) return;
     directoryLoadingRef.current = true;
     setIsLoadingDirectory(true);
     setDirectoryError('');
@@ -88,19 +85,11 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
         directoryLoadingRef.current = false;
         setIsLoadingDirectory(false);
       });
-  }, [authToken, category, directory, isLoadingDirectory, isOpen, query]);
+  }, [authToken, directory, isLoadingDirectory, isOpen, query]);
 
   const options = useMemo(() => {
     const normalizedQuery = normalizeForSearch(query);
-    if (!directory || (category === 'all' && normalizedQuery.length < 2)) return [];
-
-    const categoryPatterns: Record<Exclude<CollegeCategory, 'all'>, RegExp> = {
-      engineering: /engineer|technology|technical|polytechnic|architecture/i,
-      medical: /medical|medicine|dental|nurs|pharmacy|ayurved|siddha|homeopath|physiotherap|paramedical|health science|mbbs|healthcare/i,
-      arts: /arts|science|humanities|commerce|liberal|fine arts|social science/i,
-    };
-    const otherDiscipline = /engineer|technology|technical|polytechnic|architecture|medical|medicine|dental|nurs|pharmacy|ayurved|siddha|homeopath|physiotherap|paramedical|health science|mbbs|healthcare|law|legal|teacher training|education|management|hotel management|fashion|design|aviation/i;
-    const categoryPattern = category === 'all' ? null : categoryPatterns[category];
+    if (!directory || normalizedQuery.length < 2) return [];
 
     const queryTokens = normalizedQuery.split(' ').filter(Boolean);
     const filtered = directory.filter((college) => {
@@ -110,21 +99,13 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
         || searchable.includes(normalizedQuery)
         || compactSearchable.includes(normalizedQuery.replace(/ /g, ''))
         || queryTokens.every((token) => searchable.split(' ').some((word) => word === token || (token.length >= 4 && word.length >= 4 && editDistance(token, word) <= 1)));
-      if (!matchesSearch) return false;
-      if (!categoryPattern) return true;
-
-      const categoryText = `${college.name} ${college.type} ${college.collegeType}`;
-      if (category === 'arts') {
-        const generalCollege = /university affiliated college|constituent college/i.test(`${college.institutionCategory} ${college.collegeType}`);
-        return categoryPattern.test(categoryText) || (generalCollege && !otherDiscipline.test(categoryText));
-      }
-      return categoryPattern.test(categoryText);
+      return matchesSearch;
     });
     return filtered.sort((first, second) =>
       normalizeForSearch(first.name).localeCompare(normalizeForSearch(second.name), 'en', { sensitivity: 'base' })
       || first.id.localeCompare(second.id, 'en', { sensitivity: 'base' }),
     );
-  }, [category, directory, query]);
+  }, [directory, query]);
 
   useEffect(() => {
     const handleOutside = (event: MouseEvent) => {
@@ -142,15 +123,7 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
 
   return (
     <div ref={rootRef} className="relative">
-      <label className="mb-2 block text-xs font-semibold text-slate-600">College type</label>
-      <div className="mb-3 flex gap-1.5 overflow-x-auto pb-1" role="group" aria-label="College type">
-        {([
-          ['all', 'All'],
-          ['engineering', 'Engineering'],
-          ['arts', 'Arts & Science'],
-          ['medical', 'Medical'],
-        ] as const).map(([key, label]) => <button key={key} type="button" aria-pressed={category === key} onClick={() => { setCategory(key); setHighlightedIndex(-1); setIsOpen(true); }} className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-semibold transition ${category === key ? 'border-[#0B3D91] bg-[#0B3D91] text-white shadow-sm' : 'border-slate-200 bg-white text-slate-600 hover:border-blue-200 hover:bg-blue-50 hover:text-[#0B3D91]'}`}>{label}</button>)}
-      </div>
+      <label className="mb-2 block text-xs font-semibold text-slate-600">College / Institution</label>
       <div className={`flex w-full items-center gap-2 rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition focus-within:border-[#0B3D91] focus-within:ring-4 focus-within:ring-blue-100 ${isOpen ? 'border-[#0B3D91]' : 'border-slate-200'}`}>
         <Search className="h-4 w-4 shrink-0 text-slate-400" />
         <input
@@ -187,7 +160,7 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
         <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`} />
       </div>
       {isOpen && <div className="absolute z-[1000000] mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-        {query.trim().length < 2 && category === 'all' ? <p className="px-3 py-3 text-xs text-slate-500">Type at least 2 letters to search all Tamil Nadu colleges, or choose Engineering, Arts &amp; Science, or Medical &amp; Health Sciences first.</p>
+        {query.trim().length < 2 ? <p className="px-3 py-3 text-xs text-slate-500">Type at least 2 letters to search the Tamil Nadu college directory.</p>
               : isLoadingDirectory ? <p className="px-3 py-3 text-xs text-slate-500">Loading colleges from the TQI backend…</p>
               : directoryError ? <p className="px-3 py-3 text-xs text-rose-700">{directoryError} You can still enter the college name manually.</p>
               : options.length ? <><p className="sticky top-0 z-10 border-b border-slate-100 bg-white px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{options.length.toLocaleString()} matching colleges · sorted A–Z · all Tamil Nadu districts</p>{options.map((college, index) => <button key={college.id} type="button" onMouseEnter={() => setHighlightedIndex(index)} onClick={() => choose(college)} className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
