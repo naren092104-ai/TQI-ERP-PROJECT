@@ -404,7 +404,7 @@ export default function App() {
     }
     const controller = new AbortController();
     const loadMaintenance = async () => {
-      setMaintenanceLoading(true);
+      if (maintenanceCheckedToken !== currentUser.token) setMaintenanceLoading(true);
       try {
         const response = await fetch(apiUrl('/api/system/maintenance'), {
           headers: { Authorization: `Bearer ${currentUser.token}` },
@@ -414,19 +414,25 @@ export default function App() {
         const data = await response.json().catch(() => null);
         if (!response.ok || !data?.success) return;
         setMaintenanceState(data.maintenance || null);
+        setMaintenanceCheckedToken(currentUser.token);
       } catch {
         // Ignore transient maintenance fetch failures while keeping the current app visible.
       } finally {
-        if (!controller.signal.aborted) setMaintenanceCheckedToken(currentUser.token);
-        setMaintenanceLoading(false);
+        if (!controller.signal.aborted && maintenanceCheckedToken !== currentUser.token) setMaintenanceLoading(false);
       }
     };
     void loadMaintenance();
-    return () => controller.abort();
-  }, [currentUser?.token]);
+    const timer = window.setInterval(() => void loadMaintenance(), 10_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(timer);
+    };
+  }, [currentUser?.token, maintenanceCheckedToken]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
     let active = true;
     const refreshNotifications = async () => {
       try {
@@ -449,7 +455,7 @@ export default function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [currentUser?.token]);
+  }, [currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
 
   useEffect(() => {
     if (!areNotificationsLoaded) return;
