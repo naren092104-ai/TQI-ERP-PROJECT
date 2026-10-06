@@ -234,6 +234,8 @@ export default function App() {
   // Sync with API Backend
   const fetchBackendData = useCallback(async (signal?: AbortSignal) => {
     if (!currentUser?.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
 
     // 300 ms debounce — React 19 Strict Mode unmounts and remounts immediately
     // in dev. The abort from the first mount cancels this timer before the
@@ -245,6 +247,7 @@ export default function App() {
       }
     });
     if (signal?.aborted) return;
+    if (currentUserRole !== 'Super Admin' && (maintenanceCheckedToken !== currentUser.token || maintenanceState?.enabled)) return;
 
     const headers = {
       Authorization: `Bearer ${currentUser.token}`,
@@ -385,7 +388,7 @@ export default function App() {
       setAreAcademicYearsLoading(false);
       // Network error or abort — keep existing in-memory state.
     }
-  }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId]);
+  }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId, maintenanceCheckedToken, maintenanceState?.enabled]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
