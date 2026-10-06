@@ -11,19 +11,88 @@ import { sendLoginOtp, sendOnboardingCredentialsEmail, sendWorkflowEmail } from 
 import * as archiverModule from 'archiver';
 import { pool, getDatabaseStatus, initializeDatabase } from './db/connection.js';
 import { initDatabaseSchema } from './db/init.js';
+import { RESET_OPTIONS, executeReset, previewReset, type ResetImpact } from './dataReset.js';
 
-dotenv.config();
-dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') });
+const resolveProjectRoot = (): string => {
+  const candidates = [
+    process.cwd(),
+    path.resolve(process.cwd(), '..'),
+    path.resolve(process.cwd(), 'backend'),
+  ];
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'frontend')) && fs.existsSync(path.join(candidate, 'backend'))) {
+      return candidate;
+    }
+  }
+
+  return process.cwd();
+};
+
+const PROJECT_ROOT = resolveProjectRoot();
+
+const loadDotenvFiles = () => {
+  const candidates = [
+    path.join(PROJECT_ROOT, '.env'),
+    path.join(PROJECT_ROOT, 'backend', '.env'),
+    path.join(process.cwd(), '.env'),
+  ];
+
+  const uniqueCandidates = [...new Set(candidates.filter((candidate) => fs.existsSync(candidate)))];
+
+  for (const candidate of uniqueCandidates) {
+    dotenv.config({ path: candidate, override: true });
+  }
+};
+
+loadDotenvFiles();
 
 const archiver: any = (archiverModule as any).default || archiverModule;
-const PROJECT_ROOT = fs.existsSync(path.join(process.cwd(), 'frontend'))
-  ? process.cwd()
-  : path.resolve(process.cwd(), '..');
+
+const configuredUploadsDir = process.env.UPLOADS_DIR?.trim();
+const normalizedUploadsDir = configuredUploadsDir?.replace(
+  /^[.\\/]*storage[\\/]uploads(?=$|[\\/])/i,
+  path.join('backend', 'storage', 'uploads'),
+);
+const UPLOADS_DIR = configuredUploadsDir
+  ? path.resolve(PROJECT_ROOT, normalizedUploadsDir || configuredUploadsDir)
+  : path.join(PROJECT_ROOT, 'backend', 'storage', 'uploads');
+const LEGACY_UPLOADS_DIR = path.join(PROJECT_ROOT, 'storage', 'uploads');
+const BACKUPS_DIR = path.join(PROJECT_ROOT, 'backend', 'storage', 'backups');
+const BACKUP_TABLES = [
+  'academic_years', 'clusters', 'modules', 'academic_setup', 'panchayats', 'villages', 'students', 'volunteers', 'module_resources', 'sessions',
+  'attendance_sessions', 'student_attendance', 'volunteer_attendance', 'lesson_plans',
+  'session_photos', 'session_photo_submissions', 'session_photo_delete_requests', 'session_reports',
+  'date_change_requests', 'session_submissions', 'finance_entries', 'finance_reports',
+  'finance_report_history', 'approvals', 'notifications',
+] as const;
+
+const resolveStoredUploadPath = (storedPath: unknown): string => {
+  const rawPath = String(storedPath || '').trim();
+  if (!rawPath) return '';
+
+  const resolvedPath = path.isAbsolute(rawPath)
+    ? path.normalize(rawPath)
+    : path.resolve(PROJECT_ROOT, rawPath);
+  if (fs.existsSync(resolvedPath)) return resolvedPath;
+
+  const legacyRelativePath = path.relative(LEGACY_UPLOADS_DIR, resolvedPath);
+  if (
+    legacyRelativePath &&
+    legacyRelativePath !== '..' &&
+    !legacyRelativePath.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(legacyRelativePath)
+  ) {
+    const relocatedPath = path.join(UPLOADS_DIR, legacyRelativePath);
+    if (fs.existsSync(relocatedPath)) return relocatedPath;
+  }
+
+  return resolvedPath;
+};
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 const JWT_SECRET = process.env.JWT_SECRET || 'replace-with-a-secret';
-const UPLOADS_DIR = path.join(PROJECT_ROOT, process.env.UPLOADS_DIR || 'storage/uploads');
 const DEFAULT_ACADEMIC_SESSION_NAMES = [
   'Parents Meet',
   'Know Your Locality',
@@ -69,7 +138,135 @@ const serializeUser = (row: any) => ({
   phone: row.phone || '',
   status: row.status,
   mustChangePassword: Boolean(row.must_change_password),
+  passwordCreatedAt: row.password_created_at || row.password_changed_at || row.created_at || null,
+  passwordChangedAt: row.password_changed_at || null,
+  passwordResetAt: row.password_reset_at || null,
+  passwordResetBy: row.password_reset_by_name || row.password_reset_by || null,
+  passwordStatus: Boolean(row.must_change_password) ? 'TEMPORARY' : 'SET',
 });
+
+const isStrongPassword = (password: string): boolean =>
+  password.length >= 8 && /[A-Z]/.test(password) && /[a-z]/.test(password) && /\d/.test(password) && /[^A-Za-z0-9]/.test(password);
+
+const generateTemporaryPassword = (): string => {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const special = '@#$%&*!?';
+  const all = `${upper}${lower}${digits}${special}`;
+  const chars = [upper, lower, digits, special].map((set) => set[randomInt(set.length)]);
+  while (chars.length < 16) chars.push(all[randomInt(all.length)]);
+  for (let i = chars.length - 1; i > 0; i -= 1) {
+    const j = randomInt(i + 1);
+    [chars[i], chars[j]] = [chars[j], chars[i]];
+  }
+  return chars.join('');
+};
+
+const recordPasswordEvent = async (input: {
+  userId: string; action: 'PASSWORD_CHANGED' | 'PASSWORD_RESET' | 'TEMP_PASSWORD_GENERATED' | 'FORCE_PASSWORD_CHANGE_ENABLED';
+  actorId: string; actorName: string; actorRole: string; clusterId?: string | null;
+  ip?: string; userAgent?: string; details?: string;
+}, db: any = pool) => {
+  const id = randomUUID();
+  await db.query(
+    'INSERT INTO user_password_history (id, user_id, action, changed_by, changed_by_name, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [id, input.userId, input.action, input.actorId, input.actorName, input.ip || null, input.userAgent || null],
+  );
+  await db.query(
+    'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [randomUUID(), input.actorId, input.actorName, input.actorRole, input.clusterId || null, input.action, 'AUTH', input.userId, input.details || input.action],
+  );
+};
+
+const normalizeMaintenanceSettings = (row: any) => ({
+  id: String(row?.id || 'website_maintenance'),
+  enabled: Boolean(row?.enabled),
+  title: String(row?.title || 'Website Under Maintenance'),
+  message: String(row?.message || 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.'),
+  expectedCompletion: row?.expected_completion ? new Date(row.expected_completion).toISOString() : null,
+  showCountdown: Boolean(row?.show_countdown),
+  autoDisable: Boolean(row?.auto_disable),
+  enabledAt: row?.enabled_at ? new Date(row.enabled_at).toISOString() : null,
+  enabledBy: row?.enabled_by || null,
+  enabledByName: row?.enabled_by_name || null,
+  disabledAt: row?.disabled_at ? new Date(row.disabled_at).toISOString() : null,
+  disabledBy: row?.disabled_by || null,
+  disabledByName: row?.disabled_by_name || null,
+  updatedAt: row?.updated_at ? new Date(row.updated_at).toISOString() : null,
+  updatedBy: row?.updated_by || null,
+});
+
+const getMaintenanceSettings = async () => {
+  const [rows] = await pool.query<any[]>(`SELECT m.*, e.name AS enabled_by_name, d.name AS disabled_by_name
+    FROM maintenance_settings m
+    LEFT JOIN users e ON e.id = m.enabled_by
+    LEFT JOIN users d ON d.id = m.disabled_by
+    WHERE m.id = 'website_maintenance' LIMIT 1`);
+
+  let row = rows[0] || null;
+
+  if (row && row.enabled && row.auto_disable && row.expected_completion && new Date(row.expected_completion).getTime() <= Date.now()) {
+    await pool.query(
+      `UPDATE maintenance_settings
+       SET enabled = FALSE,
+           disabled_at = NOW(),
+           disabled_by = 'system',
+           updated_at = NOW()
+       WHERE id = 'website_maintenance'`,
+    );
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), null, 'System', 'System', null, 'MAINTENANCE_AUTO_DISABLED', 'SYSTEM', 'website_maintenance', JSON.stringify({ status: 'SUCCESS', expectedCompletion: row.expected_completion, reason: 'Auto disable completed.' })],
+    );
+    row = { ...row, enabled: false, disabled_at: new Date().toISOString(), disabled_by: 'system' };
+  }
+
+  if (!row) {
+    const fallback = {
+      id: 'website_maintenance',
+      enabled: false,
+      title: 'Website Under Maintenance',
+      message: 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.',
+      expected_completion: null,
+      show_countdown: false,
+      auto_disable: false,
+      enabled_at: null,
+      enabled_by: null,
+      disabled_at: null,
+      disabled_by: null,
+      updated_at: new Date().toISOString(),
+      updated_by: null,
+      enabled_by_name: null,
+      disabled_by_name: null,
+    };
+    return normalizeMaintenanceSettings(fallback);
+  }
+
+  return normalizeMaintenanceSettings(row);
+};
+
+const logMaintenanceEvent = async (action: 'MAINTENANCE_ENABLED' | 'MAINTENANCE_DISABLED' | 'MAINTENANCE_UPDATED' | 'MAINTENANCE_AUTO_DISABLED', actor: { id?: string | null; name?: string; role?: string }, details: Record<string, any> = {}) => {
+  await pool.query(
+    'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [randomUUID(), actor.id || null, actor.name || 'System', actor.role || 'System', null, action, 'SYSTEM', 'website_maintenance', JSON.stringify(details)],
+  );
+};
+
+const getMaintenanceGuardStatus = async (req: AuthenticatedRequest) => {
+  const maintenance = await getMaintenanceSettings();
+  const isSuperAdmin = req.user?.role === 'Super Admin';
+  const allowedDuringMaintenance = [
+    '/',
+    '/api/auth/logout',
+    '/api/auth/me',
+    '/api/auth/change-password',
+    '/api/system/maintenance',
+  ];
+  const isMaintenanceApiCall = req.path.startsWith('/api/system/maintenance');
+  const deniedByMaintenance = Boolean(maintenance.enabled && !isSuperAdmin && !allowedDuringMaintenance.includes(req.path) && !isMaintenanceApiCall);
+  return { maintenance, deniedByMaintenance };
+};
 
 // ============================================================
 // Phase 4: Session Status Flow Enforcement
@@ -153,6 +350,20 @@ const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextF
     }
 
     req.user = serializeUser(rows[0]);
+    const authPath = req.path;
+    const allowedDuringForcedChange = authPath === '/api/auth/change-password' || authPath === '/api/auth/me' || authPath === '/api/auth/logout';
+    if (req.user.mustChangePassword && !allowedDuringForcedChange) {
+      res.status(403).json({ success: false, code: 'PASSWORD_CHANGE_REQUIRED', error: 'Change your temporary password before using the application.' });
+      return;
+    }
+
+    const maintenanceCheck = await getMaintenanceGuardStatus(req);
+    if (maintenanceCheck.deniedByMaintenance) {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+      res.status(403).json({ success: false, code: 'MAINTENANCE_MODE_ACTIVE', maintenance: maintenanceCheck.maintenance, error: 'Website maintenance is active. Please try again later.' });
+      return;
+    }
+
     next();
   } catch (error) {
     res.status(401).json({ success: false, error: 'Invalid or expired session.' });
@@ -379,6 +590,7 @@ const mapSession = (row: any) => {
 
 const mapFinanceEntry = (row: any) => ({
   id: row.id,
+  sessionId: row.session_id || undefined,
   title: row.title || row.description,
   description: row.description,
   category: row.category || 'General',
@@ -387,16 +599,49 @@ const mapFinanceEntry = (row: any) => ({
   clusterName: row.cluster_name || row.cluster_id,
   date: row.date || new Date().toISOString().split('T')[0],
   createdBy: row.created_by,
-  status: row.status || 'Draft',
+  status: row.status === 'Submitted' ? 'Pending' : row.status === 'Rejected' ? 'Correction' : row.status || 'Draft',
+  draftId: row.draft_id || undefined,
   billReference: row.bill_reference || '',
+  billUrl: row.bill_url || undefined,
+  count: row.count == null ? undefined : Number(row.count),
+  countAmount: row.count_amount || undefined,
+  remarks: row.remarks || '',
   panchayatId: row.panchayat_id || '',
   panchayatName: row.panchayat_name || '',
 });
 
+const mapFinanceReport = (row: any) => {
+  let reportData: any = {};
+  try { reportData = typeof row.report_data === 'string' ? JSON.parse(row.report_data) : (row.report_data || {}); } catch { reportData = {}; }
+  return {
+    ...reportData,
+    id: String(row.id),
+    status: ({ DRAFT: 'Draft', SUBMITTED: 'Pending', PENDING_APPROVAL: 'Pending', APPROVED: 'Approved', REJECTED: 'Correction Requested' } as Record<string, string>)[String(row.report_status)] || 'Draft',
+    reportStatus: String(row.report_status || 'DRAFT'),
+    editRequestStatus: String(row.edit_request_status || 'NONE'),
+    editRequestReason: row.edit_request_reason || '',
+    editRequestedBy: row.edit_requested_by || '',
+    editRequestedAt: row.edit_requested_at || null,
+    editApprovedBy: row.edit_approved_by || '',
+    editApprovedAt: row.edit_approved_at || null,
+    editRejectedBy: row.edit_rejected_by || '',
+    editRejectedAt: row.edit_rejected_at || null,
+    editRejectionReason: row.edit_rejection_reason || '',
+    editPermission: Boolean(row.edit_permission),
+    lastSubmittedAt: row.last_submitted_at || null,
+    lastSubmittedBy: row.last_submitted_by || '',
+    createdBy: row.created_by || '',
+    updatedBy: row.updated_by || '',
+    createdAt: row.created_at || null,
+    updatedAt: row.updated_at || null,
+    history: row.history || [],
+  };
+};
+
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 
-const PHOTO_STORAGE_DIR = path.join(PROJECT_ROOT, 'storage', 'uploads');
+const PHOTO_STORAGE_DIR = UPLOADS_DIR;
 
 const photoUploadStorage = multer.diskStorage({
   destination: (_req, _file, callback) => {
@@ -592,13 +837,17 @@ app.post('/api/auth/logout', (_req: Request, res: Response) => {
 app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   const currentPassword = String(req.body.currentPassword || '');
   const newPassword = String(req.body.newPassword || '');
-  if (newPassword.length < 8) {
-    res.status(400).json({ success: false, error: 'New password must be at least 8 characters long.' });
+  if (!isStrongPassword(newPassword)) {
+    res.status(400).json({ success: false, error: 'Password must have at least 8 characters, uppercase and lowercase letters, a number, and a special character.' });
     return;
   }
+  let connection: any;
   try {
-    const [rows] = await pool.query<any[]>('SELECT password_hash, must_change_password FROM users WHERE id = ? LIMIT 1', [req.user.id]);
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [rows] = await connection.query('SELECT password_hash, must_change_password FROM users WHERE id = ? LIMIT 1 FOR UPDATE', [req.user.id]) as [any[], any];
     if (!rows.length) {
+      await connection.rollback();
       res.status(404).json({ success: false, error: 'User account not found.' });
       return;
     }
@@ -607,34 +856,33 @@ app.post('/api/auth/change-password', requireAuth, async (req: AuthenticatedRequ
     if (!isFirstTimeOnboarding) {
       const match = await bcrypt.compare(currentPassword, rows[0].password_hash || '');
       if (!match) {
+        await connection.rollback();
         res.status(401).json({ success: false, error: 'The current password provided is incorrect.' });
         return;
       }
     }
 
     const passwordHash = await bcrypt.hash(newPassword, 10);
-    await pool.query('UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?', [passwordHash, req.user.id]);
-
-    // Record audit log for password update
-    await pool.query(
-      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [
-        `aud-${randomUUID()}`,
-        req.user.id,
-        req.user.name,
-        req.user.role,
-        req.user.clusterId === 'all' ? null : req.user.clusterId,
-        isFirstTimeOnboarding ? 'ONBOARDING_PASSWORD_SET' : 'PASSWORD_CHANGED',
-        'AUTH',
-        req.user.id,
-        `User ${req.user.email} successfully updated account password.`,
-      ],
-    ).catch(() => undefined);
+    await connection.query('UPDATE users SET password_hash = ?, must_change_password = FALSE, password_changed_at = NOW(), password_created_at = COALESCE(password_created_at, NOW()) WHERE id = ?', [passwordHash, req.user.id]);
+    await recordPasswordEvent({
+      userId: req.user.id,
+      action: 'PASSWORD_CHANGED',
+      actorId: req.user.id,
+      actorName: req.user.name,
+      actorRole: req.user.role,
+      clusterId: req.user.clusterId === 'all' ? null : req.user.clusterId,
+      ip: req.ip || req.socket.remoteAddress,
+      userAgent: String(req.headers['user-agent'] || ''),
+    }, connection);
+    await connection.commit();
 
     res.json({ success: true, message: 'Password updated successfully. You are now logged in.' });
   } catch (error) {
+    await connection?.rollback().catch(() => undefined);
     console.error('Password change failed:', error);
     res.status(503).json({ success: false, error: 'Unable to update password. Please try again.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -1206,7 +1454,8 @@ app.post('/api/session-photos/delete-requests/:id/:action', requireAuth, async (
     const request = rows[0];
     if (req.params.action === 'approve') {
       const [photoRows] = await pool.query<any[]>('SELECT file_path FROM session_photos WHERE id = ? AND academic_year_id = ? LIMIT 1', [request.photo_id, year.id]);
-      if (photoRows[0]?.file_path && fs.existsSync(photoRows[0].file_path)) fs.unlinkSync(photoRows[0].file_path);
+      const photoPath = resolveStoredUploadPath(photoRows[0]?.file_path);
+      if (photoPath && fs.existsSync(photoPath)) fs.unlinkSync(photoPath);
       await pool.query('DELETE FROM session_photos WHERE id = ? AND academic_year_id = ?', [request.photo_id, year.id]);
       res.json({ success: true, status: 'APPROVED' });
       return;
@@ -1408,7 +1657,7 @@ app.get('/api/session-photos/file/:id', requireAuth, async (req: AuthenticatedRe
     }
 
     const row = rows[0];
-    const filePath = String(row.file_path || '');
+    const filePath = resolveStoredUploadPath(row.file_path);
     if (req.user.role === 'Cluster Admin' && String(row.cluster_id) !== String(await resolveClusterForAcademicYear(req, year.id))) {
       res.status(403).json({ success: false, error: 'This photo is outside your cluster.' });
       return;
@@ -1441,7 +1690,7 @@ app.get('/api/session-photos/:id/download', requireAuth, async (req: Authenticat
     }
 
     const row = rows[0];
-    const filePath = String(row.file_path || '');
+    const filePath = resolveStoredUploadPath(row.file_path);
     if (req.user.role === 'Cluster Admin' && String(row.cluster_id) !== String(await resolveClusterForAcademicYear(req, year.id))) {
       res.status(403).json({ success: false, error: 'This photo is outside your cluster.' });
       return;
@@ -1488,7 +1737,9 @@ app.get('/api/session-photos/download-zip', requireAuth, async (req: Authenticat
 
     sql += ' ORDER BY uploaded_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    const files = rows.filter((row) => row.file_path && fs.existsSync(row.file_path));
+    const files = rows
+      .map((row) => ({ ...row, resolvedFilePath: resolveStoredUploadPath(row.file_path) }))
+      .filter((row) => row.resolvedFilePath && fs.existsSync(row.resolvedFilePath));
 
     if (!files.length) {
       res.status(404).json({ success: false, error: 'No photos available to download.' });
@@ -1506,7 +1757,7 @@ app.get('/api/session-photos/download-zip', requireAuth, async (req: Authenticat
 
     files.forEach((row) => {
       const safeName = String(row.original_filename || `photo-${row.id}.png`);
-      archive.file(row.file_path, { name: safeName });
+      archive.file(row.resolvedFilePath, { name: safeName });
     });
 
     await archive.finalize();
@@ -1550,8 +1801,9 @@ app.delete('/api/session-photos/:id', requireAuth, async (req: AuthenticatedRequ
       res.status(403).json({ success: false, error: 'Only administrators can delete session photos.' });
       return;
     }
-    if (row.file_path && fs.existsSync(row.file_path)) {
-      fs.unlinkSync(row.file_path);
+    const filePath = resolveStoredUploadPath(row.file_path);
+    if (filePath && fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
     }
 
     await pool.query('DELETE FROM session_photos WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
@@ -1598,6 +1850,42 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
     }
     sql += ' ORDER BY approvals.created_at DESC, approvals.id DESC';
     const [rows] = await pool.query<any[]>(sql, params);
+    const financeDraftIds = rows
+      .filter((row) => ['Finance', 'Finance Edit Request'].includes(String(row.module)) && row.record_id)
+      .map((row) => String(row.record_id));
+    const financeDetails = new Map<string, { totalAmount: number; itemCount: number; billCount: number; date: string; title?: string; collegeName?: string; sessionName?: string }>();
+    if (financeDraftIds.length) {
+      const [financeRows] = await pool.query<any[]>(
+        `SELECT draft_id, SUM(amount) AS total_amount, COUNT(*) AS item_count,
+          SUM(CASE WHEN bill_url IS NOT NULL AND bill_url <> '' THEN 1 ELSE 0 END) AS bill_count,
+          MIN(date) AS entry_date
+         FROM finance_entries
+         WHERE draft_id IN (?) AND academic_year_id = ?
+         GROUP BY draft_id`,
+        [financeDraftIds, year.id],
+      );
+      financeRows.forEach((financeRow) => financeDetails.set(String(financeRow.draft_id), {
+        totalAmount: Number(financeRow.total_amount || 0),
+        itemCount: Number(financeRow.item_count || 0),
+        billCount: Number(financeRow.bill_count || 0),
+        date: financeRow.entry_date ? new Date(financeRow.entry_date).toISOString().slice(0, 10) : '',
+      }));
+      const [reportMetadataRows] = await pool.query<any[]>(
+        `SELECT id, JSON_UNQUOTE(JSON_EXTRACT(report_data, '$.title')) AS report_title,
+                JSON_UNQUOTE(JSON_EXTRACT(report_data, '$.collegeName')) AS college_name,
+                JSON_UNQUOTE(JSON_EXTRACT(report_data, '$.sessionDay')) AS session_name
+         FROM finance_reports WHERE academic_year_id = ? AND id IN (?)`,
+        [year.id, financeDraftIds],
+      );
+      reportMetadataRows.forEach((report) => {
+        const details = financeDetails.get(String(report.id));
+        if (details) {
+          details.title = report.report_title || undefined;
+          details.collegeName = report.college_name || undefined;
+          details.sessionName = report.session_name || undefined;
+        }
+      });
+    }
     const attendanceIds = rows.filter((row) => row.module === 'Attendance' && row.record_id).map((row) => String(row.record_id));
     const attendanceRecords = new Map<string, any[]>();
     const volunteerRecords = new Map<string, any[]>();
@@ -1637,7 +1925,10 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
     }
     res.json({ success: true, approvals: rows.map((row) => {
       const isAttendance = row.module === 'Attendance';
+      const isFinance = row.module === 'Finance' || row.module === 'Finance Edit Request';
       const attendanceId = String(row.record_id || '');
+      const financeRecordId = String(row.record_id || '');
+      const financeDetail = financeDetails.get(financeRecordId);
       const dayNumber = Number(row.attendance_day_number || 0);
       const panchayatName = String(row.attendance_panchayat_name || 'Panchayat');
       const villageName = String(row.attendance_village_name || (row.attendance_village_id ? 'Village' : 'All Villages'));
@@ -1645,7 +1936,11 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
       id: row.id,
       module: row.module || 'Sessions',
       recordId: isAttendance ? attendanceId : row.record_id || row.id,
-      recordTitle: isAttendance ? `${panchayatName} · ${villageName} · Day ${dayNumber} Attendance` : row.record_id || 'Approval request',
+      recordTitle: isAttendance
+        ? `${panchayatName} · ${villageName} · Day ${dayNumber} Attendance`
+        : isFinance
+          ? `${financeDetail?.title || (row.module === 'Finance Edit Request' ? 'Finance Edit Request' : 'Finance Submission')} · ${financeDetail?.date || 'Date unavailable'}`
+          : row.record_id || 'Approval request',
       submittedBy: row.requester_name || row.requested_by || '',
       submittedAt: row.created_at,
       status: row.status,
@@ -1660,6 +1955,15 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
         totalCount: Number(row.total_count || 0),
         records: attendanceRecords.get(attendanceId) || [],
         volunteerAttendance: volunteerRecords.get(attendanceId) || [],
+      } : isFinance ? {
+        totalAmount: financeDetail?.totalAmount || 0,
+        itemCount: financeDetail?.itemCount || 0,
+        billCount: financeDetail?.billCount || 0,
+        date: financeDetail?.date || '',
+        collegeName: financeDetail?.collegeName || '',
+        sessionName: financeDetail?.sessionName || '',
+        reason: row.remarks || '',
+        sessionId: row.session_id || '',
       } : '',
       correctionReason: undefined,
     });
@@ -1701,8 +2005,29 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
     }
 
     await pool.query('UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ? AND academic_year_id = ?', [status, req.params.id, year.id]);
+
     const actionName = action === 'approve' ? 'APPROVE' : action === 'reject' ? 'REJECT' : 'REQUEST_RESUBMISSION';
-    const recordId = approval.record_id || approval.id;
+    const recordId = String(approval.record_id || approval.id || '');
+
+    if (approval.module === 'Finance') {
+      const financeTarget = String(recordId || '').trim();
+      const updateStatus = action === 'approve' ? 'Approved' : action === 'reject' ? 'Rejected' : 'Rejected';
+      if (financeTarget) {
+        await pool.query(
+          'UPDATE finance_entries SET status = ?, updated_at = NOW() WHERE academic_year_id = ? AND (id = ? OR draft_id = ?)',
+          [updateStatus, year.id, financeTarget, financeTarget],
+        );
+        await pool.query(
+          'UPDATE finance_reports SET report_status = ?, edit_permission = 0, updated_by = ? WHERE academic_year_id = ? AND id = ?',
+          [action === 'approve' ? 'APPROVED' : 'REJECTED', req.user.id, year.id, financeTarget],
+        );
+        await pool.query(
+          'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [randomUUID(), financeTarget, year.id, action === 'approve' ? 'Finance report approved' : 'Finance report rejected', remarks || `Report status changed to ${status}.`, req.user.id, req.user.name || req.user.email || 'Super Admin'],
+        );
+      }
+    }
+
     await pool.query(
       'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
       [randomUUID(), req.user.id, req.user.name, 'Super Admin', approval.cluster_id || null, actionName, approval.module || 'Submission', recordId, remarks || `Status changed to ${status}`],
@@ -1715,6 +2040,136 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
   } catch (error) {
     console.error('Failed to update approval:', error);
     res.status(503).json({ success: false, error: 'Unable to update approval. Please try again.' });
+  }
+});
+
+app.get('/api/system/maintenance', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const settings = await getMaintenanceSettings();
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+    res.json({ success: true, maintenance: settings });
+  } catch (error) {
+    console.error('Failed to load maintenance settings:', error);
+    res.status(503).json({ success: false, error: 'Unable to load maintenance settings.' });
+  }
+});
+
+app.post('/api/system/maintenance/enable', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can enable maintenance mode.' });
+    return;
+  }
+  const title = String(req.body.title || '').trim() || 'Website Under Maintenance';
+  const message = String(req.body.message || '').trim() || 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.';
+  const expectedCompletion = req.body.expectedCompletion ? new Date(req.body.expectedCompletion) : null;
+  const showCountdown = Boolean(req.body.showCountdown);
+  const autoDisable = Boolean(req.body.autoDisable);
+  if (!expectedCompletion || Number.isNaN(expectedCompletion.getTime()) || expectedCompletion.getTime() <= Date.now() || !showCountdown) {
+    res.status(400).json({ success: false, error: 'A future maintenance end time and enabled countdown are required.' });
+    return;
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO maintenance_settings (id, enabled, title, message, expected_completion, show_countdown, auto_disable, enabled_at, enabled_by, updated_at)
+       VALUES ('website_maintenance', 1, ?, ?, ?, ?, ?, NOW(), ?, NOW())
+       ON DUPLICATE KEY UPDATE enabled = 1, title = VALUES(title), message = VALUES(message), expected_completion = VALUES(expected_completion), show_countdown = VALUES(show_countdown), auto_disable = VALUES(auto_disable), enabled_at = NOW(), enabled_by = VALUES(enabled_by), disabled_at = NULL, disabled_by = NULL, updated_at = NOW()`,
+      [title, message, expectedCompletion && !Number.isNaN(expectedCompletion.getTime()) ? expectedCompletion.toISOString().slice(0, 19).replace('T', ' ') : null, showCountdown ? 1 : 0, autoDisable ? 1 : 0, req.user.id],
+    );
+    const settings = await getMaintenanceSettings();
+    await logMaintenanceEvent('MAINTENANCE_ENABLED', { id: req.user.id, name: req.user.name, role: req.user.role }, { title, message, expectedCompletion: settings.expectedCompletion, showCountdown, autoDisable, status: 'SUCCESS' });
+    res.json({ success: true, maintenance: settings, message: 'Maintenance mode enabled successfully.' });
+  } catch (error) {
+    console.error('Failed to enable maintenance mode:', error);
+    res.status(503).json({ success: false, error: 'Unable to enable maintenance mode. Please try again.' });
+  }
+});
+
+app.post('/api/system/maintenance/disable', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can disable maintenance mode.' });
+    return;
+  }
+  try {
+    await pool.query(
+      `INSERT INTO maintenance_settings (id, enabled, title, message, expected_completion, show_countdown, auto_disable, disabled_at, disabled_by, updated_at)
+       VALUES ('website_maintenance', 0, 'Website Under Maintenance', 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.', NULL, 0, 0, NOW(), ?, NOW())
+       ON DUPLICATE KEY UPDATE enabled = 0, disabled_at = NOW(), disabled_by = VALUES(disabled_by), updated_at = NOW()`,
+      [req.user.id],
+    );
+    const settings = await getMaintenanceSettings();
+    await logMaintenanceEvent('MAINTENANCE_DISABLED', { id: req.user.id, name: req.user.name, role: req.user.role }, { status: 'SUCCESS' });
+    res.json({ success: true, maintenance: settings, message: 'Maintenance mode disabled successfully.' });
+  } catch (error) {
+    console.error('Failed to disable maintenance mode:', error);
+    res.status(503).json({ success: false, error: 'Unable to disable maintenance mode. Please try again.' });
+  }
+});
+
+app.put('/api/system/maintenance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can update maintenance settings.' });
+    return;
+  }
+
+  const nextTitle = String(req.body.title || '').trim() || 'Website Under Maintenance';
+  const nextMessage = String(req.body.message || '').trim() || 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.';
+  const nextExpectedCompletion = req.body.expectedCompletion ? new Date(req.body.expectedCompletion) : null;
+  const nextShowCountdown = Boolean(req.body.showCountdown);
+  const nextAutoDisable = Boolean(req.body.autoDisable);
+  if (!nextExpectedCompletion || Number.isNaN(nextExpectedCompletion.getTime()) || nextExpectedCompletion.getTime() <= Date.now() || !nextShowCountdown) {
+    res.status(400).json({ success: false, error: 'A future maintenance end time and enabled countdown are required.' });
+    return;
+  }
+
+  try {
+    await pool.query(
+      `INSERT INTO maintenance_settings (id, enabled, title, message, expected_completion, show_countdown, auto_disable, updated_at, enabled_by)
+       VALUES ('website_maintenance', 1, ?, ?, ?, ?, ?, NOW(), ?) ON DUPLICATE KEY UPDATE title = VALUES(title), message = VALUES(message), expected_completion = VALUES(expected_completion), show_countdown = VALUES(show_countdown), auto_disable = VALUES(auto_disable), updated_at = NOW(), enabled_by = COALESCE(enabled_by, VALUES(enabled_by))`,
+      [nextTitle, nextMessage, nextExpectedCompletion && !Number.isNaN(nextExpectedCompletion.getTime()) ? nextExpectedCompletion.toISOString().slice(0, 19).replace('T', ' ') : null, nextShowCountdown ? 1 : 0, nextAutoDisable ? 1 : 0, req.user.id],
+    );
+    const settings = await getMaintenanceSettings();
+    await logMaintenanceEvent('MAINTENANCE_UPDATED', { id: req.user.id, name: req.user.name, role: req.user.role }, { title: nextTitle, message: nextMessage, expectedCompletion: settings.expectedCompletion, showCountdown: nextShowCountdown, autoDisable: nextAutoDisable, status: 'SUCCESS' });
+    res.json({ success: true, maintenance: settings, message: 'Maintenance settings updated successfully.' });
+  } catch (error) {
+    console.error('Failed to update maintenance settings:', error);
+    res.status(503).json({ success: false, error: 'Unable to update maintenance settings. Please try again.' });
+  }
+});
+
+app.get('/api/settings/finance', requireAuth, async (_req: AuthenticatedRequest, res: Response) => {
+  try {
+    const [rows] = await pool.query<any[]>(
+      "SELECT setting_value FROM tqi_settings WHERE setting_key = 'finance_officer_name' LIMIT 1",
+    );
+    res.json({ success: true, financeOfficerName: String(rows[0]?.setting_value || 'TQI Finance Team') });
+  } catch (error) {
+    console.error('Failed to load finance settings:', error);
+    res.status(503).json({ success: false, error: 'Unable to load finance settings.' });
+  }
+});
+
+app.put('/api/settings/finance', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can update finance settings.' });
+    return;
+  }
+  const financeOfficerName = String(req.body.financeOfficerName || '').trim().replace(/\s+/g, ' ');
+  if (!financeOfficerName) {
+    res.status(400).json({ success: false, error: 'Finance officer name is required.' });
+    return;
+  }
+  try {
+    await pool.query(
+      `INSERT INTO tqi_settings (setting_key, setting_value, updated_by)
+       VALUES ('finance_officer_name', ?, ?)
+       ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_by = VALUES(updated_by), updated_at = NOW()`,
+      [financeOfficerName, req.user.id],
+    );
+    res.json({ success: true, financeOfficerName });
+  } catch (error) {
+    console.error('Failed to update finance settings:', error);
+    res.status(503).json({ success: false, error: 'Unable to save the finance officer name.' });
   }
 });
 
@@ -1739,8 +2194,10 @@ app.get('/api/colleges', requireAuth, (_req: AuthenticatedRequest, res: Response
 
 app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const year = await resolveAcademicYear(req);
-    if (!year) {
+    const allYears = req.user.role === 'Super Admin'
+      && String(req.query.allYears || '').toLowerCase() === 'true';
+    const year = allYears ? null : await resolveAcademicYear(req);
+    if (!allYears && !year) {
       res.status(404).json({ success: false, error: 'No academic year is available.' });
       return;
     }
@@ -1749,10 +2206,13 @@ app.get('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Res
     // Counts are joined into the UI from the already year-scoped people/location APIs.
     let sql = `SELECT c.*, u.name AS admin_name, u.email AS admin_email, u.phone AS admin_phone
       FROM clusters c LEFT JOIN users u ON u.id = c.admin_id WHERE ${includeArchived ? '1=1' : "c.status = 'Active'"}`;
-    const params: any[] = [year.id];
-    sql += ' AND c.academic_year_id = ?';
+    const params: any[] = [];
+    if (!allYears && year) {
+      sql += ' AND c.academic_year_id = ?';
+      params.push(year.id);
+    }
     if (req.user.role === 'Cluster Admin') {
-      const clusterId = await resolveClusterForAcademicYear(req, year.id);
+      const clusterId = await resolveClusterForAcademicYear(req, year!.id);
       sql += ' AND c.id = ?';
       params.push(clusterId);
     }
@@ -1793,7 +2253,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   // Keep IDs inside clusters.id VARCHAR(64), even for long official college names.
   const clusterId = `${(cleanIdPart || 'cluster').slice(0, 20)}-${randomUUID().slice(0, 8)}-${String(year.id).slice(-8)}`;
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
-  const temporaryPassword = String(req.body.temporaryPassword || `TQI@Admin${randomInt(1000, 10000)}!`).trim();
+  const temporaryPassword = generateTemporaryPassword();
 
   if (!collegeName || !district || !collegeDistrict || !spocName || !spocMobile || !adminEmail) {
     res.status(400).json({ success: false, error: 'Cluster name/district, college, college location, SPOC name, mobile, and Gmail are required.' });
@@ -1821,7 +2281,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
 
   const normalizedPhone = `+91 ${spocMobile}`;
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  const passwordHash = await bcrypt.hash(temporaryPassword, 12);
   let connection: any;
   try {
     connection = await pool.getConnection();
@@ -1841,7 +2301,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       );
     });
     await connection.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, 'Cluster Admin', ?, ?, TRUE, 'Active')`,
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, password_created_at, status) VALUES (?, ?, ?, ?, 'Cluster Admin', ?, ?, TRUE, NOW(), 'Active')`,
       [adminId, adminName, adminEmail, passwordHash, clusterId, normalizedPhone],
     );
     await connection.query(
@@ -1868,6 +2328,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     await connection.commit();
     connection.release();
     connection = null;
+    await recordPasswordEvent({ userId: adminId, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') });
+    await recordPasswordEvent({ userId: adminId, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId });
 
     // Deliver the temporary password only after the account transaction commits.
     const emailSent = await sendOnboardingCredentialsEmail({
@@ -1933,7 +2395,7 @@ app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: Authen
 
   let connection: any;
   let admin: any;
-  const temporaryPassword = `TQI@Admin${randomInt(1000, 10000)}!`;
+  const temporaryPassword = generateTemporaryPassword();
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
@@ -1953,10 +2415,13 @@ app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: Authen
     admin = rows[0];
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     await connection.query(
-      "UPDATE users SET password_hash = ?, must_change_password = TRUE, status = 'Active' WHERE id = ?",
-      [passwordHash, admin.user_id],
+      "UPDATE users SET password_hash = ?, must_change_password = TRUE, password_reset_at = NOW(), password_reset_by = ?, status = 'Active' WHERE id = ?",
+      [passwordHash, req.user.id, admin.user_id],
     );
     await connection.commit();
+    await recordPasswordEvent({ userId: admin.user_id, action: 'PASSWORD_RESET', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') });
+    await recordPasswordEvent({ userId: admin.user_id, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id });
+    await recordPasswordEvent({ userId: admin.user_id, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id });
   } catch (error) {
     await connection?.rollback().catch(() => undefined);
     console.error('Failed to reset cluster credentials:', error);
@@ -3307,6 +3772,140 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 });
 
+app.put('/api/attendance/:id/admin-edit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can directly edit attendance.' });
+    return;
+  }
+  let connection: any;
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [attendanceRows] = await connection.query(
+      'SELECT cluster_id, attendance_type FROM attendance_sessions WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!attendanceRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Attendance submission not found.' });
+      return;
+    }
+    const attendance = attendanceRows[0];
+    let totalCount = 0;
+    let presentCount = 0;
+    let taskCompletedCount = 0;
+    if (attendance.attendance_type === 'volunteers') {
+      if (!Array.isArray(req.body.volunteerAttendance)) {
+        await connection.rollback();
+        res.status(400).json({ success: false, error: 'Volunteer attendance rows are required.' });
+        return;
+      }
+      const records = req.body.volunteerAttendance;
+      totalCount = records.length;
+      presentCount = records.filter((record: any) => record.status === 'Present' || record.present === true).length;
+      await connection.query('DELETE FROM volunteer_attendance WHERE attendance_session_id = ?', [req.params.id]);
+      for (const record of records) {
+        if (!record.volunteerId) throw new Error('A volunteer row is missing its volunteer ID.');
+        await connection.query(
+          'INSERT INTO volunteer_attendance (id, attendance_session_id, volunteer_id, present) VALUES (?, ?, ?, ?)',
+          [randomUUID(), req.params.id, record.volunteerId, record.status === 'Present' || record.present === true],
+        );
+      }
+    } else {
+      if (!Array.isArray(req.body.records)) {
+        await connection.rollback();
+        res.status(400).json({ success: false, error: 'Student attendance rows are required.' });
+        return;
+      }
+      const records = req.body.records;
+      totalCount = records.length;
+      presentCount = records.filter((record: any) => record.status === 'Present' || record.present === true).length;
+      taskCompletedCount = records.filter((record: any) => record.taskStatus === 'Completed').length;
+      await connection.query('DELETE FROM student_attendance WHERE attendance_session_id = ?', [req.params.id]);
+      for (const record of records) {
+        if (!record.studentId) throw new Error('A student row is missing its student ID.');
+        await connection.query(
+          'INSERT INTO student_attendance (id, attendance_session_id, student_id, present, task_status) VALUES (?, ?, ?, ?, ?)',
+          [randomUUID(), req.params.id, record.studentId, record.status === 'Present' || record.present === true, String(record.taskStatus || 'Not Marked')],
+        );
+      }
+    }
+    await connection.query(
+      'UPDATE attendance_sessions SET present_count = ?, total_count = ?, task_completed_count = ?, updated_at = NOW() WHERE id = ? AND academic_year_id = ?',
+      [presentCount, totalCount, taskCompletedCount, req.params.id, year.id],
+    );
+    await connection.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, 'Super Admin', attendance.cluster_id, 'EDIT_ATTENDANCE', 'Attendance', req.params.id, 'Attendance records edited directly by Super Admin.'],
+    );
+    await connection.commit();
+    res.json({ success: true, totalCount, presentCount, taskCompletedCount });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to edit attendance as Super Admin:', error);
+    res.status(503).json({ success: false, error: 'Unable to save attendance changes.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.delete('/api/attendance/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can delete attendance submissions.' });
+    return;
+  }
+  let connection: any;
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [attendanceRows] = await connection.query(
+      'SELECT cluster_id FROM attendance_sessions WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!attendanceRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Attendance submission not found.' });
+      return;
+    }
+    await connection.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, 'Super Admin', attendanceRows[0].cluster_id, 'DELETE_ATTENDANCE', 'Attendance', req.params.id, 'Attendance submission deleted by Super Admin.'],
+    );
+    await connection.query(
+      `UPDATE approvals SET status = 'Rejected', remarks = 'Attendance submission deleted by Super Admin', updated_at = NOW()
+       WHERE module = 'Attendance' AND record_id = ? AND academic_year_id = ? AND status IN ('Pending', 'Open')`,
+      [req.params.id, year.id],
+    );
+    await connection.query('DELETE FROM attendance_sessions WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
+    await connection.commit();
+    res.json({ success: true });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to delete attendance as Super Admin:', error);
+    res.status(503).json({ success: false, error: 'Unable to delete this attendance submission.' });
+  } finally {
+    connection?.release();
+  }
+});
+
 app.put('/api/attendance/:id/request-edit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Cluster Admin') {
     res.status(403).json({ success: false, error: 'Only Cluster Admin can request attendance edit approval.' });
@@ -3622,8 +4221,14 @@ app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Resp
       return;
     }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
+    const draftId = String(req.query.draftId || '').trim();
     let sql = 'SELECT * FROM finance_entries WHERE academic_year_id = ?';
     const params: any[] = [year.id];
+
+    if (draftId) {
+      sql += ' AND draft_id = ?';
+      params.push(draftId);
+    }
 
     if (req.user.role === 'Cluster Admin') {
       const clusterId = await resolveClusterForAcademicYear(req, year.id);
@@ -3636,7 +4241,108 @@ app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Resp
 
     sql += ' ORDER BY date DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    res.json({ success: true, financeEntries: rows.map(mapFinanceEntry) });
+    const reportParams: any[] = [year.id];
+    let reportSql = 'SELECT * FROM finance_reports WHERE academic_year_id = ?';
+    if (req.user.role === 'Cluster Admin') {
+      const scopedCluster = await resolveClusterForAcademicYear(req, year.id);
+      reportSql += ' AND cluster_id = ?';
+      reportParams.push(scopedCluster);
+    } else if (cluster !== 'all') {
+      reportSql += ' AND cluster_id = ?';
+      reportParams.push(cluster);
+    }
+    reportSql += ' ORDER BY updated_at DESC';
+    let [reportRows] = await pool.query<any[]>(reportSql, reportParams);
+    const reportIdSet = new Set(reportRows.map((report) => String(report.id)));
+    const orphanDraftIds = Array.from(new Set(rows
+      .filter((entry) => entry.draft_id && entry.status === 'Draft' && !reportIdSet.has(String(entry.draft_id)))
+      .map((entry) => String(entry.draft_id))));
+    for (const orphanDraftId of orphanDraftIds) {
+      const group = rows.filter((entry) => String(entry.draft_id) === orphanDraftId && entry.status === 'Draft');
+      if (!group.length || group.some((entry) => String(entry.cluster_id) !== String(group[0].cluster_id))) continue;
+      const first = group[0];
+      const [clusterRows] = await pool.query<any[]>(
+        'SELECT name, college_name, spoc_name FROM clusters WHERE id = ? LIMIT 1',
+        [first.cluster_id],
+      );
+      const clusterInfo = clusterRows[0] || {};
+      const routes: any[] = [];
+      const food: any = { breakfast: { amount: 0, remarks: '', bill: null }, lunch: { amount: 0, remarks: '', bill: null }, dinner: { amount: 0, remarks: '', bill: null }, refreshments: { amount: 0, remarks: '', bill: null } };
+      let stationery = { amount: 0, remarks: '', bill: null as any };
+      const otherItems: any[] = [];
+      for (const entry of group) {
+        const description = String(entry.description || '');
+        const amount = Number(entry.amount || 0);
+        const bill = entry.bill_url ? { url: entry.bill_url, fileName: entry.bill_reference || '', detectedAmount: amount, isVerified: true } : null;
+        if (entry.category === 'Travel') {
+          const routeMatch = description.match(/Travel:\s*(.*?)\s*→\s*(.*?)\s*\(/i);
+          const formulaMatch = description.match(/\((\d+)\s*vols?\s*×\s*₹?([\d.]+)/i);
+          routes.push({
+            id: entry.id,
+            from: routeMatch?.[1]?.trim() || description.replace(/^Travel:\s*/i, ''),
+            to: routeMatch?.[2]?.trim() || '',
+            volunteers: Number(entry.count || formulaMatch?.[1] || 0),
+            perPerson: Number(formulaMatch?.[2] || (Number(entry.count) ? amount / Number(entry.count) : amount)),
+            remarks: entry.remarks || '',
+            bill,
+          });
+        } else if (entry.category === 'Food') {
+          const key = description.toLowerCase().includes('breakfast') ? 'breakfast'
+            : description.toLowerCase().includes('lunch') ? 'lunch'
+              : description.toLowerCase().includes('dinner') ? 'dinner' : 'refreshments';
+          food[key] = { amount, remarks: entry.remarks || '', bill };
+        } else if (entry.category === 'Stationery' || entry.category === 'Materials') {
+          stationery = { amount, remarks: entry.remarks || '', bill };
+        } else {
+          otherItems.push({ id: entry.id, description, amount, remarks: entry.remarks || '', bill });
+        }
+      }
+      const dayMatch = group.map((entry) => String(entry.description || '').match(/Day\s+\d+/i)?.[0]).find(Boolean);
+      const firstDate = first.date instanceof Date
+        ? `${first.date.getFullYear()}-${String(first.date.getMonth() + 1).padStart(2, '0')}-${String(first.date.getDate()).padStart(2, '0')}`
+        : String(first.date || '').slice(0, 10);
+      const reportData = {
+        id: orphanDraftId,
+        title: `${dayMatch || 'Finance Report'} Finance Report`,
+        sessionDay: dayMatch || 'Day 1',
+        sessionDate: firstDate,
+        clusterId: first.cluster_id,
+        clusterName: clusterInfo.name || first.cluster_id,
+        collegeName: clusterInfo.college_name || '',
+        spocName: clusterInfo.spoc_name || '',
+        financerName: 'TQI Finance Team',
+        status: 'Draft',
+        lastSaved: first.updated_at || first.created_at,
+        totalAmount: group.reduce((sum, entry) => sum + Number(entry.amount || 0), 0),
+        routes, food, stationery, otherItems,
+      };
+      const [recoveryResult] = await pool.query<any>(
+        `INSERT IGNORE INTO finance_reports (id, cluster_id, academic_year_id, session_id, report_status, report_data, created_by, updated_by)
+         VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?)`,
+        [orphanDraftId, first.cluster_id, year.id, first.session_id || null, JSON.stringify(reportData), first.created_by || req.user.id, first.created_by || req.user.id],
+      );
+      if (Number(recoveryResult.affectedRows || 0) > 0) {
+        await pool.query(
+          'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [randomUUID(), orphanDraftId, year.id, 'Draft recovered', 'Restored editable report metadata for existing Draft finance entries.', first.created_by || req.user.id, 'Finance draft recovery'],
+        );
+      }
+    }
+    if (orphanDraftIds.length) [reportRows] = await pool.query<any[]>(reportSql, reportParams);
+    const reportIds = reportRows.map((report) => String(report.id));
+    const historyByReport = new Map<string, any[]>();
+    if (reportIds.length) {
+      const [historyRows] = await pool.query<any[]>(
+        'SELECT report_id, event, details, user_name, created_at FROM finance_report_history WHERE academic_year_id = ? AND report_id IN (?) ORDER BY created_at ASC',
+        [year.id, reportIds],
+      );
+      historyRows.forEach((history) => {
+        const reportHistory = historyByReport.get(String(history.report_id)) || [];
+        reportHistory.push({ event: history.event, details: history.details || '', userName: history.user_name || '', createdAt: history.created_at });
+        historyByReport.set(String(history.report_id), reportHistory);
+      });
+    }
+    res.json({ success: true, financeEntries: rows.map(mapFinanceEntry), financeDrafts: reportRows.map((report) => mapFinanceReport({ ...report, history: historyByReport.get(String(report.id)) || [] })) });
   } catch (error) {
     console.error('Failed to load finance:', error);
     res.status(503).json({ success: false, error: 'Unable to load data. Please try again.' });
@@ -3659,7 +4365,7 @@ app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Res
       const [clusterRows] = await pool.query<any[]>('SELECT id FROM clusters WHERE academic_year_id = ? ORDER BY created_at ASC LIMIT 1', [year.id]);
       clusterId = clusterRows[0]?.id || 'dharmapuri-ksr';
     }
-    const id = String(req.body.id || `finance-${Date.now()}`).trim();
+    let id = String(req.body.id || `finance-${Date.now()}`).trim();
     // Phase 4: Check if linked session is editable
     const finSessionId = String(req.body.sessionId || '');
     if (finSessionId) {
@@ -3671,16 +4377,534 @@ app.post('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Res
     }
     const amount = Number(req.body.amount || 0);
     const date = String(req.body.date || new Date().toISOString().split('T')[0]);
+    const draftId = req.body.draftId ? String(req.body.draftId) : null;
+
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admin can edit finance entries.' });
+      return;
+    }
+    const [existingRows] = await pool.query<any[]>(
+      'SELECT status, draft_id FROM finance_entries WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+      [id, year.id, clusterId],
+    );
+    let existingEntry = existingRows[0];
+    const targetDraftId = draftId || existingEntry?.draft_id || null;
+    if (!existingEntry && targetDraftId) {
+      const [retryRows] = await pool.query<any[]>(
+        `SELECT id, status, draft_id FROM finance_entries
+         WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ? AND status = 'Draft'
+           AND date = ? AND description = ? AND category = ? AND amount = ?
+           AND COALESCE(bill_url, '') = ? AND COALESCE(remarks, '') = ?
+           AND COALESCE(count, -1) = ? AND COALESCE(count_amount, '') = ?
+         ORDER BY created_at ASC LIMIT 1`,
+        [targetDraftId, year.id, clusterId, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount,
+          String(req.body.billUrl || ''), String(req.body.remarks || ''), req.body.count == null ? -1 : Number(req.body.count), String(req.body.countAmount || '')],
+      );
+      if (retryRows[0]) {
+        existingEntry = retryRows[0];
+        id = String(retryRows[0].id);
+      }
+    }
+    let reportState: any = null;
+    if (targetDraftId) {
+      const [reportRows] = await pool.query<any[]>(
+        'SELECT report_status, edit_permission FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+        [targetDraftId, year.id, clusterId],
+      );
+      reportState = reportRows[0] || null;
+      if (!reportState && !existingEntry) {
+        const [siblingRows] = await pool.query<any[]>(
+          "SELECT id FROM finance_entries WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ? AND status <> 'Draft' LIMIT 1",
+          [targetDraftId, year.id, clusterId],
+        );
+        if (siblingRows.length) {
+          res.status(403).json({ success: false, error: 'This submitted finance report is locked. An approved edit request is required.' });
+          return;
+        }
+      }
+    }
+    const hasEditGrant = Boolean(reportState?.edit_permission);
+    const isCorrection = String(reportState?.report_status) === 'REJECTED';
+    if ((existingEntry && String(existingEntry.status) !== 'Draft' && !hasEditGrant && !isCorrection) ||
+        (reportState && String(reportState.report_status) !== 'DRAFT' && !hasEditGrant && !isCorrection)) {
+      res.status(403).json({ success: false, error: 'This submitted finance report is locked. An approved edit request is required.' });
+      return;
+    }
+    if (isCorrection && !existingEntry) {
+      res.status(403).json({ success: false, error: 'A rejected report can only edit its existing expense rows; new expenses must be added to a new draft.' });
+      return;
+    }
+    const databaseStatus = isCorrection ? 'Draft' : existingEntry?.status || (hasEditGrant ? 'Submitted' : 'Draft');
 
     await pool.query(
-      'INSERT INTO finance_entries (id, cluster_id, session_id, academic_year_id, date, description, category, amount, created_by, status, bill_reference) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), session_id = VALUES(session_id), academic_year_id = VALUES(academic_year_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), created_by = VALUES(created_by), status = VALUES(status), bill_reference = VALUES(bill_reference)',
-      [id, clusterId, req.body.sessionId || null, year.id, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), String(req.body.status || 'Draft'), String(req.body.billReference || '')]
+      'INSERT INTO finance_entries (id, cluster_id, session_id, academic_year_id, date, description, category, amount, created_by, status, draft_id, bill_reference, bill_url, count, count_amount, remarks) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE cluster_id = VALUES(cluster_id), session_id = VALUES(session_id), academic_year_id = VALUES(academic_year_id), date = VALUES(date), description = VALUES(description), category = VALUES(category), amount = VALUES(amount), draft_id = VALUES(draft_id), bill_reference = VALUES(bill_reference), bill_url = VALUES(bill_url), count = VALUES(count), count_amount = VALUES(count_amount), remarks = VALUES(remarks)',
+      [id, clusterId, req.body.sessionId || null, year.id, date, String(req.body.description || 'Finance Entry').trim(), String(req.body.category || 'General'), amount, String(req.user.id), databaseStatus, targetDraftId, String(req.body.billReference || ''), String(req.body.billUrl || '') || null, req.body.count == null ? null : Number(req.body.count), req.body.countAmount || null, String(req.body.remarks || '')]
     );
+    if (isCorrection && targetDraftId) {
+      await pool.query(
+        "UPDATE finance_reports SET report_status = 'DRAFT', updated_by = ? WHERE id = ? AND academic_year_id = ? AND cluster_id = ? AND report_status = 'REJECTED'",
+        [req.user.id, targetDraftId, year.id, clusterId],
+      );
+      await pool.query(
+        "UPDATE finance_entries SET status = 'Draft', updated_at = NOW() WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ? AND status = 'Rejected'",
+        [targetDraftId, year.id, clusterId],
+      );
+      await pool.query(
+        'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [randomUUID(), targetDraftId, year.id, 'Correction edited', `Updated expense: ${String(req.body.description || 'Finance Entry').trim()}`, req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+      );
+    }
 
-    res.json({ success: true, financeEntry: { id, clusterId, date, description: req.body.description || 'Finance Entry', category: req.body.category || 'General', amount, status: req.body.status || 'Draft', billReference: req.body.billReference || '' } });
+    res.json({ success: true, financeEntry: { id, clusterId, date, description: req.body.description || 'Finance Entry', category: req.body.category || 'General', amount, status: databaseStatus === 'Submitted' ? 'Pending' : databaseStatus, draftId: targetDraftId, billReference: req.body.billReference || '', billUrl: req.body.billUrl || undefined } });
   } catch (error) {
     console.error('Failed to save finance entry:', error);
     res.status(500).json({ success: false, error: 'Unable to save finance entry.' });
+  }
+});
+
+app.get('/api/finance/reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    let sql = 'SELECT * FROM finance_reports WHERE academic_year_id = ?';
+    const params: any[] = [year.id];
+    if (req.user.role === 'Cluster Admin') {
+      const clusterId = await resolveClusterForAcademicYear(req, year.id);
+      sql += ' AND cluster_id = ?';
+      params.push(clusterId);
+    } else if (req.query.clusterId && String(req.query.clusterId) !== 'all') {
+      sql += ' AND cluster_id = ?';
+      params.push(String(req.query.clusterId));
+    }
+    sql += ' ORDER BY updated_at DESC';
+    const [reportRows] = await pool.query<any[]>(sql, params);
+    const ids = reportRows.map((report) => String(report.id));
+    const historyByReport = new Map<string, any[]>();
+    if (ids.length) {
+      const [historyRows] = await pool.query<any[]>(
+        'SELECT report_id, event, details, user_name, created_at FROM finance_report_history WHERE academic_year_id = ? AND report_id IN (?) ORDER BY created_at ASC',
+        [year.id, ids],
+      );
+      historyRows.forEach((history) => {
+        const historyList = historyByReport.get(String(history.report_id)) || [];
+        historyList.push({ event: history.event, details: history.details || '', userName: history.user_name || '', createdAt: history.created_at });
+        historyByReport.set(String(history.report_id), historyList);
+      });
+    }
+    res.json({ success: true, financeReports: reportRows.map((row) => mapFinanceReport({ ...row, history: historyByReport.get(String(row.id)) || [] })) });
+  } catch (error) {
+    console.error('Failed to load finance reports:', error);
+    res.status(503).json({ success: false, error: 'Unable to load finance reports.' });
+  }
+});
+
+app.post('/api/finance/reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admin can save a finance report.' });
+      return;
+    }
+    const year = await resolveAcademicYear(req);
+    if (!year || isArchivedAcademicYear(year)) {
+      res.status(year ? 409 : 404).json({ success: false, error: year ? 'Archived academic years are read-only.' : 'No academic year is available.' });
+      return;
+    }
+    const report = req.body.report || {};
+    const id = String(report.id || '').trim();
+    if (!id) {
+      res.status(400).json({ success: false, error: 'Finance report ID is required.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, String(report.clusterId || ''));
+    if (!clusterId || clusterId === 'all') {
+      res.status(400).json({ success: false, error: 'A valid cluster is required to save finance.' });
+      return;
+    }
+    const [existingRows] = await pool.query<any[]>(
+      'SELECT report_status, edit_permission FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+      [id, year.id, clusterId],
+    );
+    const existing = existingRows[0];
+    if (existing && !['DRAFT', 'REJECTED'].includes(String(existing.report_status)) && !existing.edit_permission) {
+      res.status(403).json({ success: false, error: 'This report is locked. An approved edit request is required.' });
+      return;
+    }
+    const sessionId = String(report.sessionId || '').trim() || null;
+    await pool.query(
+      `INSERT INTO finance_reports (id, cluster_id, academic_year_id, session_id, report_status, report_data, created_by, updated_by)
+       VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?)
+      ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), report_data = VALUES(report_data), report_status = IF(report_status = 'REJECTED', 'DRAFT', report_status), updated_by = VALUES(updated_by)`,
+      [id, clusterId, year.id, sessionId, JSON.stringify(report), req.user.id, req.user.id],
+    );
+    if (String(existing?.report_status) === 'REJECTED') {
+      await pool.query(
+        "UPDATE finance_entries SET status = 'Draft', updated_at = NOW() WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ? AND status = 'Rejected'",
+        [id, year.id, clusterId],
+      );
+    }
+    const event = existing ? (existing.edit_permission ? 'Report edited' : 'Draft saved') : 'Report created';
+    await pool.query(
+      'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), id, year.id, event, 'Finance report and expense details saved.', req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+    );
+    if (!existing) {
+      await pool.query(
+        'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [randomUUID(), id, year.id, 'Draft saved', 'Initial finance draft saved.', req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+      );
+    }
+    res.json({ success: true, reportId: id });
+  } catch (error) {
+    console.error('Failed to save finance report:', error);
+    res.status(503).json({ success: false, error: 'Unable to save finance report.' });
+  }
+});
+
+app.delete('/api/finance/reports/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admin can delete a finance draft.' });
+      return;
+    }
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [rows] = await pool.query<any[]>(
+      'SELECT report_status, edit_permission FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+      [req.params.id, year.id, clusterId],
+    );
+    if (!rows.length || rows[0].report_status !== 'DRAFT' || rows[0].edit_permission) {
+      res.status(403).json({ success: false, error: 'Only an editable draft report can be deleted.' });
+      return;
+    }
+    await pool.query('DELETE FROM finance_report_history WHERE report_id = ? AND academic_year_id = ?', [req.params.id, year.id]);
+    await pool.query('DELETE FROM finance_entries WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ?', [req.params.id, year.id, clusterId]);
+    await pool.query('DELETE FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ?', [req.params.id, year.id, clusterId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete finance draft:', error);
+    res.status(503).json({ success: false, error: 'Unable to delete finance draft.' });
+  }
+});
+
+app.delete('/api/finance/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admin can delete finance entries.' });
+      return;
+    }
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [rows] = await pool.query<any[]>(
+      'SELECT id, draft_id, status FROM finance_entries WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+      [req.params.id, year.id, clusterId],
+    );
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Finance entry was not found.' });
+      return;
+    }
+    const draftId = String(rows[0].draft_id || '');
+    const [reports] = draftId ? await pool.query<any[]>(
+      'SELECT report_status, edit_permission FROM finance_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [draftId, year.id],
+    ) : [[]];
+    if ((rows[0].status !== 'Draft' || (reports[0] && !['DRAFT', 'REJECTED'].includes(String(reports[0].report_status)))) && !reports[0]?.edit_permission) {
+      res.status(403).json({ success: false, error: 'This report is locked. An approved edit request is required.' });
+      return;
+    }
+    await pool.query('DELETE FROM finance_entries WHERE id = ? AND academic_year_id = ? AND cluster_id = ?', [req.params.id, year.id, clusterId]);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Failed to delete finance entry:', error);
+    res.status(503).json({ success: false, error: 'Unable to delete finance entry.' });
+  }
+});
+
+app.post('/api/finance/submit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let connection: any;
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+
+    const draftId = String(req.body.draftId || '').trim();
+    if (!draftId) {
+      res.status(400).json({ success: false, error: 'Finance submission ID is required.' });
+      return;
+    }
+
+    const clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || ''));
+    if (!clusterId || clusterId === 'all') {
+      res.status(400).json({ success: false, error: 'A valid cluster is required to submit finance.' });
+      return;
+    }
+
+    const missingBillReason = String(req.body.missingBillReason || '').trim();
+    const submittedEntries = Array.isArray(req.body.entries) ? req.body.entries : [];
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [entryRows] = (await connection.query(
+      'SELECT id, session_id, status, description, amount, date, bill_url, bill_reference FROM finance_entries WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ? FOR UPDATE',
+      [draftId, year.id, clusterId],
+    )) as [any[], any];
+    if (!entryRows.length) {
+      await connection.rollback();
+      res.status(404).json({ success: false, error: 'Finance draft entries were not found.' });
+      return;
+    }
+
+    if (entryRows.some((entry: any) => !String(entry.description || '').trim() || Number(entry.amount) <= 0 || !entry.date)) {
+      await connection.rollback();
+      res.status(400).json({ success: false, error: 'Every expense must have a description, a valid amount greater than zero, and a date before submission.' });
+      return;
+    }
+
+    const missingBillEntries = entryRows.filter((entry: any) => !String(entry.bill_url || '').trim() && !String(entry.bill_reference || '').trim());
+    const mismatchedBillEntries = submittedEntries.filter((entry: any) => {
+      const billUrl = String(entry?.billUrl || '').trim();
+      const detectedAmount = Number(entry?.billDetectedAmount ?? 0);
+      const amount = Number(entry?.amount ?? 0);
+      return Boolean(billUrl) && detectedAmount > 0 && Math.abs(amount - detectedAmount) > 0.01;
+    });
+    if (mismatchedBillEntries.length > 0) {
+      await connection.rollback();
+      const badEntry = mismatchedBillEntries[0];
+      res.status(400).json({
+        success: false,
+        error: 'The entered amount does not match the uploaded bill amount. Please upload a valid bill or correct the amount before submitting.',
+        entryId: badEntry?.id,
+      });
+      return;
+    }
+    if (missingBillEntries.length > 0) {
+      if (!missingBillReason) {
+        await connection.rollback();
+        res.status(400).json({ success: false, error: 'Bills are mandatory for finance submission. Please provide the reason for any missing bills so Super Admin can review and approve it.' });
+        return;
+      }
+
+      const sessionId = entryRows.find((entry: any) => entry.session_id)?.session_id || null;
+      await connection.query(
+        `INSERT INTO finance_reports (id, cluster_id, academic_year_id, session_id, report_status, report_data, edit_request_status, edit_request_reason, edit_requested_by, edit_requested_at, edit_permission, created_by, updated_by)
+         VALUES (?, ?, ?, ?, 'DRAFT', '[]', 'PENDING', ?, ?, NOW(), 0, ?, ?)
+         ON DUPLICATE KEY UPDATE edit_request_status = 'PENDING', edit_request_reason = VALUES(edit_request_reason), edit_requested_by = VALUES(edit_requested_by), edit_requested_at = NOW(), edit_permission = 0, updated_by = VALUES(updated_by)`,
+        [draftId, clusterId, year.id, sessionId, missingBillReason, req.user.id, req.user.id, req.user.id],
+      );
+      await connection.query(
+        `INSERT INTO approvals (id, module, status, requested_by, session_id, record_id, cluster_id, academic_year_id, remarks, date)
+         SELECT ?, 'Finance Edit Request', 'Pending', ?, ?, ?, ?, ?, ?, CURDATE()
+         WHERE NOT EXISTS (
+           SELECT 1 FROM approvals WHERE module = 'Finance Edit Request' AND record_id = ? AND academic_year_id = ? AND status IN ('Open','Pending')
+         )`,
+        [randomUUID(), req.user.id, sessionId, draftId, clusterId, year.id, missingBillReason, draftId, year.id],
+      );
+      await connection.query(
+        'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [randomUUID(), draftId, year.id, 'Missing bill approval requested', missingBillReason, req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+      );
+      await connection.commit();
+      res.json({ success: true, draftId, status: 'Pending', missingBillApprovalRequested: true, message: 'Your missing-bill reason was sent for Super Admin approval.' });
+      return;
+    }
+
+    const [reportRows] = (await connection.query(
+      'SELECT report_status, edit_permission, edit_request_status FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? FOR UPDATE',
+      [draftId, year.id, clusterId],
+    )) as [any[], any];
+    const report = reportRows[0];
+    if (!report && entryRows.some((entry: any) => String(entry.status) !== 'Draft')) {
+      await connection.rollback();
+      res.status(403).json({ success: false, error: 'This report is already submitted and cannot be resubmitted without an approved edit request.' });
+      return;
+    }
+    if (report && !['DRAFT', 'REJECTED'].includes(String(report.report_status)) && !report.edit_permission) {
+      await connection.rollback();
+      res.status(403).json({ success: false, error: 'This report is locked and cannot be submitted again without an approved edit request.' });
+      return;
+    }
+
+    for (const entry of entryRows) {
+      if (entry.session_id) {
+        const editable = await isSessionEditable(String(entry.session_id));
+        if (!editable.editable) {
+          await connection.rollback();
+          res.status(403).json({ success: false, error: editable.reason || 'The linked session is locked.' });
+          return;
+        }
+      }
+    }
+
+    const sessionId = entryRows.find((entry: any) => entry.session_id)?.session_id || null;
+    await connection.query(
+      "UPDATE finance_entries SET status = 'Submitted' WHERE draft_id = ? AND academic_year_id = ? AND cluster_id = ?",
+      [draftId, year.id, clusterId],
+    );
+    await connection.query(
+      `UPDATE finance_reports SET report_status = 'PENDING_APPROVAL', edit_request_status = 'NONE', edit_request_reason = NULL,
+       edit_requested_by = NULL, edit_requested_at = NULL, edit_permission = 0, last_submitted_at = NOW(), last_submitted_by = ?, updated_by = ?
+       WHERE id = ? AND academic_year_id = ? AND cluster_id = ?`,
+      [req.user.id, req.user.id, draftId, year.id, clusterId],
+    );
+    await connection.query(
+      `INSERT INTO approvals (id, module, status, requested_by, session_id, record_id, cluster_id, academic_year_id, date)
+       SELECT ?, 'Finance', 'Pending', ?, ?, ?, ?, ?, CURDATE()
+       WHERE NOT EXISTS (
+         SELECT 1 FROM approvals WHERE module = 'Finance' AND record_id = ? AND academic_year_id = ? AND status IN ('Open','Pending')
+       )`,
+      [randomUUID(), req.user.id, sessionId, draftId, clusterId, year.id, draftId, year.id],
+    );
+    await connection.commit();
+    await pool.query(
+      'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), draftId, year.id, report?.edit_permission ? 'Report resubmitted' : 'Report submitted for approval', `${entryRows.length} expenses submitted for review.`, req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+    );
+    res.json({ success: true, draftId, status: 'Pending', submittedItems: entryRows.length });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Failed to submit finance draft:', error);
+    res.status(503).json({ success: false, error: 'Unable to submit finance for approval.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.post('/api/finance/:id/request-edit', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Cluster Admin') {
+    res.status(403).json({ success: false, error: 'Only Cluster Admin can request finance edits.' });
+    return;
+  }
+
+  const reason = String(req.body.reason || '').trim();
+  if (!reason) {
+    res.status(400).json({ success: false, error: 'Please provide a reason for the finance edit request.' });
+    return;
+  }
+
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [entryRows] = await pool.query<any[]>(
+      'SELECT id, draft_id, status, cluster_id, session_id FROM finance_entries WHERE (id = ? OR draft_id = ?) AND academic_year_id = ? AND cluster_id = ? ORDER BY created_at ASC',
+      [req.params.id, req.params.id, year.id, clusterId],
+    );
+    if (!entryRows.length) {
+      res.status(404).json({ success: false, error: 'Finance entry not found.' });
+      return;
+    }
+
+    const recordId = String(entryRows[0].draft_id || entryRows[0].id);
+    const reportStatus = String(entryRows[0].status || '');
+    if (reportStatus === 'Draft') {
+      res.status(409).json({ success: false, error: 'A draft report cannot request edit permission.' });
+      return;
+    }
+    const [reportRows] = await pool.query<any[]>(
+      'SELECT edit_request_status, report_status FROM finance_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? LIMIT 1',
+      [recordId, year.id, clusterId],
+    );
+    if (reportRows[0]?.edit_request_status === 'PENDING') {
+      res.status(409).json({ success: false, error: 'An edit request is already pending Super Admin approval.' });
+      return;
+    }
+    const reportData = {
+      id: recordId,
+      title: `Finance Report ${entryRows[0].session_id || ''}`.trim(),
+      sessionDay: '', sessionDate: '', clusterId, clusterName: clusterId,
+      collegeName: '', spocName: '', financerName: '', routes: [],
+      food: { breakfast: {}, lunch: {}, dinner: {}, refreshments: {} },
+      stationery: {}, otherItems: [], totalAmount: 0,
+    };
+    await pool.query(
+      `INSERT INTO finance_reports (id, cluster_id, academic_year_id, session_id, report_status, report_data, edit_request_status, edit_request_reason, edit_requested_by, edit_requested_at, edit_permission, created_by, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, NOW(), 0, ?, ?)
+       ON DUPLICATE KEY UPDATE edit_request_status = 'PENDING', edit_request_reason = VALUES(edit_request_reason), edit_requested_by = VALUES(edit_requested_by), edit_requested_at = NOW(), edit_permission = 0, updated_by = VALUES(updated_by)`,
+      [recordId, clusterId, year.id, entryRows[0].session_id || null, reportRows[0]?.report_status || 'SUBMITTED', JSON.stringify(reportData), reason, req.user.id, req.user.id, req.user.id],
+    );
+    await pool.query(
+      `INSERT INTO approvals (id, module, status, requested_by, session_id, record_id, cluster_id, academic_year_id, remarks, date)
+       VALUES (?, 'Finance Edit Request', 'Pending', ?, ?, ?, ?, ?, ?, CURDATE())`,
+      [randomUUID(), req.user.id, entryRows[0].session_id || null, recordId, clusterId, year.id, reason],
+    );
+    await pool.query(
+      'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), recordId, year.id, 'Edit request submitted', reason, req.user.id, req.user.name || req.user.email || 'Cluster Admin'],
+    );
+    res.json({ success: true, status: 'PENDING', recordId });
+  } catch (error) {
+    console.error('Failed to request finance edit approval:', error);
+    res.status(503).json({ success: false, error: 'Unable to request finance edit approval.' });
+  }
+});
+
+app.put('/api/finance/reports/:id/edit-request', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can review finance edit requests.' });
+    return;
+  }
+  const action = String(req.body.action || '').toLowerCase();
+  const rejectionReason = String(req.body.reason || '').trim();
+  if (!['approve', 'reject'].includes(action) || (action === 'reject' && !rejectionReason)) {
+    res.status(400).json({ success: false, error: 'Choose approve or reject and provide a rejection reason when needed.' });
+    return;
+  }
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    const [rows] = await pool.query<any[]>(
+      'SELECT * FROM finance_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!rows.length || rows[0].edit_request_status !== 'PENDING') {
+      res.status(409).json({ success: false, error: 'No pending finance edit request was found.' });
+      return;
+    }
+    const approved = action === 'approve';
+    await pool.query(
+      `UPDATE finance_reports SET edit_request_status = ?, edit_permission = ?, edit_approved_by = ?, edit_approved_at = ?, edit_rejected_by = ?, edit_rejected_at = ?, edit_rejection_reason = ?, updated_by = ?
+       WHERE id = ? AND academic_year_id = ?`,
+      [approved ? 'APPROVED' : 'REJECTED', approved ? 1 : 0, approved ? req.user.id : null, approved ? new Date() : null, approved ? null : req.user.id, approved ? null : new Date(), approved ? null : rejectionReason, req.user.id, req.params.id, year.id],
+    );
+    await pool.query(
+      "UPDATE approvals SET status = ?, updated_at = NOW(), remarks = CONCAT(COALESCE(remarks, ''), ?) WHERE module = 'Finance Edit Request' AND record_id = ? AND academic_year_id = ? AND status = 'Pending'",
+      [approved ? 'Approved' : 'Rejected', approved ? ' [Edit approved]' : ` [Edit rejected: ${rejectionReason}]`, req.params.id, year.id],
+    );
+    await pool.query(
+      'INSERT INTO finance_report_history (id, report_id, academic_year_id, event, details, user_id, user_name) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.params.id, year.id, approved ? 'Edit request approved' : 'Edit request rejected', approved ? 'Editing permission granted.' : rejectionReason, req.user.id, req.user.name || req.user.email || 'Super Admin'],
+    );
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name || req.user.email || 'Super Admin', 'Super Admin', rows[0].cluster_id, approved ? 'APPROVE_FINANCE_EDIT' : 'REJECT_FINANCE_EDIT', 'Finance', req.params.id, approved ? 'Edit permission granted.' : rejectionReason],
+    );
+    res.json({ success: true, editRequestStatus: approved ? 'APPROVED' : 'REJECTED', editPermission: approved });
+  } catch (error) {
+    console.error('Failed to review finance edit request:', error);
+    res.status(503).json({ success: false, error: 'Unable to review finance edit request.' });
   }
 });
 
@@ -3724,6 +4948,305 @@ app.get('/api/notifications', requireAuth, async (req: AuthenticatedRequest, res
   } catch (error) {
     console.error('Failed to load notifications:', error);
     res.status(503).json({ success: false, error: 'Unable to load data. Please try again.' });
+  }
+});
+
+const requireSuperAdminForReset = (req: AuthenticatedRequest, res: Response): boolean => {
+  if (req.user?.role === 'Super Admin') return true;
+  res.status(403).json({ success: false, error: 'Only Super Admin can access data reset.' });
+  return false;
+};
+
+const getBackupDirectory = (backupId: string): string => {
+  if (!/^[a-zA-Z0-9-]{10,80}$/.test(backupId)) throw new Error('Invalid backup ID.');
+  return path.join(BACKUPS_DIR, backupId);
+};
+
+const toBackupValue = (value: any, fieldType: number) => {
+  if (!(value instanceof Date)) return value;
+  const iso = value.toISOString();
+  if (fieldType === 10) return iso.slice(0, 10);
+  return `${iso.slice(0, 10)} ${iso.slice(11, 19)}`;
+};
+
+const writeOperationalBackup = async (kind: 'manual' | 'automatic' | 'pre-reset', actor?: any) => {
+  fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+  const backupId = `tqi-${new Date().toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}`;
+  const tableData: Record<string, any[]> = {};
+  const counts: Record<string, number> = {};
+  for (const table of BACKUP_TABLES) {
+    const [rows, fields] = await pool.query<any[]>(`SELECT * FROM \`${table}\``);
+    const fieldTypes = new Map((fields as any[]).map((field) => [field.name, Number(field.columnType || field.type || 0)]));
+    tableData[table] = rows.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, toBackupValue(value, fieldTypes.get(key) || 0)])));
+    counts[table] = rows.length;
+  }
+  const payload = { format: 'TQI_ERP_OPERATIONAL_BACKUP', version: 1, id: backupId, kind, createdAt: new Date().toISOString(), createdBy: actor?.name || 'Automatic scheduler', tables: tableData, counts };
+  const snapshot = JSON.stringify(payload);
+  const checksum = createHash('sha256').update(snapshot).digest('hex');
+  const directory = getBackupDirectory(backupId);
+  fs.mkdirSync(directory, { recursive: true });
+  const tempFile = path.join(directory, 'snapshot.json.tmp');
+  fs.writeFileSync(tempFile, snapshot, { encoding: 'utf8', flag: 'wx' });
+  fs.renameSync(tempFile, path.join(directory, 'snapshot.json'));
+  if (fs.existsSync(UPLOADS_DIR)) fs.cpSync(UPLOADS_DIR, path.join(directory, 'uploads'), { recursive: true, force: true, errorOnExist: false });
+  fs.writeFileSync(path.join(directory, 'manifest.json'), JSON.stringify({ id: backupId, kind, createdAt: payload.createdAt, checksum, counts, includesUploads: fs.existsSync(path.join(directory, 'uploads')) }, null, 2), 'utf8');
+
+  if (actor?.id) {
+    await pool.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+      [randomUUID(), actor.id, actor.name, actor.role, 'OPERATIONAL_BACKUP_CREATED', 'Administration', backupId, JSON.stringify({ kind, counts, checksum })],
+    );
+  }
+  return { id: backupId, kind, createdAt: payload.createdAt, counts, checksum, includesUploads: fs.existsSync(path.join(directory, 'uploads')) };
+};
+
+const listOperationalBackups = () => {
+  if (!fs.existsSync(BACKUPS_DIR)) return [];
+  return fs.readdirSync(BACKUPS_DIR, { withFileTypes: true })
+    .filter((item) => item.isDirectory())
+    .flatMap((item) => {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(path.join(BACKUPS_DIR, item.name, 'manifest.json'), 'utf8'));
+        return [{ ...manifest, bytes: fs.statSync(path.join(BACKUPS_DIR, item.name, 'snapshot.json')).size }];
+      } catch { return []; }
+    })
+    .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+};
+
+let automaticBackupInProgress = false;
+const runAutomaticBackupIfDue = async () => {
+  if (automaticBackupInProgress) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (listOperationalBackups().some((backup) => backup.kind === 'automatic' && String(backup.createdAt).slice(0, 10) === today)) return;
+  automaticBackupInProgress = true;
+  try {
+    const backup = await writeOperationalBackup('automatic');
+    console.log(`[BACKUP] Daily operational backup created (${backup.id}).`);
+    const automatic = listOperationalBackups().filter((item) => item.kind === 'automatic');
+    automatic.slice(30).forEach((item) => fs.rmSync(getBackupDirectory(item.id), { recursive: true, force: true }));
+  } catch (error) {
+    console.error('[BACKUP] Automatic backup failed:', error instanceof Error ? error.message : 'unknown error');
+  } finally {
+    automaticBackupInProgress = false;
+  }
+};
+
+app.get('/api/admin/backups', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  res.json({ success: true, backups: listOperationalBackups() });
+});
+
+app.post('/api/admin/backups', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  try {
+    const backup = await writeOperationalBackup('manual', req.user);
+    res.status(201).json({ success: true, backup });
+  } catch (error) {
+    console.error('Manual backup failed:', error);
+    res.status(503).json({ success: false, error: 'Unable to create an operational backup.' });
+  }
+});
+
+app.get('/api/admin/backups/:id/download', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  try {
+    const directory = getBackupDirectory(req.params.id);
+    if (!fs.existsSync(path.join(directory, 'snapshot.json'))) { res.status(404).json({ success: false, error: 'Backup was not found.' }); return; }
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="${req.params.id}.zip"`);
+    const archive = archiver('zip', { zlib: { level: 6 } });
+    archive.on('error', (error: Error) => { console.error('Backup archive failed:', error); if (!res.headersSent) res.status(500); res.end(); });
+    archive.pipe(res);
+    archive.directory(directory, false);
+    void archive.finalize();
+  } catch (error) { res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Unable to download backup.' }); }
+});
+
+app.post('/api/admin/backups/:id/restore', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  if (String(req.body.confirmation || '') !== 'RESTORE') { res.status(400).json({ success: false, error: 'Type RESTORE exactly to confirm.' }); return; }
+  let connection: any;
+  try {
+    const directory = getBackupDirectory(req.params.id);
+    const snapshotFile = path.join(directory, 'snapshot.json');
+    const manifestFile = path.join(directory, 'manifest.json');
+    if (!fs.existsSync(snapshotFile) || !fs.existsSync(manifestFile)) { res.status(404).json({ success: false, error: 'Backup or manifest was not found.' }); return; }
+    const raw = fs.readFileSync(snapshotFile, 'utf8');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const checksum = createHash('sha256').update(raw).digest('hex');
+    if (checksum !== manifest.checksum) { res.status(409).json({ success: false, error: 'Backup integrity check failed. Nothing was restored.' }); return; }
+    const backup = JSON.parse(raw);
+    if (backup.format !== 'TQI_ERP_OPERATIONAL_BACKUP' || backup.version !== 1 || !backup.tables || BACKUP_TABLES.some((table) => !Array.isArray(backup.tables[table]))) {
+      res.status(400).json({ success: false, error: 'Unsupported or incomplete TQI backup.' }); return;
+    }
+    const safetyBackup = await writeOperationalBackup('pre-reset', req.user);
+
+    connection = await pool.getConnection();
+    await connection.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+    await connection.beginTransaction();
+    await connection.query('SET FOREIGN_KEY_CHECKS = 0');
+    for (const table of [...BACKUP_TABLES].reverse()) await connection.query(`DELETE FROM \`${table}\``);
+    for (const table of BACKUP_TABLES) {
+      const data = backup.tables[table] as Array<Record<string, any>>;
+      if (!data.length) continue;
+      const columns = Object.keys(data[0]);
+      if (columns.some((column) => !/^[a-zA-Z0-9_]+$/.test(column)) || data.some((row) => Object.keys(row).join('|') !== columns.join('|'))) throw new Error(`Invalid backup records for ${table}.`);
+      const placeholders = columns.map(() => '?').join(',');
+      const sql = `INSERT INTO \`${table}\` (${columns.map((column) => `\`${column}\``).join(',')}) VALUES (${placeholders})`;
+      for (let start = 0; start < data.length; start += 250) {
+        await connection.query(sql, data.slice(start, start + 250).map((row) => columns.map((column) => row[column])));
+      }
+    }
+    await connection.query('SET FOREIGN_KEY_CHECKS = 1');
+    await connection.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name, req.user.role, 'OPERATIONAL_BACKUP_RESTORED', 'Administration', req.params.id, JSON.stringify({ backupId: req.params.id, restoredTables: BACKUP_TABLES, counts: backup.counts, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') })],
+    );
+    await connection.commit();
+    const backupUploads = path.join(directory, 'uploads');
+    if (fs.existsSync(backupUploads)) fs.cpSync(backupUploads, UPLOADS_DIR, { recursive: true, force: true });
+    res.json({ success: true, backupId: req.params.id, safetyBackupId: safetyBackup.id, counts: backup.counts, message: 'Operational data restored. User accounts, passwords, settings, academic year setup, and audit logs were preserved.' });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    try { await connection?.query('SET FOREIGN_KEY_CHECKS = 1'); } catch { /* connection cleanup */ }
+    console.error('Backup restore failed:', error);
+    res.status(503).json({ success: false, error: error instanceof Error ? error.message : 'Unable to restore operational backup.' });
+  } finally { connection?.release(); }
+});
+
+app.get('/api/admin/data-reset/options', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  res.json({ success: true, modules: RESET_OPTIONS });
+});
+
+app.get('/api/admin/data-reset/impact', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  const moduleId = String(req.query.module || '').trim();
+  const scope = String(req.query.scope || '').trim();
+  let connection: any;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const impact = await previewReset(connection, moduleId, scope);
+    await connection.rollback();
+    res.json({ success: true, impact });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    res.status(400).json({ success: false, error: error instanceof Error ? error.message : 'Unable to calculate reset impact.' });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.post('/api/admin/data-reset/execute', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  const moduleId = String(req.body.module || '').trim();
+  const scope = String(req.body.scope || '').trim();
+  const moduleDefinition = RESET_OPTIONS.find((item) => item.id === moduleId);
+  const moduleLabel = moduleDefinition?.label || moduleId;
+  const scopeLabel = moduleDefinition?.scopes.find((item) => item.id === scope)?.label || scope;
+  const confirmation = String(req.body.confirmation || '');
+  const expectedImpact = req.body.expectedImpact as ResetImpact | undefined;
+  if (confirmation !== 'RESET') {
+    res.status(400).json({ success: false, error: 'Type RESET exactly to confirm this operation.' });
+    return;
+  }
+  if (!moduleId || !scope || !expectedImpact || !Number.isInteger(Number(expectedImpact.records))) {
+    res.status(400).json({ success: false, error: 'Select a module and scope and load the impact preview before confirming.' });
+    return;
+  }
+  const resetId = randomUUID();
+  const requestMetadata = { ip: req.ip || req.socket.remoteAddress || '', userAgent: String(req.headers['user-agent'] || '') };
+  let connection: any;
+  let impact: ResetImpact | undefined;
+  let safetyBackup: any;
+  try {
+    safetyBackup = await writeOperationalBackup('pre-reset', req.user);
+    connection = await pool.getConnection();
+    await connection.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+    await connection.beginTransaction();
+    impact = await previewReset(connection, moduleId, scope);
+    const expected = {
+      records: Number(expectedImpact.records || 0), expenses: Number(expectedImpact.expenses || 0),
+      bills: Number(expectedImpact.bills || 0), relatedRecords: Number(expectedImpact.relatedRecords || 0), files: Number(expectedImpact.files || 0),
+    };
+    if (JSON.stringify(impact) !== JSON.stringify(expected)) {
+      await connection.rollback();
+      res.status(409).json({ success: false, error: 'The data changed after preview. Reload the impact summary and confirm again.', impact });
+      return;
+    }
+    const result = await executeReset(connection, moduleId, scope);
+    const auditDetails = JSON.stringify({
+      resetId, module: moduleId, scope, records: result.records, expenses: result.expenses,
+      moduleLabel, scopeLabel,
+      bills: result.bills, relatedRecords: result.relatedRecords, files: result.files,
+      affectedRows: result.affectedRows, status: 'SUCCESS', ...requestMetadata,
+    });
+    await connection.query(
+      'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+      [randomUUID(), req.user.id, req.user.name || req.user.email || 'Super Admin', 'Super Admin', 'RESET_DATA', 'Data Reset', resetId, auditDetails],
+    );
+    await connection.commit();
+
+    const fileCleanupErrors: string[] = [];
+    let filesRemoved = 0;
+    for (const storedPath of result.filePaths) {
+      const resolved = resolveStoredUploadPath(storedPath);
+      const allowed = [UPLOADS_DIR, LEGACY_UPLOADS_DIR].some((root) => {
+        const relative = path.relative(root, resolved);
+        return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+      });
+      if (!allowed) {
+        fileCleanupErrors.push('An upload path was outside the application storage directory and was left untouched.');
+        continue;
+      }
+      try {
+        if (fs.existsSync(resolved)) { fs.unlinkSync(resolved); filesRemoved += 1; }
+      } catch (error) {
+        fileCleanupErrors.push(error instanceof Error ? error.message : 'An uploaded file could not be removed.');
+      }
+    }
+    if (fileCleanupErrors.length) {
+      const detail = JSON.stringify({ resetId, module: moduleId, scope, moduleLabel, scopeLabel, records: result.records, expenses: result.expenses, bills: result.bills, relatedRecords: result.relatedRecords, files: result.files, affectedRows: result.affectedRows, filesRemoved, fileCleanupErrors, status: 'SUCCESS_WITH_FILE_CLEANUP_WARNING', ...requestMetadata });
+      try {
+        await pool.query('UPDATE audit_logs SET details = ? WHERE record_id = ? AND action = \'RESET_DATA\'', [detail, resetId]);
+      } catch (auditError) {
+        console.error('Reset succeeded but file-cleanup warning could not be appended to audit history:', auditError);
+      }
+    }
+    res.json({ success: true, resetId, safetyBackupId: safetyBackup.id, result: { ...result, filePaths: undefined, filesRemoved, fileCleanupErrors } });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    const message = error instanceof Error ? error.message : 'Reset failed due to an unexpected database error.';
+    try {
+      const failureDetails = JSON.stringify({ resetId, module: moduleId, scope, moduleLabel, scopeLabel, ...(impact || {}), status: 'FAILED', error: message, ...requestMetadata });
+      await pool.query(
+        'INSERT INTO audit_logs (id, user_id, user_name, role, cluster_id, action, module, record_id, details) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)',
+        [randomUUID(), req.user.id, req.user.name || req.user.email || 'Super Admin', 'Super Admin', 'RESET_DATA', 'Data Reset', resetId, failureDetails],
+      );
+    } catch (auditError) {
+      console.error('Unable to record failed reset in audit log:', auditError);
+    }
+    res.status(503).json({ success: false, error: message });
+  } finally {
+    connection?.release();
+  }
+});
+
+app.get('/api/admin/data-reset/history', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (!requireSuperAdminForReset(req, res)) return;
+  try {
+    const [rows] = await pool.query<any[]>(
+      "SELECT id, user_id, user_name, record_id, details, created_at FROM audit_logs WHERE action = 'RESET_DATA' ORDER BY created_at DESC LIMIT 200",
+    );
+    res.json({ success: true, history: rows.map((row) => {
+      let details: any = {};
+      try { details = JSON.parse(row.details || '{}'); } catch { details = {}; }
+      return { id: row.id, resetId: row.record_id, adminId: row.user_id, adminName: row.user_name || 'Super Admin', createdAt: row.created_at, ...details };
+    }) });
+  } catch (error) {
+    console.error('Failed to load reset history:', error);
+    res.status(503).json({ success: false, error: 'Unable to load reset history.' });
   }
 });
 
@@ -3778,7 +5301,7 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
   const phone = String(req.body.phone || '').trim();
   const role = req.body.role === 'Super Admin' ? 'Super Admin' : 'Cluster Admin';
   const clusterId = role === 'Cluster Admin' ? (String(req.body.clusterId || '').trim() || null) : null;
-  const temporaryPassword = String(req.body.temporaryPassword || `TQI@Admin${randomInt(1000, 9999)}`).trim();
+  const temporaryPassword = generateTemporaryPassword();
 
   if (!name || !email) {
     res.status(400).json({ success: false, error: 'Name and email are required.' });
@@ -3813,12 +5336,12 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
   }
 
   const userId = String(req.body.id || `usr-${randomUUID()}`);
-  const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+  const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
   try {
     await pool.query('START TRANSACTION');
     await pool.query(
-      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, 'Active')`,
+      `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, password_created_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, TRUE, NOW(), 'Active')`,
       [userId, name, email, passwordHash, role, clusterId, formattedPhone],
     );
 
@@ -3843,6 +5366,8 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
     ).catch(() => undefined);
 
     await pool.query('COMMIT');
+    await recordPasswordEvent({ userId, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') });
+    await recordPasswordEvent({ userId, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId });
 
     // Fetch cluster name if any for email dispatch
     let clusterName = '';
@@ -3864,7 +5389,6 @@ app.post('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respo
 
     res.status(201).json({
       success: true,
-      temporaryPassword,
       user: serializeUser(createdRows[0] || { id: userId, name, email, role, cluster_id: clusterId, phone: formattedPhone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
@@ -3952,18 +5476,67 @@ app.delete('/api/users/:id', requireAuth, async (req: AuthenticatedRequest, res:
   }
 });
 
-app.post('/api/users/:id/reset-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
-  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can reset passwords.' }); return; }
-  const password = String(req.body.password || '');
-  if (password.length < 8) { res.status(400).json({ success: false, error: 'Password must be at least 8 characters.' }); return; }
+app.get('/api/users/:id/password-security', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can view password status.' }); return; }
   try {
-    const passwordHash = await bcrypt.hash(password, 10);
-    const [result] = await pool.query<any>('UPDATE users SET password_hash = ?, must_change_password = FALSE WHERE id = ?', [passwordHash, req.params.id]);
+    const [usersRows] = await pool.query<any[]>(`SELECT u.id, u.name, u.email, u.role, u.must_change_password, u.password_created_at, u.password_changed_at, u.password_reset_at, u.password_reset_by, resetter.name AS password_reset_by_name
+      FROM users u LEFT JOIN users resetter ON resetter.id = u.password_reset_by WHERE u.id = ? LIMIT 1`, [req.params.id]);
+    if (!usersRows.length) { res.status(404).json({ success: false, error: 'User not found.' }); return; }
+    const [historyRows] = await pool.query<any[]>(
+      'SELECT action, changed_by_name, created_at FROM user_password_history WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+      [req.params.id],
+    );
+    const user = usersRows[0];
+    res.json({ success: true, status: Boolean(user.must_change_password) ? 'TEMPORARY' : 'SET', passwordCreatedAt: user.password_created_at, passwordChangedAt: user.password_changed_at, passwordResetAt: user.password_reset_at, passwordResetBy: user.password_reset_by, history: historyRows });
+  } catch (error) {
+    console.error('Unable to load password status:', error);
+    res.status(503).json({ success: false, error: 'Unable to load password status.' });
+  }
+});
+
+app.post('/api/users/:id/change-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can change another user password.' }); return; }
+  const password = String(req.body.password || '');
+  if (!isStrongPassword(password)) { res.status(400).json({ success: false, error: 'Password must have at least 8 characters, uppercase and lowercase letters, a number, and a special character.' }); return; }
+  let connection: any;
+  try {
+    const passwordHash = await bcrypt.hash(password, 12);
+    connection = await pool.getConnection(); await connection.beginTransaction();
+    const [result] = await connection.query('UPDATE users SET password_hash = ?, must_change_password = FALSE, password_changed_at = NOW(), password_created_at = COALESCE(password_created_at, NOW()) WHERE id = ?', [passwordHash, req.params.id]) as [any, any];
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'User not found.' }); return; }
+    await recordPasswordEvent({ userId: req.params.id, action: 'PASSWORD_CHANGED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.user.clusterId === 'all' ? null : req.user.clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') }, connection);
+    await connection.commit();
     res.json({ success: true });
   } catch (error) {
-    res.status(503).json({ success: false, error: 'Unable to reset password.' });
-  }
+    await connection?.rollback().catch(() => undefined);
+    console.error('Unable to change user password:', error);
+    res.status(503).json({ success: false, error: 'Unable to change user password.' });
+  } finally { connection?.release(); }
+});
+
+app.post('/api/users/:id/reset-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') { res.status(403).json({ success: false, error: 'Only Super Admin can reset passwords.' }); return; }
+  const temporaryPassword = generateTemporaryPassword();
+  let connection: any;
+  try {
+    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    connection = await pool.getConnection(); await connection.beginTransaction();
+    const [result] = await connection.query(
+      'UPDATE users SET password_hash = ?, must_change_password = TRUE, password_reset_at = NOW(), password_reset_by = ?, password_created_at = COALESCE(password_created_at, NOW()) WHERE id = ?',
+      [passwordHash, req.user.id, req.params.id],
+    ) as [any, any];
+    if (!result.affectedRows) { await connection.rollback(); res.status(404).json({ success: false, error: 'User not found.' }); return; }
+    await recordPasswordEvent({ userId: req.params.id, action: 'PASSWORD_RESET', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.user.clusterId === 'all' ? null : req.user.clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || ''), details: 'Temporary password generated; plaintext returned once to the authorized administrator.' }, connection);
+    await recordPasswordEvent({ userId: req.params.id, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.user.clusterId === 'all' ? null : req.user.clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') }, connection);
+    await recordPasswordEvent({ userId: req.params.id, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.user.clusterId === 'all' ? null : req.user.clusterId }, connection);
+    const [usersRows] = await connection.query(`SELECT u.*, resetter.name AS password_reset_by_name FROM users u LEFT JOIN users resetter ON resetter.id = u.password_reset_by WHERE u.id = ? LIMIT 1`, [req.params.id]) as [any[], any];
+    await connection.commit();
+    res.json({ success: true, temporaryPassword, user: serializeUser(usersRows[0]) });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Unable to reset user password:', error);
+    res.status(503).json({ success: false, error: 'Unable to reset user password.' });
+  } finally { connection?.release(); }
 });
 
 // --- NEW ENDPOINTS ADDED IN PHASE 2 (PART 1) ---
@@ -5388,13 +6961,14 @@ app.get('/api/session-report-photos/:id/file', requireAuth, async (req: Authenti
       res.status(403).json({ success: false, error: 'This photo is outside your cluster.' });
       return;
     }
-    if (!fs.existsSync(rows[0].file_path)) {
+    const filePath = resolveStoredUploadPath(rows[0].file_path);
+    if (!filePath || !fs.existsSync(filePath)) {
       res.status(404).json({ success: false, error: 'Photo file is missing from storage.' });
       return;
     }
     res.setHeader('Cache-Control', 'private, no-store');
     res.type(rows[0].mime_type || 'application/octet-stream');
-    res.sendFile(path.resolve(rows[0].file_path));
+    res.sendFile(path.resolve(filePath));
   } catch (error) {
     console.error('Failed to read session report photo:', error);
     res.status(503).json({ success: false, error: 'Unable to load session report photo.' });
@@ -5428,7 +7002,7 @@ app.delete('/api/session-report-photos/:id', requireAuth, async (req: Authentica
       return;
     }
     await pool.query('DELETE FROM session_report_photos WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
-    try { fs.unlinkSync(rows[0].file_path); } catch { /* database reference is already removed */ }
+    try { fs.unlinkSync(resolveStoredUploadPath(rows[0].file_path)); } catch { /* database reference is already removed */ }
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete session report photo:', error);
@@ -5820,7 +7394,7 @@ app.delete('/api/modules/:id/resources/:resourceId', requireAuth, async (req: Au
       return;
     }
     await pool.query('DELETE FROM module_resources WHERE id = ? AND module_id = ?', [req.params.resourceId, req.params.id]);
-    await fs.promises.unlink(rows[0].file_path).catch(() => undefined);
+    await fs.promises.unlink(resolveStoredUploadPath(rows[0].file_path)).catch(() => undefined);
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete module resource:', error);
@@ -5839,7 +7413,8 @@ app.get('/api/modules/:id/resources/:resourceId/download', requireAuth, async (r
       'SELECT resources.file_path, resources.original_filename FROM module_resources resources JOIN modules ON modules.id = resources.module_id WHERE resources.id = ? AND resources.module_id = ? AND modules.academic_year_id = ? LIMIT 1',
       [req.params.resourceId, req.params.id, year.id],
     );
-    if (!rows.length || !fs.existsSync(rows[0].file_path)) {
+    const filePath = resolveStoredUploadPath(rows[0]?.file_path);
+    if (!rows.length || !filePath || !fs.existsSync(filePath)) {
       res.status(404).json({ success: false, error: 'Resource not found.' });
       return;
     }
@@ -5852,10 +7427,10 @@ app.get('/api/modules/:id/resources/:resourceId/download', requireAuth, async (r
             : 'application/octet-stream';
       res.setHeader('Content-Type', contentType);
       res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(rows[0].original_filename)}`);
-      res.sendFile(rows[0].file_path);
+      res.sendFile(filePath);
       return;
     }
-    res.download(rows[0].file_path, rows[0].original_filename);
+    res.download(filePath, rows[0].original_filename);
   } catch (error) {
     console.error('Failed to download module resource:', error);
     res.status(500).json({ success: false, error: 'Unable to download resource.' });
@@ -6092,10 +7667,11 @@ const copyAcademicYearMasterData = async (
     const [rows] = await connection.query('SELECT * FROM session_photos WHERE academic_year_id = ?', [sourceYearId]);
     for (const row of rows) {
       const clusterId = clusterIds.get(row.cluster_id);
-      if (!clusterId || !row.file_path || !fs.existsSync(row.file_path)) continue;
+      const sourceFilePath = resolveStoredUploadPath(row.file_path);
+      if (!clusterId || !sourceFilePath || !fs.existsSync(sourceFilePath)) continue;
       const id = `photo-${randomUUID()}`;
-      const copiedPath = path.join(path.dirname(row.file_path), `${id}-${path.basename(row.file_path)}`);
-      fs.copyFileSync(row.file_path, copiedPath);
+      const copiedPath = path.join(path.dirname(sourceFilePath), `${id}-${path.basename(sourceFilePath)}`);
+      fs.copyFileSync(sourceFilePath, copiedPath);
       copiedFilePaths.push(copiedPath);
       await connection.query(
         'INSERT INTO session_photos (id, cluster_id, session_id, academic_year_id, day_number, file_path, file_url, original_filename, uploaded_by, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -6528,7 +8104,7 @@ app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequ
     for (const filePath of photoPaths) {
       const [references] = await pool.query<any[]>('SELECT id FROM session_photos WHERE file_path = ? LIMIT 1', [filePath]);
       if (!references.length) {
-        try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ }
+        try { fs.unlinkSync(resolveStoredUploadPath(filePath)); } catch { /* best effort cleanup */ }
       }
     }
     res.json({ success: true, data: { id: yearId, name: years[0].name } });
@@ -6574,6 +8150,10 @@ const startServer = async () => {
       // Self-heal the academic_setup table at boot so a previous failed migration
       // (or stale schema_migrations row) never breaks the /api/academic-setup endpoints.
       await ensureAcademicSetupTable().catch(() => undefined);
+      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+      void runAutomaticBackupIfDue();
+      const backupTimer = setInterval(() => void runAutomaticBackupIfDue(), 60 * 60 * 1000);
+      backupTimer.unref?.();
       console.log(`\n==================================================`);
       console.log(`🚀 TQI Backend API running on http://localhost:${PORT}`);
       console.log(`   Health Check: http://localhost:${PORT}/api/health`);

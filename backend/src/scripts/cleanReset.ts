@@ -11,7 +11,10 @@ async function runCleanReset() {
 
     // 1. Run migrations to ensure all latest tables exist
     console.log('[CLEAN-RESET] Ensuring all migrations are applied...');
-    const migrationDir = path.resolve(process.cwd(), 'database', 'migrations');
+    const projectRoot = fs.existsSync(path.join(process.cwd(), 'frontend'))
+      ? process.cwd()
+      : path.resolve(process.cwd(), '..');
+    const migrationDir = path.join(projectRoot, 'database', 'migrations');
     if (fs.existsSync(migrationDir)) {
       const files = fs.readdirSync(migrationDir).filter(f => f.endsWith('.sql')).sort();
       for (const file of files) {
@@ -38,6 +41,7 @@ async function runCleanReset() {
 
     const tables = [
       'audit_logs',
+      'user_password_history',
       'auth_otps',
       'volunteer_attendance',
       'student_attendance',
@@ -51,6 +55,8 @@ async function runCleanReset() {
       'lesson_plans',
       'module_resources',
       'sessions',
+      'finance_report_history',
+      'finance_reports',
       'finance_entries',
       'students',
       'volunteers',

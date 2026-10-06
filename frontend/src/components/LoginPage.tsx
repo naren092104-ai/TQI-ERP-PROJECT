@@ -22,6 +22,7 @@ export interface AuthSession {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   role: UserRole;
   clusterId: string;
   clusterName: string;
@@ -74,6 +75,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [otpRequested, setOtpRequested] = useState(false);
   const [activeMethod, setActiveMethod] = useState<'password' | 'otp'>('password');
   const [showPassword, setShowPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -189,17 +192,20 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    if (newPassword.length < 8) { setErrorMessage('New password must be at least 8 characters.'); return; }
+    if (!passwordStrong(newPassword)) { setErrorMessage('Use 8+ characters with uppercase, lowercase, a number, and a special character.'); return; }
     if (newPassword !== confirmPassword) { setErrorMessage('Passwords do not match.'); return; }
     setIsLoading(true);
     try {
       const response = await fetch(apiUrl('/api/auth/change-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${pendingSession?.token}` },
-        body: JSON.stringify({ currentPassword: password || 'TQI', newPassword }),
+        body: JSON.stringify({ newPassword }),
       });
       const data = await response.json();
       if (!response.ok || !data?.success) { setErrorMessage(data?.error || 'Unable to change password.'); setIsLoading(false); return; }
+      setPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
       onLoginSuccess({ ...pendingSession!, mustChangePassword: false });
     } catch {
       // SECURITY: Never advance to the dashboard without backend confirmation.
@@ -213,7 +219,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const handleTokenReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
-    if (newPassword.length < 8 || newPassword !== confirmPassword) { setErrorMessage(newPassword.length < 8 ? 'New password must be at least 8 characters.' : 'Passwords do not match.'); return; }
+    if (!passwordStrong(newPassword) || newPassword !== confirmPassword) { setErrorMessage(!passwordStrong(newPassword) ? 'Use 8+ characters with uppercase, lowercase, a number, and a special character.' : 'Passwords do not match.'); return; }
     setIsLoading(true);
     try {
       const response = await fetch(apiUrl('/api/auth/reset-password'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: resetToken, newPassword }) });
@@ -262,16 +268,18 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <Lock size={16} weight="light" className="tqi-login-input-icon" />
                   <input
                     id="new-pass"
-                    type="password"
-                    className="tqi-login-input"
+                    type={showNewPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="new-password"
                     value={newPassword}
                     minLength={8}
                     onChange={(e) => { setNewPassword(e.target.value); setErrorMessage(null); }}
                     placeholder="At least 8 characters"
                   />
+                  <button type="button" onClick={() => setShowNewPassword((value) => !value)} className="mt-1 text-[11px] font-semibold text-blue-700">{showNewPassword ? 'Hide password' : 'Show password'}</button>
                 </div>
                 <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
-                  Use 8+ characters, including a number and a symbol.
+                  Minimum 8 characters, uppercase, lowercase, number, and special character.
                 </span>
               </div>
 
@@ -281,19 +289,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   <Lock size={16} weight="light" className="tqi-login-input-icon" />
                   <input
                     id="confirm-pass"
-                    type="password"
-                    className="tqi-login-input"
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    autoComplete="new-password"
                     value={confirmPassword}
                     minLength={8}
                     onChange={(e) => { setConfirmPassword(e.target.value); setErrorMessage(null); }}
                     placeholder="Re-enter the same password"
                   />
+                  <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} className="mt-1 text-[11px] font-semibold text-blue-700">{showConfirmPassword ? 'Hide password' : 'Show password'}</button>
                 </div>
               </div>
 
               <button
                 type="submit"
-                disabled={isLoading || newPassword.length < 8 || newPassword !== confirmPassword}
+                disabled={isLoading || !passwordStrong(newPassword) || newPassword !== confirmPassword}
                 className="tqi-login-primary"
               >
                 {isLoading ? <TqiLoadingMark /> : null}
@@ -588,4 +598,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     </div>
   );
 };
+
+function passwordStrong(value: string) {
+  return value.length >= 8 && /[A-Z]/.test(value) && /[a-z]/.test(value) && /\d/.test(value) && /[^A-Za-z0-9]/.test(value);
+}
 

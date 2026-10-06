@@ -43,6 +43,8 @@ interface AttendanceViewProps {
   onSaveAttendance: (session: AttendanceSession) => Promise<void> | void;
   onReviewAttendance?: (attendanceId: string, action: 'approve' | 'request-resubmission' | 'approve-edit' | 'deny-edit', remarks: string) => Promise<void>;
   onRequestAttendanceEdit?: (attendanceId: string, reason: string) => Promise<void>;
+  onAdminEditAttendance?: (attendanceId: string, records: AttendanceRecord[], volunteerAttendance: VolunteerAttendanceRecord[]) => Promise<void>;
+  onAdminDeleteAttendance?: (attendanceId: string) => Promise<void>;
 }
 
 export const AttendanceView: React.FC<AttendanceViewProps> = ({
@@ -59,6 +61,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
   onSaveAttendance,
   onReviewAttendance,
   onRequestAttendanceEdit,
+  onAdminEditAttendance,
+  onAdminDeleteAttendance,
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
 
@@ -631,6 +635,8 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
         subject={initialSubject}
         academicYear={academicYear}
         onReviewAttendance={onReviewAttendance || (async () => undefined)}
+        onAdminEditAttendance={onAdminEditAttendance || (async () => undefined)}
+        onAdminDeleteAttendance={onAdminDeleteAttendance || (async () => undefined)}
       />
     );
   }

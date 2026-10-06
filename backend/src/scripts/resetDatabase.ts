@@ -14,6 +14,7 @@ async function resetAndSeed() {
     // finance_bills / finance_transactions never existed).
     const tables = [
       'audit_logs',
+      'user_password_history',
       'auth_otps',
       'volunteer_attendance',
       'student_attendance',
@@ -27,6 +28,8 @@ async function resetAndSeed() {
       'lesson_plans',
       'module_resources',
       'sessions',
+      'finance_report_history',
+      'finance_reports',
       'finance_entries',
       'students',
       'volunteers',

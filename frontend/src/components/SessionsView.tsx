@@ -41,6 +41,7 @@ interface SessionsViewProps {
   panchayats: Panchayat[];
   volunteers: Volunteer[];
   userRole?: string;
+  currentClusterId?: string;
   dateChangeRequests?: DateChangeRequest[];
   onNavigate: (tab: TabType, targetId?: string, secondaryParam?: string) => void;
   onAddSession: (newSession: Omit<Session, 'id'>) => Promise<void> | void;
@@ -58,6 +59,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   panchayats = [],
   volunteers = [],
   userRole = 'Super Admin',
+  currentClusterId,
   dateChangeRequests = [],
   onNavigate,
   onAddSession,
@@ -69,10 +71,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 }) => {
   const isSuperAdmin = userRole === 'Super Admin';
   const isClusterAdmin = userRole === 'Cluster Admin';
+  const canManageSchedules = isSuperAdmin;
 
   // Search & Filter State
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedClusterId, setSelectedClusterId] = useState<string>('all');
+  const [selectedClusterId, setSelectedClusterId] = useState<string>(isSuperAdmin ? 'all' : currentClusterId || 'all');
   const [showClusterCards, setShowClusterCards] = useState(isSuperAdmin);
   const [selectedDay, setSelectedDay] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -117,9 +120,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   };
 
   useEffect(() => {
-    setShowClusterCards(isSuperAdmin);
-    setSelectedClusterId('all');
-  }, [isSuperAdmin]);
+    if (isSuperAdmin) {
+      setShowClusterCards(true);
+      setSelectedClusterId('all');
+      return;
+    }
+
+    setShowClusterCards(false);
+    setSelectedClusterId(currentClusterId || 'all');
+  }, [isSuperAdmin, currentClusterId]);
 
   const moduleOptions = [
     'Spoken English & Communication',
@@ -252,8 +261,9 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   }, [clusters, sessions, dateChangeRequests, volunteers]);
 
   const handleOpenAdd = () => {
+    if (!canManageSchedules) return;
     setEditingSession(null);
-    const initialClusterId = clusters[0]?.id || '';
+    const initialClusterId = isSuperAdmin ? (clusters[0]?.id || '') : (currentClusterId || clusters[0]?.id || '');
     const initialPanchayats = panchayats.filter((panchayat) => panchayat.clusterId === initialClusterId);
     const initialTargets = initialPanchayats.flatMap((panchayat) => (panchayat.villages || []).map((village) => ({
       panchayatId: panchayat.id,
@@ -595,13 +605,15 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 <span>{pendingRescheduleRequests.length} Reschedule Requests Pending</span>
               </Button>
             )}
-            <Button
-              onClick={handleOpenAdd}
-              className="gap-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Schedule Session Cycle (From - To)</span>
-            </Button>
+            {canManageSchedules && (
+              <Button
+                onClick={handleOpenAdd}
+                className="gap-1.5 rounded-xl bg-primary text-primary-foreground text-xs font-semibold"
+              >
+                <Plus className="h-4 w-4" />
+                <span>Schedule Session Cycle (From - To)</span>
+              </Button>
+            )}
           </div>
         </div>
 
@@ -754,14 +766,16 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             </div>
           )}
 
-          <Button
-            size="sm"
-            onClick={handleOpenAdd}
-            className="gap-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            <span>Schedule Session Cycle (From - To)</span>
-          </Button>
+          {canManageSchedules && (
+            <Button
+              size="sm"
+              onClick={handleOpenAdd}
+              className="gap-1.5 rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-semibold"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              <span>Schedule Session Cycle (From - To)</span>
+            </Button>
+          )}
         </div>
       </div>
 
@@ -879,29 +893,6 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
               />
             </div>
 
-            {/* Cluster Filter */}
-            <div className="w-44">
-              <Select
-                value={selectedClusterId}
-                onValueChange={(val) => {
-                  setSelectedClusterId(val);
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger className="h-9 text-xs rounded-xl">
-                  <SelectValue placeholder="All Clusters" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clusters</SelectItem>
-                  {clusters.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             {/* Day Filter */}
             <div className="w-32">
               <Select
@@ -959,7 +950,13 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
           {paginatedSessions.length === 0 ? (
             <div className="rounded-2xl border border-border bg-card py-12">
-              <EmptyState icon={Calendar} title="No sessions scheduled" description="Schedule teaching sessions using From Date to To Date to populate the academic cycle." actionLabel="+ Schedule Session Cycle" onAction={handleOpenAdd} />
+              <EmptyState
+                icon={Calendar}
+                title="No sessions scheduled"
+                description="Schedule teaching sessions using From Date to To Date to populate the academic cycle."
+                actionLabel={canManageSchedules ? '+ Schedule Session Cycle' : undefined}
+                onAction={canManageSchedules ? handleOpenAdd : undefined}
+              />
             </div>
           ) : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {paginatedSessions.map((session, idx) => {

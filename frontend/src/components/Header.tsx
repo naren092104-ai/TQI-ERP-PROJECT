@@ -34,6 +34,8 @@ interface HeaderProps {
   onRoleChange?: (role: UserRole) => void;
   onToggleSidebar?: () => void;
   onOpenCommandPalette?: () => void;
+  maintenance?: { enabled: boolean; title: string; message: string; expectedCompletion: string | null; showCountdown: boolean; autoDisable: boolean } | null;
+  onManageMaintenance?: () => void;
   academicYears?: Array<{ id: string; name: string; is_active?: boolean; status?: string }>;
   selectedAcademicYearId?: string;
   onSelectAcademicYear?: (id: string) => void;
@@ -52,6 +54,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onToggleSidebar,
   onOpenCommandPalette,
+  maintenance = null,
+  onManageMaintenance,
   academicYears = [],
   selectedAcademicYearId = '',
   onSelectAcademicYear,
@@ -214,6 +218,16 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: Academic Year, Notifications, Mode, User profile */}
         <div className="tqi-header-actions flex items-center gap-2 shrink-0">
+          {userRole === 'Super Admin' && maintenance?.enabled && (
+            <button
+              type="button"
+              onClick={() => onManageMaintenance?.()}
+              className="inline-flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-red-700 shadow-sm hover:bg-red-100"
+            >
+              <span className="h-2 w-2 rounded-full bg-red-600" />
+              Maintenance Mode
+            </button>
+          )}
           {/* Global Academic Year Selector */}
           <div className="tqi-header-year relative">
             <select

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { pdf } from '@react-pdf/renderer';
 import type { AttendanceSession, AttendanceRecord, VolunteerAttendanceRecord, Cluster, Panchayat, Session } from '../types';
-import { ArrowLeft, Calendar, CheckCircle2, ChevronRight, Download, RotateCcw, Users, X } from './ui/icons';
+import { ArrowLeft, Calendar, CheckCircle2, ChevronRight, Download, Edit3, RotateCcw, Save, Trash2, Users, X } from './ui/icons';
 import { exportSuperAdminAttendanceExcel, triggerFileDownload } from '../utils/exportUtils';
 import { AttendanceRosterPdf, type AttendanceDownloadRow } from '../utils/pdf/AttendanceRosterPdf';
 
@@ -13,6 +13,8 @@ interface SuperAdminAttendanceReviewViewProps {
   subject: 'students' | 'volunteers';
   academicYear?: string;
   onReviewAttendance: (attendanceId: string, action: 'approve' | 'request-resubmission' | 'approve-edit' | 'deny-edit', remarks: string) => Promise<void>;
+  onAdminEditAttendance: (attendanceId: string, records: AttendanceRecord[], volunteerAttendance: VolunteerAttendanceRecord[]) => Promise<void>;
+  onAdminDeleteAttendance: (attendanceId: string) => Promise<void>;
 }
 
 const statusLabel = (status?: string) => {
@@ -43,6 +45,8 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
   subject,
   academicYear = '',
   onReviewAttendance,
+  onAdminEditAttendance,
+  onAdminDeleteAttendance,
 }) => {
   const [clusterId, setClusterId] = useState('');
   const [dayNumber, setDayNumber] = useState<number | null>(null);
@@ -54,6 +58,11 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
   const [saving, setSaving] = useState(false);
   const [reviewError, setReviewError] = useState('');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [editingAttendanceId, setEditingAttendanceId] = useState<string | null>(null);
+  const [editingStudentRecords, setEditingStudentRecords] = useState<AttendanceRecord[]>([]);
+  const [editingVolunteerRecords, setEditingVolunteerRecords] = useState<VolunteerAttendanceRecord[]>([]);
+  const [isSavingAdminEdit, setIsSavingAdminEdit] = useState(false);
+  const [adminEditError, setAdminEditError] = useState('');
   const isVolunteer = subject === 'volunteers';
 
   const matchingAttendance = useMemo(
@@ -130,6 +139,50 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
     }
   };
 
+  const beginAdminEdit = (entry: AttendanceSession) => {
+    setEditingAttendanceId(entry.id);
+    setEditingStudentRecords([...(entry.records || [])]);
+    setEditingVolunteerRecords([...(entry.volunteerAttendance || [])]);
+    setAdminEditError('');
+  };
+
+  const saveAdminEdit = async () => {
+    if (!editingAttendanceId) return;
+    setIsSavingAdminEdit(true);
+    setAdminEditError('');
+    try {
+      await onAdminEditAttendance(editingAttendanceId, editingStudentRecords, editingVolunteerRecords);
+      setEditingAttendanceId(null);
+    } catch (error) {
+      setAdminEditError(error instanceof Error ? error.message : 'Unable to save attendance changes.');
+    } finally {
+      setIsSavingAdminEdit(false);
+    }
+  };
+
+  const deleteAttendance = async (entry: AttendanceSession) => {
+    const location = [entry.clusterName, entry.panchayatName, entry.villageName, `Day ${entry.dayNumber}`].filter(Boolean).join(' · ');
+    if (!window.confirm(`Permanently delete this attendance submission?\n${location}`)) return;
+    try {
+      await onAdminDeleteAttendance(entry.id);
+      if (editingAttendanceId === entry.id) setEditingAttendanceId(null);
+    } catch (error) {
+      setAdminEditError(error instanceof Error ? error.message : 'Unable to delete this attendance submission.');
+    }
+  };
+
+  const adminRecordActions = (entry: AttendanceSession) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {editingAttendanceId === entry.id ? <>
+        <button type="button" onClick={() => void saveAdminEdit()} disabled={isSavingAdminEdit} className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground disabled:opacity-50"><Save className="h-3.5 w-3.5" />{isSavingAdminEdit ? 'Saving…' : 'Save changes'}</button>
+        <button type="button" onClick={() => setEditingAttendanceId(null)} disabled={isSavingAdminEdit} className="rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground">Cancel</button>
+      </> : <>
+        <button type="button" onClick={() => beginAdminEdit(entry)} className="inline-flex items-center gap-1 rounded-lg border border-primary/30 px-3 py-1.5 text-xs font-semibold text-primary hover:bg-primary/5"><Edit3 className="h-3.5 w-3.5" />Edit</button>
+        <button type="button" onClick={() => void deleteAttendance(entry)} className="inline-flex items-center gap-1 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"><Trash2 className="h-3.5 w-3.5" />Delete</button>
+      </>}
+    </div>
+  );
+
   const reviewCard = (entries: AttendanceSession[]) => {
     const pending = entries.find((entry) => entry.status === 'Submitted' || entry.status === 'Pending Review');
     const editRequest = entries.find((entry) => entry.status === 'Edit Requested');
@@ -152,6 +205,9 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
   const selectedAttendance = isVolunteer
     ? activeDay?.entries || []
     : villageId ? rowsForLocation(panchayatId, villageId) : [];
+  const allVillagesAttendance = !isVolunteer && panchayatId && dayNumber !== null
+    ? matchingAttendance.find((item) => item.clusterId === clusterId && Number(item.dayNumber) === dayNumber && item.panchayatId === panchayatId && !item.villageId && item.villageName === 'All Villages')
+    : undefined;
   const roster = selectedAttendance[0];
   const studentRecords = (roster?.records || []) as AttendanceRecord[];
   const volunteerRecords = (roster?.volunteerAttendance || []) as VolunteerAttendanceRecord[];
@@ -286,6 +342,7 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
           {clusterId && <button type="button" onClick={goBack} className="inline-flex items-center gap-1.5 self-start rounded-xl border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-muted"><ArrowLeft className="h-4 w-4" /> Back</button>}
         </div>
       </div>
+      {adminEditError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{adminEditError}</p>}
 
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <button type="button" onClick={() => { setClusterId(''); setDayNumber(null); setPanchayatId(''); setVillageId(''); }} className="hover:text-primary">Clusters</button>
@@ -330,7 +387,7 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
             const allVillagesEntry = entries.find((item) => !item.villageId && item.villageName === 'All Villages');
             return <div key={panchayat.id} className="flex w-full items-center justify-between gap-4 border-b border-border p-4 last:border-0 hover:bg-muted/30">
               <button type="button" onClick={() => setPanchayatId(panchayat.id)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">{index + 1}</span><span><strong className="block text-sm text-foreground">{panchayat.name}</strong><span className="text-xs text-muted-foreground">{panchayat.villages?.length || 0} villages · {villagesSubmitted} submitted</span></span></button>
-              <span className="flex items-center gap-3">{allVillagesEntry ? reviewCard([allVillagesEntry]) : <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClass(locationStatus(entries))}`}>{statusLabel(locationStatus(entries))}</span>}<button type="button" onClick={() => setPanchayatId(panchayat.id)} aria-label={`Open ${panchayat.name}`} className="rounded-lg p-1 text-muted-foreground hover:bg-muted"><ChevronRight className="h-4 w-4 shrink-0" /></button></span>
+              <span className="flex items-center gap-3">{allVillagesEntry ? <>{reviewCard([allVillagesEntry])}{adminRecordActions(allVillagesEntry)}</> : <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${statusClass(locationStatus(entries))}`}>{statusLabel(locationStatus(entries))}</span>}<button type="button" onClick={() => setPanchayatId(panchayat.id)} aria-label={`Open ${panchayat.name}`} className="rounded-lg p-1 text-muted-foreground hover:bg-muted"><ChevronRight className="h-4 w-4 shrink-0" /></button></span>
             </div>;
           })}
           {!clusterPanchayats.length && <p className="p-8 text-center text-sm text-muted-foreground">No panchayats are configured for this cluster.</p>}
@@ -341,14 +398,15 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
         <div><h2 className="text-lg font-bold text-foreground">Day {dayNumber} · Volunteer attendance</h2><p className="text-xs text-muted-foreground">{activeCluster?.name} · no panchayat or village filtering for volunteer records</p></div>
         {selectedAttendance.map((entry) => {
           const records = (entry.volunteerAttendance || []) as VolunteerAttendanceRecord[];
+          const displayedRecords = editingAttendanceId === entry.id ? editingVolunteerRecords : records;
           return <div key={entry.id} className="overflow-hidden rounded-2xl border border-border bg-card">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
               <div><h3 className="font-bold text-foreground">{entry.sessionName || `Day ${dayNumber} Attendance`}</h3><p className="mt-1 text-xs text-muted-foreground">{entry.presentCount || 0} present / {entry.totalCount || records.length} volunteers</p></div>
-              {reviewCard([entry])}
+              <div className="flex flex-wrap items-center gap-2">{reviewCard([entry])}{adminRecordActions(entry)}</div>
             </div>
             <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">S.No</th><th className="p-3">Volunteer Name</th><th className="p-3">Role</th><th className="p-3">Attendance</th></tr></thead><tbody className="divide-y divide-border">
-              {records.map((record, index) => <tr key={record.volunteerId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.volunteerName}</td><td className="p-3">{record.role || 'Volunteer'}</td><td className={`p-3 font-semibold ${record.status === 'Present' ? 'text-emerald-700' : 'text-rose-700'}`}>{record.status}</td></tr>)}
-              {!records.length && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">No volunteer attendance rows were submitted.</td></tr>}
+              {displayedRecords.map((record, index) => <tr key={record.volunteerId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.volunteerName}</td><td className="p-3">{record.role || 'Volunteer'}</td><td className={`p-3 font-semibold ${record.status === 'Present' ? 'text-emerald-700' : 'text-rose-700'}`}>{editingAttendanceId === entry.id ? <select aria-label={`Attendance for ${record.volunteerName}`} value={record.status} onChange={(event) => setEditingVolunteerRecords((previous) => previous.map((item) => item.volunteerId === record.volunteerId ? { ...item, status: event.target.value as 'Present' | 'Absent' } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Present</option><option>Absent</option></select> : record.status}</td></tr>)}
+              {!displayedRecords.length && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">No volunteer attendance rows were submitted.</td></tr>}
             </tbody></table></div>
           </div>;
         })}
@@ -357,6 +415,16 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
 
       {panchayatId && !villageId && <section className="space-y-3">
         <div><h2 className="text-lg font-bold text-foreground">Villages · {activePanchayat?.name}</h2><p className="text-xs text-muted-foreground">Day {dayNumber} · {activeDay?.title}</p></div>
+        {allVillagesAttendance && <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+            <div><h3 className="font-bold text-foreground">All Villages · Day {dayNumber}</h3><p className="mt-1 text-xs text-muted-foreground">{allVillagesAttendance.presentCount || 0} present / {allVillagesAttendance.totalCount || allVillagesAttendance.records.length} students</p></div>
+            <div className="flex flex-wrap items-center gap-2">{reviewCard([allVillagesAttendance])}{adminRecordActions(allVillagesAttendance)}</div>
+          </div>
+          <div className="overflow-x-auto"><table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">S.No</th><th className="p-3">Student Name</th><th className="p-3">Standard</th><th className="p-3">Attendance</th><th className="p-3">Task</th></tr></thead><tbody className="divide-y divide-border">
+            {(editingAttendanceId === allVillagesAttendance.id ? editingStudentRecords : allVillagesAttendance.records).map((record, index) => <tr key={record.studentId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.studentName}</td><td className="p-3">{record.standard || '—'}</td><td className="p-3">{editingAttendanceId === allVillagesAttendance.id ? <select aria-label={`Attendance for ${record.studentName}`} value={record.status === 'Present' ? 'Present' : 'Absent'} onChange={(event) => setEditingStudentRecords((previous) => previous.map((item) => item.studentId === record.studentId ? { ...item, status: event.target.value as 'Present' | 'Absent' } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Present</option><option>Absent</option></select> : record.status}</td><td className="p-3">{editingAttendanceId === allVillagesAttendance.id ? <select aria-label={`Task completion for ${record.studentName}`} value={record.taskStatus || 'Not Completed'} onChange={(event) => setEditingStudentRecords((previous) => previous.map((item) => item.studentId === record.studentId ? { ...item, taskStatus: event.target.value as AttendanceRecord['taskStatus'] } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Completed</option><option>Not Completed</option><option>Not Marked</option></select> : record.taskStatus || '—'}</td></tr>)}
+            {!allVillagesAttendance.records.length && <tr><td colSpan={5} className="p-8 text-center text-muted-foreground">No attendance rows were submitted for this panchayat.</td></tr>}
+          </tbody></table></div>
+        </div>}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {villages.map((village) => {
             const entries = rowsForLocation(panchayatId, village.id || village.name);
@@ -381,11 +449,11 @@ export const SuperAdminAttendanceReviewView: React.FC<SuperAdminAttendanceReview
         </div>
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
           <div><h2 className="font-bold text-foreground">{activeVillage?.name || roster?.villageName || 'Village'} · Day {dayNumber}</h2><p className="text-xs text-muted-foreground">{activePanchayat?.name} · {activeCluster?.name} · {activeDay?.title}</p></div>
-          {reviewCard(selectedAttendance)}
+          <div className="flex flex-wrap items-center gap-2">{reviewCard(selectedAttendance)}{roster && adminRecordActions(roster)}</div>
         </div>
         <div className="overflow-x-auto rounded-2xl border border-border bg-card">
           <table className="w-full text-left text-xs"><thead className="bg-muted/50 text-muted-foreground"><tr><th className="p-3">S.No</th><th className="p-3">Name</th><th className="p-3">{isVolunteer ? 'Role' : 'Standard'}</th><th className="p-3">Attendance</th>{!isVolunteer && <th className="p-3">Task</th>}</tr></thead><tbody className="divide-y divide-border">
-            {isVolunteer ? volunteerRecords.map((record, index) => <tr key={record.volunteerId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.volunteerName}</td><td className="p-3">{record.role || 'Volunteer'}</td><td className="p-3"><span className={record.status === 'Present' ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{record.status}</span></td></tr>) : studentRecords.map((record, index) => <tr key={record.studentId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.studentName}</td><td className="p-3">{record.standard || '—'}</td><td className="p-3"><span className={record.status === 'Present' ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{record.status}</span></td><td className="p-3">{record.taskStatus || '—'}</td></tr>)}
+            {isVolunteer ? (editingAttendanceId === roster?.id ? editingVolunteerRecords : volunteerRecords).map((record, index) => <tr key={record.volunteerId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.volunteerName}</td><td className="p-3">{record.role || 'Volunteer'}</td><td className="p-3">{editingAttendanceId === roster?.id ? <select aria-label={`Attendance for ${record.volunteerName}`} value={record.status} onChange={(event) => setEditingVolunteerRecords((previous) => previous.map((item) => item.volunteerId === record.volunteerId ? { ...item, status: event.target.value as 'Present' | 'Absent' } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Present</option><option>Absent</option></select> : <span className={record.status === 'Present' ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{record.status}</span>}</td></tr>) : (editingAttendanceId === roster?.id ? editingStudentRecords : studentRecords).map((record, index) => <tr key={record.studentId}><td className="p-3 tabular-nums text-muted-foreground">{index + 1}</td><td className="p-3 font-semibold text-foreground">{record.studentName}</td><td className="p-3">{record.standard || '—'}</td><td className="p-3">{editingAttendanceId === roster?.id ? <select aria-label={`Attendance for ${record.studentName}`} value={record.status === 'Present' ? 'Present' : 'Absent'} onChange={(event) => setEditingStudentRecords((previous) => previous.map((item) => item.studentId === record.studentId ? { ...item, status: event.target.value as 'Present' | 'Absent' } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Present</option><option>Absent</option></select> : <span className={record.status === 'Present' ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{record.status}</span>}</td><td className="p-3">{editingAttendanceId === roster?.id ? <select aria-label={`Task completion for ${record.studentName}`} value={record.taskStatus || 'Not Completed'} onChange={(event) => setEditingStudentRecords((previous) => previous.map((item) => item.studentId === record.studentId ? { ...item, taskStatus: event.target.value as AttendanceRecord['taskStatus'] } : item))} className="rounded-md border border-border bg-background px-2 py-1"><option>Completed</option><option>Not Completed</option><option>Not Marked</option></select> : record.taskStatus || '—'}</td></tr>)}
             {!studentRecords.length && !volunteerRecords.length && <tr><td colSpan={isVolunteer ? 4 : 5} className="p-10 text-center text-muted-foreground">No attendance details have been submitted for this day.</td></tr>}
           </tbody></table>
         </div>

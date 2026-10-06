@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Check,
   X,
@@ -10,6 +10,7 @@ import {
   ShieldCheck,
 } from "./ui/icons";
 import { InputField, TextAreaField } from "./ui/Field";
+import { apiUrl } from "../utils/api";
 
 interface SettingsViewProps {
   currentUser?: {
@@ -22,7 +23,24 @@ interface SettingsViewProps {
     mailingAddress?: string;
   };
   onUpdateProfile?: (updated: any) => void;
+  financeOfficerName?: string;
+  canManageFinanceSettings?: boolean;
+  onSaveFinanceOfficerName?: (name: string) => Promise<void>;
+  authToken?: string;
+  canResetData?: boolean;
+  maintenance?: { enabled: boolean; title: string; message: string; expectedCompletion: string | null; showCountdown: boolean; autoDisable: boolean } | null;
+  onMaintenanceRefresh?: () => void;
+  resetHistoryVersion?: number;
+  onOpenResetData?: () => void;
+  onBackupRestored?: () => void;
 }
+
+const toLocalDateTimeInputValue = (value: string | null): string => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
 
 /**
  * Personal Information — Profile settings view.
@@ -37,6 +55,16 @@ interface SettingsViewProps {
 export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   onUpdateProfile,
+  financeOfficerName = "TQI Finance Team",
+  canManageFinanceSettings = false,
+  onSaveFinanceOfficerName,
+  authToken = "",
+  canResetData = false,
+  maintenance = null,
+  onMaintenanceRefresh,
+  resetHistoryVersion = 0,
+  onOpenResetData,
+  onBackupRestored,
 }) => {
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem("tqi_personal_settings");
@@ -72,6 +100,108 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [emailForm, setEmailForm] = useState(profile.email);
   const [phoneForm, setPhoneForm] = useState(profile.phone);
   const [addressForm, setAddressForm] = useState(profile.mailingAddress);
+  const [financeOfficerForm, setFinanceOfficerForm] = useState(financeOfficerName);
+  const [isSavingFinanceOfficer, setIsSavingFinanceOfficer] = useState(false);
+  const [resetHistory, setResetHistory] = useState<any[]>([]);
+  const [resetHistoryError, setResetHistoryError] = useState("");
+  const [expandedResetId, setExpandedResetId] = useState<string | null>(null);
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [backupMessage, setBackupMessage] = useState('');
+  const [backupError, setBackupError] = useState('');
+  const [restoreTarget, setRestoreTarget] = useState<any | null>(null);
+  const [restoreConfirmation, setRestoreConfirmation] = useState('');
+  const [maintenanceForm, setMaintenanceForm] = useState({
+    title: 'Website Under Maintenance',
+    message: 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.',
+    expectedCompletion: '',
+    showCountdown: true,
+    autoDisable: false,
+  });
+  const [maintenanceBusy, setMaintenanceBusy] = useState(false);
+  const [maintenanceDialogOpen, setMaintenanceDialogOpen] = useState(false);
+  const [maintenanceDraftOpen, setMaintenanceDraftOpen] = useState(false);
+
+  useEffect(() => {
+    if (!maintenance) return;
+    setMaintenanceForm({
+      title: maintenance.title || 'Website Under Maintenance',
+      message: maintenance.message || 'We are currently performing scheduled maintenance and system improvements. Please check back shortly.',
+      expectedCompletion: toLocalDateTimeInputValue(maintenance.expectedCompletion),
+      showCountdown: Boolean(maintenance.showCountdown),
+      autoDisable: Boolean(maintenance.autoDisable),
+    });
+  }, [maintenance]);
+
+  useEffect(() => {
+    if (!canResetData || !authToken) return;
+    const controller = new AbortController();
+    fetch(apiUrl('/api/admin/data-reset/history'), {
+      headers: { Authorization: `Bearer ${authToken}` },
+      cache: 'no-store',
+      signal: controller.signal,
+    }).then(async (response) => {
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to load reset history.');
+      setResetHistory(Array.isArray(data.history) ? data.history : []);
+      setResetHistoryError("");
+    }).catch((error) => {
+      if (!controller.signal.aborted) setResetHistoryError(error instanceof Error ? error.message : 'Unable to load reset history.');
+    });
+    return () => controller.abort();
+  }, [canResetData, authToken, resetHistoryVersion]);
+
+  const loadBackups = async () => {
+    if (!canResetData || !authToken) return;
+    const response = await fetch(apiUrl('/api/admin/backups'), { headers: { Authorization: `Bearer ${authToken}` }, cache: 'no-store' });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to load backups.');
+    setBackups(Array.isArray(data.backups) ? data.backups : []);
+  };
+
+  useEffect(() => {
+    if (!canResetData) return;
+    void loadBackups().catch((error) => setBackupError(error instanceof Error ? error.message : 'Unable to load backups.'));
+  }, [canResetData, authToken, resetHistoryVersion]);
+
+  const createBackupNow = async () => {
+    setBackupBusy(true); setBackupError(''); setBackupMessage('');
+    try {
+      const response = await fetch(apiUrl('/api/admin/backups'), { method: 'POST', headers: { Authorization: `Bearer ${authToken}` } });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to create backup.');
+      setBackupMessage(`Backup created: ${data.backup.id}`);
+      await loadBackups();
+    } catch (error) { setBackupError(error instanceof Error ? error.message : 'Unable to create backup.'); }
+    finally { setBackupBusy(false); }
+  };
+
+  const downloadBackup = async (backup: any) => {
+    setBackupError('');
+    try {
+      const response = await fetch(apiUrl(`/api/admin/backups/${encodeURIComponent(backup.id)}/download`), { headers: { Authorization: `Bearer ${authToken}` } });
+      if (!response.ok) throw new Error('Unable to download this backup.');
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement('a'); link.href = url; link.download = `${backup.id}.zip`; link.click(); URL.revokeObjectURL(url);
+    } catch (error) { setBackupError(error instanceof Error ? error.message : 'Unable to download backup.'); }
+  };
+
+  const restoreBackup = async () => {
+    if (!restoreTarget || restoreConfirmation !== 'RESTORE') return;
+    setBackupBusy(true); setBackupError(''); setBackupMessage('');
+    try {
+      const response = await fetch(apiUrl(`/api/admin/backups/${encodeURIComponent(restoreTarget.id)}/restore`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ confirmation: restoreConfirmation }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to restore backup.');
+      setBackupMessage(`Backup ${restoreTarget.id} restored. A safety backup (${data.safetyBackupId}) was created first. Protected users, settings, and audit logs were preserved.`);
+      setRestoreTarget(null); setRestoreConfirmation(''); onBackupRestored?.(); await loadBackups();
+    } catch (error) { setBackupError(error instanceof Error ? error.message : 'Unable to restore backup.'); }
+    finally { setBackupBusy(false); }
+  };
+
+  useEffect(() => setFinanceOfficerForm(financeOfficerName), [financeOfficerName]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -82,6 +212,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setProfile(newProfile);
     localStorage.setItem("tqi_personal_settings", JSON.stringify(newProfile));
     onUpdateProfile?.(newProfile);
+  };
+
+  const handleMaintenanceAction = async (mode: 'enable' | 'disable' | 'update') => {
+    if (!authToken || !currentUser || currentUser.role !== 'Super Admin') {
+      showToast('Only Super Admin can manage maintenance mode.');
+      return;
+    }
+    if (mode !== 'disable') {
+      const endTime = new Date(maintenanceForm.expectedCompletion).getTime();
+      if (!maintenanceForm.expectedCompletion || !Number.isFinite(endTime) || endTime <= Date.now()) {
+        showToast('Set a future maintenance end date and time to show the countdown.');
+        return;
+      }
+      if (!maintenanceForm.showCountdown) {
+        showToast('Enable the countdown timer so users can see when maintenance is expected to finish.');
+        return;
+      }
+    }
+    setMaintenanceBusy(true);
+    try {
+      const payload = {
+        title: maintenanceForm.title,
+        message: maintenanceForm.message,
+        expectedCompletion: maintenanceForm.expectedCompletion ? new Date(maintenanceForm.expectedCompletion).toISOString() : null,
+        showCountdown: maintenanceForm.showCountdown,
+        autoDisable: maintenanceForm.autoDisable,
+      };
+      const response = await fetch(apiUrl(mode === 'disable' ? '/api/system/maintenance/disable' : mode === 'enable' ? '/api/system/maintenance/enable' : '/api/system/maintenance'), {
+        method: mode === 'update' ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update maintenance settings.');
+      onMaintenanceRefresh?.();
+      showToast(data.message || 'Maintenance settings updated successfully.');
+      setMaintenanceDialogOpen(false);
+      setMaintenanceDraftOpen(false);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Unable to update maintenance settings.');
+    } finally {
+      setMaintenanceBusy(false);
+    }
   };
 
   const handleSaveBasic = (e: React.FormEvent) => {
@@ -118,6 +291,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     showToast(
       addressForm.trim() ? "Mailing address saved" : "Mailing address removed",
     );
+  };
+
+  const handleSaveFinanceOfficer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const value = financeOfficerForm.trim().replace(/\s+/g, " ");
+    if (!value || !onSaveFinanceOfficerName) return;
+    setIsSavingFinanceOfficer(true);
+    try {
+      await onSaveFinanceOfficerName(value);
+      showToast("Finance officer name saved and will autofill finance statements");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Unable to save finance settings");
+    } finally {
+      setIsSavingFinanceOfficer(false);
+    }
   };
 
   // Inline edit link — pencil + label, brand-tinted on hover
@@ -260,6 +448,127 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       <div className="space-y-6">
+        {canResetData && (
+          <section className="tqi-card border border-red-200 dark:border-red-900/70" style={{ padding: "1.5rem 1.75rem" }}>
+            <div className="mb-4 flex flex-col gap-4 border-b pb-4" style={{ borderColor: "var(--border-subtle)" }}>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#0B3D91]">System Settings</div>
+                  <h2 className="mt-1 text-lg font-black text-[#0B3D91]">Website Maintenance Mode</h2>
+                </div>
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] ${maintenance?.enabled ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                  <span className={`h-2.5 w-2.5 rounded-full ${maintenance?.enabled ? 'bg-red-600' : 'bg-emerald-600'}`} />
+                  {maintenance?.enabled ? 'Maintenance mode active' : 'Website is live'}
+                </span>
+              </div>
+              <p className="text-sm text-slate-600">Temporarily disable access to the TQI application while system maintenance, updates, bug fixes or deployments are in progress.</p>
+            </div>
+
+            {maintenance?.enabled ? (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-black text-red-800"><span className="text-lg">🔴</span> MAINTENANCE MODE ACTIVE</div>
+                  <p className="mt-2 text-sm text-red-700">Normal users are currently blocked from accessing the application.</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Maintenance until</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900">{maintenance.expectedCompletion ? new Date(maintenance.expectedCompletion).toLocaleString() : 'End time not set — edit settings to add a countdown'}</div>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Auto disable</div>
+                    <div className="mt-2 text-sm font-semibold text-slate-900">{maintenance.autoDisable ? 'Enabled' : 'Disabled'}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <button type="button" onClick={() => void handleMaintenanceAction('disable')} disabled={maintenanceBusy} className="rounded-lg bg-red-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-60">{maintenanceBusy ? 'Updating…' : 'Disable Maintenance Mode'}</button>
+                  <button type="button" onClick={() => setMaintenanceDraftOpen(true)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">Edit Settings</button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex items-center gap-2 text-sm font-black text-emerald-800"><span className="text-lg">🟢</span> WEBSITE IS LIVE</div>
+                  <p className="mt-2 text-sm text-emerald-700">All users can currently access the application.</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+                  Super Admin will continue to have full access to the application even when maintenance mode is enabled.
+                </div>
+                <button type="button" onClick={() => setMaintenanceDialogOpen(true)} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#092d67]">Enable Maintenance Mode</button>
+              </div>
+            )}
+          </section>
+        )}
+
+        {canResetData && <section className="tqi-card border border-blue-200 dark:border-blue-900/70" style={{ padding: "1.5rem 1.75rem" }}>
+          <div className="mb-4 flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--border-subtle)" }}>
+            <div><h2 className="font-bold tracking-tight text-blue-900 dark:text-blue-200" style={{ fontSize: "1.0625rem" }}>Operational Backup &amp; Restore</h2><p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>Automatic daily backups are stored on the backend. Snapshots preserve operational tables and uploads; accounts, passwords, settings, academic setup, and audit logs are excluded.</p></div>
+            <button type="button" onClick={() => void createBackupNow()} disabled={backupBusy} className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50">{backupBusy ? 'Working…' : 'Create Backup Now'}</button>
+          </div>
+          {backupMessage && <p role="status" className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{backupMessage}</p>}
+          {backupError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{backupError}</p>}
+          {backups.length === 0 ? <p className="py-4 text-center text-xs" style={{ color: "var(--text-muted)" }}>No backups available yet. The first automatic snapshot is created when the backend starts.</p> : <div className="overflow-x-auto">
+            <table className="w-full min-w-[700px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}><th className="py-2 pr-3">Created</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">Snapshot Size</th><th className="py-2 pr-3">Upload Files</th><th className="py-2">Actions</th></tr></thead><tbody>{backups.map((backup) => <tr key={backup.id} className="border-b last:border-0" style={{ borderColor: "var(--border-subtle)" }}><td className="py-3 pr-3">{new Date(backup.createdAt).toLocaleString()}</td><td className="py-3 pr-3 capitalize">{backup.kind}</td><td className="py-3 pr-3">{(Number(backup.bytes || 0) / 1024 / 1024).toFixed(2)} MB</td><td className="py-3 pr-3">{backup.includesUploads ? 'Included' : 'No uploads'}</td><td className="py-3"><div className="flex gap-2"><button type="button" onClick={() => void downloadBackup(backup)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-[11px] font-semibold dark:border-gray-700">Download</button><button type="button" onClick={() => { setRestoreTarget(backup); setRestoreConfirmation(''); setBackupError(''); }} className="rounded-md border border-amber-300 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:text-amber-200">Restore</button></div></td></tr>)}</tbody></table>
+          </div>}
+        </section>}
+
+        {canResetData && <section className="tqi-card border border-red-200 dark:border-red-900/70" style={{ padding: "1.5rem 1.75rem" }}>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="font-bold tracking-tight text-red-800 dark:text-red-300" style={{ fontSize: "1.0625rem" }}>Administration &amp; Data Reset</h2>
+              <p className="mt-1 max-w-2xl text-xs" style={{ color: "var(--text-muted)" }}>Reset only a selected operational module and scope. The Super Admin account, authentication, settings, role permissions, and audit logs are protected.</p>
+            </div>
+            <button type="button" onClick={onOpenResetData} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
+              <span aria-hidden="true">⚠</span> Reset Data
+            </button>
+          </div>
+        </section>}
+
+        {canManageFinanceSettings && <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
+          <div className="mb-4 border-b pb-3" style={{ borderColor: "var(--border-subtle)" }}>
+            <h2 className="font-bold tracking-tight" style={{ fontSize: "1.0625rem", color: "var(--text)" }}>Finance statement setup</h2>
+            <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>This finance officer name is autofilled on finance forms and downloaded statements.</p>
+          </div>
+          <form onSubmit={(event) => void handleSaveFinanceOfficer(event)} className="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
+            <label className="flex-1 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Finance officer name
+              <input required value={financeOfficerForm} onChange={(event) => setFinanceOfficerForm(event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" placeholder="Finance officer name" />
+            </label>
+            <button type="submit" disabled={isSavingFinanceOfficer || !financeOfficerForm.trim()} className="tqi-btn-primary disabled:opacity-50">{isSavingFinanceOfficer ? "Saving…" : "Save finance setup"}</button>
+          </form>
+        </section>}
+
+        {canResetData && <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
+          <div className="mb-4 flex items-center justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--border-subtle)" }}>
+            <div>
+              <h2 className="font-bold tracking-tight" style={{ fontSize: "1.0625rem", color: "var(--text)" }}>Reset History</h2>
+              <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>Recent scoped reset attempts recorded in the protected audit log.</p>
+            </div>
+          </div>
+          {resetHistoryError ? <p role="alert" className="text-xs text-red-700">{resetHistoryError}</p> : resetHistory.length === 0 ? <p className="py-5 text-center text-xs" style={{ color: "var(--text-muted)" }}>No reset operations recorded.</p> : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] text-left text-xs">
+                <thead><tr className="border-b text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}><th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Admin</th><th className="py-2 pr-3">Module</th><th className="py-2 pr-3">Scope</th><th className="py-2 pr-3">Records</th><th className="py-2 pr-3">Status</th><th className="py-2">Action</th></tr></thead>
+                <tbody>{resetHistory.map((item) => <React.Fragment key={item.id}>
+                  <tr className="border-b" style={{ borderColor: "var(--border-subtle)" }}>
+                    <td className="py-3 pr-3 whitespace-nowrap">{item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}</td>
+                    <td className="py-3 pr-3">{item.adminName || 'Super Admin'}</td>
+                    <td className="py-3 pr-3">{item.moduleLabel || item.module || '—'}</td>
+                    <td className="py-3 pr-3">{item.scopeLabel || item.scope || '—'}</td>
+                    <td className="py-3 pr-3 tabular-nums">{Number(item.records || 0)}{String(item.module || '').startsWith('finance') && <span className="text-[10px] opacity-70"> ({Number(item.expenses || 0)} expenses · {Number(item.bills || 0)} bills)</span>}{Number(item.relatedRecords || 0) > 0 && <span className="text-[10px] opacity-70"> · {Number(item.relatedRecords || 0)} related</span>}</td>
+                    <td className="py-3 pr-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${String(item.status).startsWith('SUCCESS') ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300'}`}>{item.status || 'UNKNOWN'}</span></td>
+                    <td className="py-3"><button type="button" onClick={() => setExpandedResetId((current) => current === item.id ? null : item.id)} className="font-semibold text-blue-700 hover:underline dark:text-blue-300">{expandedResetId === item.id ? 'Hide' : 'Details'}</button></td>
+                  </tr>
+                  {expandedResetId === item.id && <tr className="border-b bg-gray-50/70 dark:bg-gray-800/40" style={{ borderColor: "var(--border-subtle)" }}><td colSpan={7} className="px-3 py-3 text-[11px]">
+                    <div className="grid gap-2 sm:grid-cols-2"><div><strong>Reset ID:</strong> {item.resetId || '—'}</div><div><strong>Admin ID:</strong> {item.adminId || '—'}</div><div><strong>Client IP:</strong> {item.ip || 'Not available'}</div><div><strong>Device:</strong> {item.userAgent || 'Not available'}</div></div>
+                    {item.error && <p className="mt-2 text-red-700"><strong>Error:</strong> {item.error}</p>}
+                    {Array.isArray(item.fileCleanupErrors) && item.fileCleanupErrors.length > 0 && <p className="mt-2 text-amber-700"><strong>File cleanup:</strong> {item.fileCleanupErrors.join(' ')}</p>}
+                  </td></tr>}
+                </React.Fragment>)}</tbody>
+              </table>
+            </div>
+          )}
+        </section>}
+
         {/* Basic Information */}
         <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
           <div
@@ -667,6 +976,102 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </section>
       </div>
+      {maintenanceDialogOpen && (
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF7A00]">Website Maintenance</div>
+                <h2 id="maintenance-title" className="mt-1 text-xl font-black text-[#0B3D91]">Enable Maintenance Mode?</h2>
+              </div>
+              <button type="button" onClick={() => setMaintenanceDialogOpen(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100"> <X size={16} /> </button>
+            </div>
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              This will temporarily prevent normal users from accessing the TQI application.
+            </div>
+            <div className="mt-4 text-sm text-slate-600">
+              Affected users:
+              <ul className="mt-2 list-disc space-y-1 pl-5">
+                <li>Cluster Admin</li>
+                <li>Financer</li>
+                <li>Volunteer</li>
+                <li>Other normal users</li>
+              </ul>
+            </div>
+            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+              Super Admin will continue to have access.
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Title
+                <input value={maintenanceForm.title} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" placeholder="Website Under Maintenance" />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Message
+                <textarea value={maintenanceForm.message} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))} rows={4} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" placeholder="We are currently performing scheduled maintenance and system improvements. Please check back shortly." />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Expected Completion Date &amp; Time
+                <input type="datetime-local" value={maintenanceForm.expectedCompletion} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
+              </label>
+
+              <div className="space-y-2 text-sm text-slate-700">
+                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.showCountdown} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))} /> Show Countdown Timer</label>
+                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.autoDisable} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))} /> Automatically disable maintenance mode at the scheduled time</label>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setMaintenanceDialogOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700">Cancel</button>
+              <button type="button" disabled={maintenanceBusy} onClick={() => void handleMaintenanceAction('enable')} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{maintenanceBusy ? 'Enabling…' : 'Enable Maintenance Mode'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {maintenanceDraftOpen && (
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="maintenance-edit-title">
+          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF7A00]">Website Maintenance</div>
+                <h2 id="maintenance-edit-title" className="mt-1 text-xl font-black text-[#0B3D91]">Edit Maintenance Settings</h2>
+              </div>
+              <button type="button" onClick={() => setMaintenanceDraftOpen(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100"> <X size={16} /> </button>
+            </div>
+            <div className="mt-5 space-y-4">
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Title
+                <input value={maintenanceForm.title} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Message
+                <textarea value={maintenanceForm.message} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))} rows={4} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Expected Completion Date &amp; Time
+                <input type="datetime-local" value={maintenanceForm.expectedCompletion} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
+              </label>
+              <div className="space-y-2 text-sm text-slate-700">
+                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.showCountdown} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))} /> Show Countdown Timer</label>
+                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.autoDisable} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))} /> Automatically disable maintenance mode at the scheduled time</label>
+              </div>
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" onClick={() => setMaintenanceDraftOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700">Cancel</button>
+              <button type="button" disabled={maintenanceBusy} onClick={() => void handleMaintenanceAction('update')} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{maintenanceBusy ? 'Saving…' : 'Save Settings'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {restoreTarget && (
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="restore-backup-title">
+          <div className="w-full max-w-lg space-y-4 rounded-2xl border border-amber-300 bg-white p-5 shadow-2xl dark:border-amber-900 dark:bg-gray-900">
+            <h2 id="restore-backup-title" className="text-base font-bold text-gray-900 dark:text-white">Restore Operational Backup?</h2>
+            <p className="text-xs text-gray-600 dark:text-gray-300">This replaces operational records with the snapshot from {new Date(restoreTarget.createdAt).toLocaleString()}. User accounts, password hashes, system settings, academic setup, and audit logs are excluded and will remain unchanged.</p>
+            <p className="text-xs font-semibold">Records in the snapshot: {Object.values(restoreTarget.counts || {}).map((value) => Number(value || 0)).reduce((sum, value) => sum + value, 0)}</p>
+            {backupError && <p role="alert" className="rounded-lg bg-red-50 p-2.5 text-xs text-red-800">{backupError}</p>}
+            <label className="block text-xs font-semibold">Type <span className="font-mono text-red-700">RESTORE</span> to proceed<input autoComplete="off" value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value)} className="mt-1.5 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 font-mono dark:border-gray-700" placeholder="RESTORE" /></label>
+            <div className="flex justify-end gap-2"><button type="button" disabled={backupBusy} onClick={() => { setRestoreTarget(null); setRestoreConfirmation(''); setBackupError(''); }} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold dark:border-gray-700">Cancel</button><button type="button" disabled={backupBusy || restoreConfirmation !== 'RESTORE'} onClick={() => void restoreBackup()} className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{backupBusy ? 'Restoring…' : 'Restore Backup'}</button></div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

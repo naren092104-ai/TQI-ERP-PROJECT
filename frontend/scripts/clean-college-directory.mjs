@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sourcePath = path.join(root, 'frontend', 'src', 'data', 'tamilNaduColleges.json');
 const backupPath = path.join(root, 'frontend', 'src', 'data', 'tamilNaduColleges.raw-backup.json');
 const reportPath = path.join(root, 'docs', 'college-data-quality-report.md');

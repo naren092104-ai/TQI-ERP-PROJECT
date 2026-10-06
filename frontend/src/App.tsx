@@ -55,6 +55,8 @@ import SessionSubmissionView from './components/SessionSubmissionView';
 import { apiUrl } from './utils/api';
 import { CommandPalette } from './components/ui/CommandPalette';
 import { NotFoundView } from './components/NotFoundView';
+import { DataResetModal } from './components/DataResetModal';
+import { MaintenancePage } from './components/MaintenancePage';
 
 const KNOWN_TABS: Set<string> = new Set([
   'dashboard', 'academic-setup', 'approvals', 'clusters', 'audit-logs', 'users',
@@ -113,11 +115,18 @@ export default function App() {
   const [initialStudentFilters, setInitialStudentFilters] = useState<{ panchayatId?: string; villageId?: string } | undefined>(undefined);
   const [activeDraftId, setActiveDraftId] = useState<string | undefined>(undefined);
   const [activeFinanceDraftId, setActiveFinanceDraftId] = useState<string | undefined>(undefined);
+  const [activeFinanceClusterId, setActiveFinanceClusterId] = useState<string | undefined>(undefined);
+  const [maintenanceState, setMaintenanceState] = useState<{ enabled: boolean; title: string; message: string; expectedCompletion: string | null; showCountdown: boolean; autoDisable: boolean } | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceCheckedToken, setMaintenanceCheckedToken] = useState<string | null>(null);
   const [openNewFinanceModal, setOpenNewFinanceModal] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
   const [selectedLessonPlanId, setSelectedLessonPlanId] = useState<string | undefined>(undefined);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
+  const [isResetModalOpen, setIsResetModalOpen] = useState(false);
+  const [suggestedResetModule, setSuggestedResetModule] = useState<string | undefined>();
+  const [resetHistoryVersion, setResetHistoryVersion] = useState(0);
 
   // Global ⌘K / Ctrl+K to open the command palette
   useEffect(() => {
@@ -143,6 +152,41 @@ export default function App() {
     }
   }, [currentTab, currentUserRole]);
 
+  useEffect(() => {
+    if (!currentUser) {
+      return;
+    }
+    try {
+      const sessionToStore: AuthSession = {
+        ...currentUser,
+        role: normalizeUserRole(currentUser.role),
+        clusterId: currentUser.clusterId || 'all',
+      };
+      localStorage.setItem('tqi_auth_session', JSON.stringify(sessionToStore));
+    } catch {
+      // ignore storage failures
+    }
+  }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser?.token) return;
+    const verifyPasswordState = async () => {
+      try {
+        const response = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${currentUser.token}` }, cache: 'no-store' });
+        const data = await response.json().catch(() => null);
+        if (data?.user?.mustChangePassword) {
+          localStorage.removeItem('tqi_auth_session');
+          setCurrentUser(null);
+        }
+      } catch {
+        // Brief network failures should not sign the user out.
+      }
+    };
+    void verifyPasswordState();
+    const timer = window.setInterval(() => void verifyPasswordState(), 30_000);
+    return () => window.clearInterval(timer);
+  }, [currentUser?.token]);
+
   // Core Data Collections (clean initial state from DB)
   const [clusters, setClusters] = useState<Cluster[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -155,6 +199,7 @@ export default function App() {
   const [attendanceSessions, setAttendanceSessions] = useState<AttendanceSession[]>([]);
   const [financeEntries, setFinanceEntries] = useState<FinanceEntry[]>([]);
   const [financeDrafts, setFinanceDrafts] = useState<FinanceDraft[]>([]);
+  const [financeOfficerName, setFinanceOfficerName] = useState('TQI Finance Team');
   const [lessonPlans, setLessonPlans] = useState<LessonPlan[]>([]);
   const [photoGroups, setPhotoGroups] = useState<SessionPhotoGroup[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -215,6 +260,15 @@ export default function App() {
             setCurrentUser(null);
             return null;
           }
+          if (response.status === 403) {
+            return response.json().then((data) => {
+              if (data?.code === 'PASSWORD_CHANGE_REQUIRED') {
+                localStorage.removeItem('tqi_auth_session');
+                setCurrentUser(null);
+              }
+              return null;
+            }).catch(() => null);
+          }
           return response.ok ? response.json() : null;
         })
         .catch(() => null);
@@ -238,6 +292,7 @@ export default function App() {
         sessionSubmissionsRes,
         academicYearsRes,
         modulesRes,
+        financeSettingsRes,
       ] = await Promise.all([
         get(`/api/panchayats?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/students?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
@@ -249,13 +304,14 @@ export default function App() {
         get(`/api/approvals?clusterId=${currentUserClusterId}`),
         get(`/api/audit-logs?clusterId=${currentUserClusterId}`),
         get('/api/notifications'),
-        get('/api/clusters'),
+        get(`/api/clusters?includeArchived=true&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         currentUserRole === 'Super Admin' ? get('/api/users') : Promise.resolve({ users: [] }),
         get('/api/date-change-requests'),
         get('/api/session-reports'),
         get('/api/session-submissions'),
         get('/api/academic-years'),
         get(`/api/modules?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get('/api/settings/finance'),
       ]);
 
       if (signal.aborted) return;
@@ -266,6 +322,7 @@ export default function App() {
       if (Array.isArray(sessionsRes?.sessions))             setSessions(sessionsRes.sessions);
       if (Array.isArray(attendanceRes?.attendanceSessions)) setAttendanceSessions(attendanceRes.attendanceSessions);
       if (Array.isArray(financeRes?.financeEntries))        setFinanceEntries(financeRes.financeEntries);
+      if (Array.isArray(financeRes?.financeDrafts))         setFinanceDrafts(financeRes.financeDrafts);
       if (Array.isArray(lessonPlansRes?.lessonPlans))       setLessonPlans(lessonPlansRes.lessonPlans);
       if (Array.isArray(approvalsRes?.approvals))           setApprovals(approvalsRes.approvals);
       if (Array.isArray(auditRes?.auditLogs))               setAuditLogs(auditRes.auditLogs);
@@ -275,6 +332,7 @@ export default function App() {
       }
       if (Array.isArray(clustersRes?.clusters))             setClusters(uniqueById(clustersRes.clusters));
       if (Array.isArray(usersRes?.users))                   setUsers(uniqueById(usersRes.users));
+      if (typeof financeSettingsRes?.financeOfficerName === 'string') setFinanceOfficerName(financeSettingsRes.financeOfficerName);
       if (Array.isArray(dateChangeRequestsRes?.dateChangeRequests)) setDateChangeRequests(dateChangeRequestsRes.dateChangeRequests);
       else if (Array.isArray(dateChangeRequestsRes?.data)) setDateChangeRequests(dateChangeRequestsRes.data);
 
@@ -331,10 +389,41 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser?.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
+    if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
     const controller = new AbortController();
     fetchBackendData(controller.signal);
     return () => controller.abort();
-  }, [fetchBackendData, currentUser?.token]);
+  }, [fetchBackendData, currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
+
+  useEffect(() => {
+    if (!currentUser?.token) {
+      setMaintenanceState(null);
+      setMaintenanceCheckedToken(null);
+      return;
+    }
+    const controller = new AbortController();
+    const loadMaintenance = async () => {
+      setMaintenanceLoading(true);
+      try {
+        const response = await fetch(apiUrl('/api/system/maintenance'), {
+          headers: { Authorization: `Bearer ${currentUser.token}` },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) return;
+        setMaintenanceState(data.maintenance || null);
+      } catch {
+        // Ignore transient maintenance fetch failures while keeping the current app visible.
+      } finally {
+        if (!controller.signal.aborted) setMaintenanceCheckedToken(currentUser.token);
+        setMaintenanceLoading(false);
+      }
+    };
+    void loadMaintenance();
+    return () => controller.abort();
+  }, [currentUser?.token]);
 
   useEffect(() => {
     if (!currentUser?.token) return;
@@ -722,11 +811,25 @@ export default function App() {
     setUsers((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleResetPassword = async (id: string, password: string) => {
-    const response = await fetch(apiUrl(`/api/users/${id}/reset-password`), { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` }, body: JSON.stringify({ password }) });
+  const handleResetPassword = async (id: string) => {
+    const response = await fetch(apiUrl(`/api/users/${id}/reset-password`), { method: 'POST', headers: { Authorization: `Bearer ${currentUser?.token || ''}` } });
     const data = await response.json();
-    if (!response.ok || !data.success) return;
-    setUsers((prev) => prev.map((item) => item.id === id ? { ...item, mustChangePassword: false } : item));
+    if (!response.ok || !data.success) throw new Error(data?.error || 'Unable to reset password.');
+    if (data.user) setUsers((prev) => prev.map((item) => item.id === id ? { ...item, ...data.user } : item));
+    await fetchBackendData(new AbortController().signal);
+    return { temporaryPassword: String(data.temporaryPassword), user: data.user };
+  };
+
+  const handleAdminChangePassword = async (id: string, password: string) => {
+    const response = await fetch(apiUrl(`/api/users/${encodeURIComponent(id)}/change-password`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser?.token || ''}` },
+      body: JSON.stringify({ password }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to change user password.');
+    setUsers((prev) => prev.map((item) => item.id === id ? { ...item, mustChangePassword: false, passwordChangedAt: new Date().toISOString(), passwordStatus: 'SET' } : item));
+    await fetchBackendData(new AbortController().signal);
   };
 
   // Navigation handlers
@@ -763,7 +866,17 @@ export default function App() {
     }
     if (tab === 'finance-statement') {
       if (targetId) {
-        setActiveFinanceDraftId(targetId);
+        const scopedTarget = targetId.match(/^finance:([^:]+):(.+)$/);
+        if (scopedTarget) {
+          setActiveFinanceClusterId(scopedTarget[1]);
+          setActiveFinanceDraftId(scopedTarget[2]);
+        } else {
+          setActiveFinanceClusterId(undefined);
+          setActiveFinanceDraftId(targetId);
+        }
+      } else {
+        setActiveFinanceClusterId(undefined);
+        setActiveFinanceDraftId(undefined);
       }
       setCurrentTab('finance-statement');
       return;
@@ -1339,6 +1452,49 @@ export default function App() {
       : attendance));
   };
 
+  const handleAdminEditAttendance = async (
+    attendanceId: string,
+    records: AttendanceSession['records'],
+    volunteerAttendance: NonNullable<AttendanceSession['volunteerAttendance']>,
+  ) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to edit attendance.');
+    const attendance = attendanceSessions.find((item) => item.id === attendanceId);
+    const response = await fetch(apiUrl(`/api/attendance/${encodeURIComponent(attendanceId)}/admin-edit`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({
+        academicYearId: selectedAcademicYearId,
+        records,
+        volunteerAttendance,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save attendance changes.');
+    setAttendanceSessions((previous) => previous.map((item) => item.id === attendanceId
+      ? {
+          ...item,
+          records: attendance?.attendanceType === 'volunteers' ? item.records : records,
+          volunteerAttendance: attendance?.attendanceType === 'volunteers' ? volunteerAttendance : item.volunteerAttendance,
+          totalCount: data.totalCount,
+          presentCount: data.presentCount,
+          absentCount: Math.max(0, data.totalCount - data.presentCount),
+          tasksCompletedCount: data.taskCompletedCount,
+        }
+      : item));
+  };
+
+  const handleAdminDeleteAttendance = async (attendanceId: string) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to delete attendance.');
+    const response = await fetch(apiUrl(`/api/attendance/${encodeURIComponent(attendanceId)}?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete this attendance submission.');
+    setAttendanceSessions((previous) => previous.filter((item) => item.id !== attendanceId));
+    setApprovals((previous) => previous.filter((item) => !(item.module === 'Attendance' && item.recordId === attendanceId)));
+  };
+
   // Finance mutations
   const handleAddFinanceEntry = async (entry: Omit<FinanceEntry, 'id'>) => {
     const created: FinanceEntry = {
@@ -1349,7 +1505,7 @@ export default function App() {
 
     if (currentUser?.token) {
       try {
-        await fetch(apiUrl('/api/finance'), {
+        const response = await fetch(apiUrl('/api/finance'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -1360,21 +1516,62 @@ export default function App() {
             clusterId: currentUserClusterId,
           }),
         });
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data?.success) {
+          throw new Error(data?.error || 'Unable to save finance entry.');
+        }
+        setFinanceEntries((previous) => previous.map((entry) => entry.id === created.id
+          ? { ...entry, status: data.financeEntry?.status || entry.status }
+          : entry));
       } catch (err) {
         console.error('Failed to persist finance entry to backend:', err);
+        setFinanceEntries((prev) => prev.filter((item) => item.id !== created.id));
+        throw err;
       }
     }
   };
 
-  const handleUpdateFinanceEntry = (id: string, updated: Partial<FinanceEntry>) => {
-    setFinanceEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...updated } : e)));
+  const handleUpdateFinanceEntry = async (id: string, updated: Partial<FinanceEntry>) => {
+    const existing = financeEntries.find((entry) => entry.id === id);
+    if (!existing) throw new Error('Finance entry was not found. Refresh and try again.');
+    const merged = { ...existing, ...updated, id };
+    if (!currentUser?.token) throw new Error('Sign in again before updating finance.');
+    const response = await fetch(apiUrl('/api/finance'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ ...merged, clusterId: merged.clusterId || currentUserClusterId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update finance entry.');
+    const savedEntry = { ...merged, status: data.financeEntry?.status || merged.status };
+    setFinanceEntries((prev) => prev.map((entry) => (entry.id === id ? savedEntry : entry)));
+    if (existing.draftId && savedEntry.status === 'Draft') {
+      setFinanceDrafts((prev) => prev.map((draft) => draft.id === existing.draftId
+        ? { ...draft, status: 'Draft', reportStatus: 'DRAFT' }
+        : draft));
+    }
   };
 
-  const handleDeleteFinanceEntry = (id: string) => {
+  const handleDeleteFinanceEntry = async (id: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before deleting a finance entry.');
+    const response = await fetch(apiUrl(`/api/finance/${encodeURIComponent(id)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete finance entry.');
     setFinanceEntries((prev) => prev.filter((e) => e.id !== id));
   };
 
-  const handleSaveFinanceDraft = (draft: FinanceDraft) => {
+  const handleSaveFinanceDraft = async (draft: FinanceDraft) => {
+    if (!currentUser?.token) throw new Error('Sign in again before saving this finance report.');
+    const response = await fetch(apiUrl('/api/finance/reports'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ report: draft }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save finance report.');
     setFinanceDrafts((prev) => {
       const idx = prev.findIndex((d) => d.id === draft.id);
       if (idx >= 0) {
@@ -1384,38 +1581,134 @@ export default function App() {
       }
       return [draft, ...prev];
     });
+    await fetchBackendData(new AbortController().signal);
   };
 
-  const handleDeleteFinanceDraft = (draftId: string) => {
-    setFinanceDrafts((prev) => prev.filter((d) => d.id !== draftId));
-  };
-
-  const handleSubmitFinanceDraft = (draftId: string) => {
-    setFinanceDrafts((prev) =>
-      prev.map((d) => (d.id === draftId ? { ...d, status: 'Pending' } : d))
-    );
-    setFinanceEntries((prev) =>
-      prev.map((e) => (e.draftId === draftId ? { ...e, status: 'Pending' } : e))
-    );
-
-    const targetDraft = financeDrafts.find((d) => d.id === draftId);
-    const newAppr: ApprovalItem = {
-      id: `appr-${Date.now()}`,
-      module: 'Finance',
-      recordId: draftId,
-      recordTitle: targetDraft?.title || 'Finance Claim Voucher',
-      clusterId: currentUserClusterId,
-      clusterName: 'Dharmapuri Cluster',
-      submittedBy: 'Dharmapuri Cluster Admin',
-      submittedAt: 'Just now',
-      status: 'Pending',
-      details: {
-        totalAmount: targetDraft?.totalAmount || 0,
-        itemCount: targetDraft?.routes?.length || 1,
-        spocName: 'Admin',
+  const handleRequestFinanceEdit = async (entryId: string, reason: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before requesting a finance edit.');
+    const response = await fetch(apiUrl(`/api/finance/${encodeURIComponent(entryId)}/request-edit`), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser.token}`,
       },
-    };
-    setApprovals((prev) => [newAppr, ...prev]);
+      body: JSON.stringify({ reason }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Unable to request a finance edit approval.');
+    }
+
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleReviewFinanceEditRequest = async (draftId: string, action: 'approve' | 'reject', reason?: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before reviewing finance edit requests.');
+    const response = await fetch(apiUrl(`/api/finance/reports/${encodeURIComponent(draftId)}/edit-request`), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ action, reason }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to review finance edit request.');
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleDeleteFinanceDraft = async (draftId: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before deleting this draft.');
+    const response = await fetch(apiUrl(`/api/finance/reports/${encodeURIComponent(draftId)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete finance draft.');
+    setFinanceDrafts((prev) => prev.filter((d) => d.id !== draftId));
+    setFinanceEntries((prev) => prev.filter((entry) => entry.draftId !== draftId));
+  };
+
+  const handleSaveFinanceOfficerName = async (name: string) => {
+    if (!currentUser?.token) throw new Error('You must be signed in to update finance settings.');
+    const response = await fetch(apiUrl('/api/settings/finance'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ financeOfficerName: name }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save the finance officer name.');
+    setFinanceOfficerName(data.financeOfficerName);
+  };
+
+  const handleSubmitFinanceDraft = async (draftId: string, missingBillReason?: string) => {
+    if (!currentUser?.token) throw new Error('Sign in again before submitting finance.');
+    const targetDraft = financeDrafts.find((draft) => draft.id === draftId);
+    let groupedEntries = financeEntries.filter((entry) => entry.draftId === draftId);
+
+    if (!groupedEntries.length) {
+      const draftResponse = await fetch(apiUrl(`/api/finance?draftId=${encodeURIComponent(draftId)}`), {
+        headers: { Authorization: `Bearer ${currentUser.token}` },
+      });
+      const draftData = await draftResponse.json().catch(() => null);
+      if (draftResponse.ok && Array.isArray(draftData?.financeEntries)) {
+        groupedEntries = draftData.financeEntries;
+      }
+    }
+
+    const clusterId = targetDraft?.clusterId || groupedEntries[0]?.clusterId || currentUserClusterId;
+    const response = await fetch(apiUrl('/api/finance/submit'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({
+        draftId,
+        clusterId,
+        academicYearId: selectedAcademicYearId,
+        entryIds: groupedEntries.map((entry) => entry.id),
+        entries: groupedEntries.map((entry) => ({
+          id: entry.id,
+          amount: Number(entry.amount || 0),
+          billUrl: entry.billUrl || undefined,
+          billDetectedAmount: entry.billDetectedAmount != null ? Number(entry.billDetectedAmount) : undefined,
+        })),
+        missingBillReason: missingBillReason?.trim() || undefined,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) {
+      throw new Error(data?.error || 'Unable to submit finance for approval.');
+    }
+
+    setFinanceDrafts((previous) => previous.map((draft) => draft.id === draftId ? { ...draft, status: 'Pending' } : draft));
+    setFinanceEntries((previous) => previous.map((entry) =>
+      entry.draftId === draftId ? { ...entry, status: 'Pending' } : entry
+    ));
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleApproveFinanceReport = async (draftId?: string) => {
+    if (!draftId) return;
+    const approval = approvals.find((item) => item.module === 'Finance' && item.recordId === draftId && item.status === 'Pending');
+    if (!approval || !currentUser?.token) throw new Error('Pending finance approval was not found. Refresh and try again.');
+    const response = await fetch(apiUrl(`/api/approvals/${encodeURIComponent(approval.id)}/approve`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to approve finance report.');
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleRejectFinanceReport = async (draftId?: string, reason?: string) => {
+    if (!draftId) return;
+    const approval = approvals.find((item) => item.module === 'Finance' && item.recordId === draftId && item.status === 'Pending');
+    if (!approval || !currentUser?.token) throw new Error('Pending finance approval was not found. Refresh and try again.');
+    const response = await fetch(apiUrl(`/api/approvals/${encodeURIComponent(approval.id)}/reject`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ reason: reason || 'No reason provided' }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to reject finance report.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   // Lesson Plan mutations
@@ -1760,9 +2053,12 @@ export default function App() {
     ? attendanceSessions
     : attendanceSessions.filter((a) => displayPanchayatIds.has(a.panchayatId) || a.clusterId === currentUserClusterId);
 
-  const displayFinance = currentUserRole === 'Super Admin'
-    ? financeEntries
-    : financeEntries.filter((f) => !f.panchayatId || displayPanchayatIds.has(f.panchayatId) || f.clusterId === currentUserClusterId);
+  const displayFinance = financeEntries.filter((f) => {
+    if (currentUserRole === 'Super Admin') {
+      return true;
+    }
+    return !f.panchayatId || displayPanchayatIds.has(f.panchayatId) || f.clusterId === currentUserClusterId;
+  });
 
   const displayFinanceDrafts = currentUserRole === 'Super Admin'
     ? financeDrafts
@@ -1799,6 +2095,14 @@ export default function App() {
   const currentClusterObj = clusters.find((c) => c.id === currentUserClusterId) || clusters[0];
   const activeClusterName = currentUserRole === 'Super Admin' ? 'All Clusters (Tamil Nadu)' : (currentClusterObj?.name || 'Cluster');
   const activeCollegeName = currentClusterObj?.collegeName || (currentUserRole === 'Super Admin' ? 'All Partner Institutions' : 'Partner Institution');
+  const openResetWizard = (moduleId?: string) => {
+    setSuggestedResetModule(moduleId);
+    setIsResetModalOpen(true);
+  };
+
+  if (currentUser && currentUser.role !== 'Super Admin' && maintenanceState?.enabled) {
+    return <MaintenancePage maintenance={maintenanceState} />;
+  }
 
   return (
     <AdminLayout
@@ -1821,6 +2125,16 @@ export default function App() {
               <button type="button" aria-label="Dismiss notification" onClick={() => setToastNotification(null)} className="rounded-md p-1 text-muted-foreground hover:bg-muted"><span aria-hidden="true">×</span></button>
             </div>
           </div>}
+          <DataResetModal
+            open={isResetModalOpen}
+            authToken={currentUser?.token || ''}
+            suggestedModule={suggestedResetModule}
+            onClose={() => { setIsResetModalOpen(false); setSuggestedResetModule(undefined); }}
+            onCompleted={() => {
+              setResetHistoryVersion((version) => version + 1);
+              void fetchBackendData(new AbortController().signal);
+            }}
+          />
         </>
       }
       sidebar={
@@ -1855,6 +2169,8 @@ export default function App() {
           onSelectCluster={(cid) => setCurrentUserClusterId(cid)}
           notifications={notifications}
           pendingApprovalsCount={pendingApprovalsCount}
+          maintenance={maintenanceState}
+          onManageMaintenance={() => setCurrentTab('settings')}
           onNavigate={(tab, targetId) => {
             handleNavigate(tab, targetId);
             setMobileSidebarOpen(false);
@@ -1938,6 +2254,7 @@ export default function App() {
                   currentUserClusterId={currentUserClusterId}
                   onSubmitDateChange={handleSubmitDateChangeRequest}
                   onReviewDateChange={handleReviewDateChangeRequest}
+                  onReviewFinanceEditRequest={handleReviewFinanceEditRequest}
                 />
               )}
 
@@ -1970,10 +2287,12 @@ export default function App() {
                 <UserManagementView
                   users={users}
                   clusters={clusters}
+                  authToken={currentUser?.token || ''}
                   onAddUser={handleAddUser}
                   onUpdateUser={handleUpdateUser}
                   onDeleteUser={handleDeleteUser}
                   onResetPassword={handleResetPassword}
+                  onChangePassword={handleAdminChangePassword}
                 />
               )}
 
@@ -2062,6 +2381,7 @@ export default function App() {
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
                   userRole={currentUserRole}
+                  currentClusterId={currentUserClusterId}
                   dateChangeRequests={displayDateChangeRequests}
                   onNavigate={handleNavigate}
                   onAddSession={handleAddSession}
@@ -2090,17 +2410,20 @@ export default function App() {
                   onSaveAttendance={handleSaveAttendance}
                   onReviewAttendance={handleReviewAttendance}
                   onRequestAttendanceEdit={handleRequestAttendanceEdit}
+                  onAdminEditAttendance={handleAdminEditAttendance}
+                  onAdminDeleteAttendance={handleAdminDeleteAttendance}
                 />
               )}
 
               {currentTab === 'lesson-plan' && (
                 <LessonPlanView
                   lessonPlans={displayLessonPlans}
+                  clusters={clusters}
                   sessions={displaySessions}
                   panchayats={displayPanchayats}
                   volunteers={displayVolunteers}
                   currentUserRole={currentUserRole}
-                  currentCluster={currentUserClusterId === 'all' ? (currentClusterObj?.name || 'All Clusters') : (currentClusterObj?.name || currentUserClusterId)}
+                  currentCluster={currentUserRole === 'Super Admin' && currentUserClusterId === 'all' ? 'All Clusters' : (currentClusterObj?.name || currentUserClusterId)}
                   currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   selectedLessonPlanId={selectedLessonPlanId}
                   onNavigate={handleNavigate}
@@ -2126,10 +2449,18 @@ export default function App() {
                 <FinanceView
                   financeEntries={displayFinance}
                   panchayats={displayPanchayats}
-                  sessions={sessions}
+                  clusters={clusters}
+                  authToken={currentUser?.token || ''}
+                  selectedAcademicYearId={selectedAcademicYearId}
                   drafts={displayFinanceDrafts}
+                  sessions={displaySessions}
+                  userRole={currentUserRole}
+                  clusterId={currentUserClusterId}
+                  initialSelectedClusterId={currentUserRole === 'Super Admin' ? activeFinanceClusterId : undefined}
                   clusterName={currentUserRole === 'Super Admin' ? 'All Clusters' : (currentClusterObj?.name || 'Cluster')}
                   collegeName={activeCollegeName}
+                  spocName={currentClusterObj?.spocName || currentClusterObj?.adminName || ''}
+                  financerName={financeOfficerName}
                   onNavigate={handleNavigate}
                   onAddFinanceEntry={handleAddFinanceEntry}
                   onUpdateFinanceEntry={handleUpdateFinanceEntry}
@@ -2137,6 +2468,7 @@ export default function App() {
                   onSaveDraft={handleSaveFinanceDraft}
                   onDeleteDraft={handleDeleteFinanceDraft}
                   onSubmitDraft={handleSubmitFinanceDraft}
+                  onRequestFinanceEdit={handleRequestFinanceEdit}
                   isOpenNewModal={openNewFinanceModal}
                   onCloseNewModal={() => setOpenNewFinanceModal(false)}
                 />
@@ -2145,19 +2477,36 @@ export default function App() {
               {currentTab === 'finance-statement' && (
                 <FinanceStatementView
                   academicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
-                  entries={displayFinance}
-                  drafts={displayFinanceDrafts}
+                  entries={activeFinanceClusterId
+                    ? displayFinance.filter((entry) => entry.clusterId === activeFinanceClusterId || entry.clusterName === clusters.find((cluster) => cluster.id === activeFinanceClusterId)?.name)
+                    : displayFinance}
+                  drafts={activeFinanceClusterId
+                    ? displayFinanceDrafts.filter((draft) => draft.clusterId === activeFinanceClusterId || draft.clusterName === clusters.find((cluster) => cluster.id === activeFinanceClusterId)?.name)
+                    : displayFinanceDrafts}
                   activeDraftId={activeFinanceDraftId}
-                  clusterName={currentUserRole === 'Super Admin' ? 'All Clusters' : (currentClusterObj?.name || 'Cluster')}
+                  canManageDrafts={currentUserRole === 'Cluster Admin'}
+                  userRole={currentUserRole}
+                  sessions={activeFinanceClusterId
+                    ? displaySessions.filter((session) => session.clusterId === activeFinanceClusterId || session.clusterName === clusters.find((cluster) => cluster.id === activeFinanceClusterId)?.name)
+                    : displaySessions}
+                  clusterId={activeFinanceClusterId || currentUserClusterId}
+                  clusterName={activeFinanceClusterId
+                    ? (clusters.find((cluster) => cluster.id === activeFinanceClusterId)?.name || 'Cluster')
+                    : currentUserRole === 'Super Admin' ? 'All Clusters' : (currentClusterObj?.name || 'Cluster')}
                   collegeName={activeCollegeName}
+                  spocName={currentClusterObj?.spocName || currentClusterObj?.adminName || ''}
+                  financerName={financeOfficerName}
                   onBack={() => setCurrentTab('finance')}
                   onNavigate={handleNavigate}
                   onSaveDraft={handleSaveFinanceDraft}
                   onDeleteDraft={handleDeleteFinanceDraft}
                   onSubmitDraft={handleSubmitFinanceDraft}
+                  onApproveReport={handleApproveFinanceReport}
+                  onRejectReport={handleRejectFinanceReport}
                   onAddFinanceEntry={handleAddFinanceEntry}
                   onUpdateFinanceEntry={handleUpdateFinanceEntry}
                   onDeleteFinanceEntry={handleDeleteFinanceEntry}
+                  onRequestFinanceEdit={handleRequestFinanceEdit}
                 />
               )}
 
@@ -2193,8 +2542,36 @@ export default function App() {
               {currentTab === 'settings' && (
                 <SettingsView
                   currentUser={currentUser}
+                  financeOfficerName={financeOfficerName}
+                  canManageFinanceSettings={currentUserRole === 'Super Admin'}
+                  canResetData={currentUserRole === 'Super Admin'}
+                  authToken={currentUser?.token || ''}
+                  maintenance={maintenanceState}
+                  onMaintenanceRefresh={() => {
+                    if (!currentUser?.token) return;
+                    fetch(apiUrl('/api/system/maintenance'), {
+                      headers: { Authorization: `Bearer ${currentUser.token}` },
+                      cache: 'no-store',
+                    })
+                      .then((response) => response.json().catch(() => null))
+                      .then((data) => setMaintenanceState(data?.maintenance || null))
+                      .catch(() => undefined);
+                  }}
+                  resetHistoryVersion={resetHistoryVersion}
+                  onOpenResetData={() => openResetWizard()}
+                  onBackupRestored={() => void fetchBackendData(new AbortController().signal)}
+                  onSaveFinanceOfficerName={handleSaveFinanceOfficerName}
                   onUpdateProfile={(updated) => {
-                    setCurrentUser((prev) => (prev ? { ...prev, ...updated } : prev));
+                    setCurrentUser((prev) => {
+                      if (!prev) return prev;
+                      const nextUser = { ...prev, ...updated } as AuthSession;
+                      try {
+                        localStorage.setItem('tqi_auth_session', JSON.stringify(nextUser));
+                      } catch {
+                        // ignore storage failures
+                      }
+                      return nextUser;
+                    });
                   }}
                 />
               )}

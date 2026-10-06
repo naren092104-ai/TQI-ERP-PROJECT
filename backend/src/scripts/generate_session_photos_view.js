@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
 const content = `import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
@@ -2396,6 +2397,6 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
 };
 `;
 
-const targetPath = path.resolve('..', 'frontend', 'src', 'components', 'SessionPhotosView.tsx');
+const targetPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..', 'frontend', 'src', 'components', 'SessionPhotosView.tsx');
 fs.writeFileSync(targetPath, content, 'utf8');
 console.log('Successfully wrote SessionPhotosView.tsx to:', targetPath);

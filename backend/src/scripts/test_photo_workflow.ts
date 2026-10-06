@@ -171,7 +171,7 @@ async function runTests() {
           `session-day-${testDayNumber}`,
           testDayNumber,
           academicYearId,
-          `storage/uploads/mock-${i}.png`,
+          `backend/storage/uploads/mock-${i}.png`,
           `/api/session-photos/file/photo-mock-${i}`,
           `mock-${i}.png`,
           'image/png',

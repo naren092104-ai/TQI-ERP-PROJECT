@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { TabType, FinanceEntry, Panchayat, FinanceDraft, Session } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { TabType, FinanceEntry, Panchayat, FinanceDraft, Session, UserRole, Cluster } from '../types';
 import { NewFinanceModal } from './NewFinanceModal';
 import Badge from './ui/badge';
 import {
@@ -15,12 +15,8 @@ import {
   Edit3,
   Trash2,
   Eye,
-  Send,
-  FileSpreadsheet,
   ArrowRight,
-  Download,
   Calendar,
-  Users,
   AlertTriangle,
 } from './ui/icons';
 import {
@@ -31,31 +27,50 @@ import {
   SelectValue,
 } from './ui/select';
 import { Table, TableHeader, TableBody, TableRow, TableCell } from './ui/table';
-import { exportFinanceExcel, exportFinanceDayPdf } from '../utils/exportUtils';
+import { apiUrl } from '../utils/api';
+
+interface FinanceClusterOption {
+  id: string;
+  name: string;
+  district?: string;
+}
 
 interface FinanceViewProps {
   financeEntries: FinanceEntry[];
   panchayats: Panchayat[];
+  clusters?: Cluster[];
+  authToken?: string;
+  selectedAcademicYearId?: string;
   sessions?: Session[];
   drafts?: FinanceDraft[];
+  userRole?: UserRole;
   onNavigate: (tab: TabType, targetId?: string) => void;
-  onAddFinanceEntry: (entry: Omit<FinanceEntry, 'id'>) => void;
+  onAddFinanceEntry: (entry: Omit<FinanceEntry, 'id'>) => void | Promise<void>;
   onUpdateFinanceEntry: (id: string, updated: Partial<FinanceEntry>) => void;
   onDeleteFinanceEntry: (id: string) => void;
-  onSaveDraft?: (draft: FinanceDraft) => void;
-  onDeleteDraft?: (draftId: string) => void;
-  onSubmitDraft?: (draftId: string) => void;
+  onSaveDraft?: (draft: FinanceDraft) => void | Promise<void>;
+  onDeleteDraft?: (draftId: string) => void | Promise<void>;
+  onSubmitDraft?: (draftId: string, missingBillReason?: string) => void | Promise<void>;
+  onRequestFinanceEdit?: (entryId: string, reason: string) => void | Promise<void>;
   isOpenNewModal?: boolean;
   onCloseNewModal?: () => void;
   clusterName?: string;
+  clusterId?: string;
+  initialSelectedClusterId?: string;
   collegeName?: string;
+  spocName?: string;
+  financerName?: string;
 }
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
-  financeEntries,
-  panchayats,
-  sessions = [],
-  drafts = [],
+  financeEntries: allFinanceEntries,
+  panchayats: allPanchayats,
+  clusters = [],
+  authToken = '',
+  selectedAcademicYearId = '',
+  sessions: allSessions = [],
+  drafts: allDrafts = [],
+  userRole = 'Cluster Admin',
   onNavigate,
   onAddFinanceEntry,
   onUpdateFinanceEntry,
@@ -63,24 +78,121 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   onSaveDraft,
   onDeleteDraft,
   onSubmitDraft,
+  onRequestFinanceEdit,
   isOpenNewModal = false,
   onCloseNewModal,
   clusterName = 'Cluster',
+  clusterId = '',
+  initialSelectedClusterId,
   collegeName = 'Partner College / Institution',
+  spocName = '',
+  financerName = 'TQI Finance Team',
 }) => {
   // Main view toggle: 'days' (card-based 8-day layout) vs 'entries' (detailed list/table)
   const [viewMode, setViewMode] = useState<'days' | 'entries'>('days');
+  const [loadedClusters, setLoadedClusters] = useState<Cluster[]>([]);
+  const [selectedFinanceClusterId, setSelectedFinanceClusterId] = useState<string | null>(
+    initialSelectedClusterId || (clusterId !== 'all' ? clusterId : null)
+  );
   const [activeTabFilter, setActiveTabFilter] = useState<'all' | 'drafts' | 'approved' | 'pending'>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedPanchayat, setSelectedPanchayat] = useState('');
   const [showModal, setShowModal] = useState(isOpenNewModal);
+  const [financeModalKey, setFinanceModalKey] = useState(0);
+  const [selectedFinanceDay, setSelectedFinanceDay] = useState<string | null>(null);
   const [editingDraft, setEditingDraft] = useState<FinanceDraft | null>(null);
   const [editingEntry, setEditingEntry] = useState<FinanceEntry | null>(null);
   const [viewingReceipt, setViewingReceipt] = useState<FinanceEntry | null>(null);
   const [receiptZoom, setReceiptZoom] = useState<number>(1);
   const [receiptRotate, setReceiptRotate] = useState<number>(0);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const isSuperAdmin = userRole === 'Super Admin';
+  const canManageFinanceEntries = !isSuperAdmin;
+  useEffect(() => {
+    if (!isSuperAdmin || !authToken) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ includeArchived: 'true' });
+    if (selectedAcademicYearId) params.set('academicYearId', selectedAcademicYearId);
+    const loadClusters = async () => {
+      const requestClusters = async (query: URLSearchParams) => {
+        const response = await fetch(apiUrl(`/api/clusters?${query.toString()}`), {
+          cache: 'no-store',
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+            'x-user-role': userRole,
+            'x-user-cluster-id': clusterId,
+          },
+          signal: controller.signal,
+        });
+        return response.ok ? response.json() : null;
+      };
+
+      try {
+        let data = await requestClusters(params);
+        if (!Array.isArray(data?.clusters) || data.clusters.length === 0) {
+          const allYearsParams = new URLSearchParams({ includeArchived: 'true', allYears: 'true' });
+          data = await requestClusters(allYearsParams);
+        }
+        if (!controller.signal.aborted && Array.isArray(data?.clusters)) setLoadedClusters(data.clusters);
+      } catch {
+        // Keep the finance overview usable from cluster IDs in loaded operational data.
+      }
+    };
+    void loadClusters();
+
+    return () => controller.abort();
+  }, [isSuperAdmin, authToken, selectedAcademicYearId, userRole, clusterId]);
+
+  const financeClusters = useMemo<FinanceClusterOption[]>(() => {
+    const clusterMap = new Map<string, FinanceClusterOption>();
+    [...clusters, ...loadedClusters].forEach((cluster) => {
+      if (cluster?.id) clusterMap.set(cluster.id, { id: cluster.id, name: cluster.name || cluster.id, district: cluster.district });
+    });
+    const addFallbackCluster = (id?: string, name?: string) => {
+      if (!id || id === 'all' || clusterMap.has(id)) return;
+      clusterMap.set(id, { id, name: name || id });
+    };
+    allPanchayats.forEach((item) => addFallbackCluster(item.clusterId, item.cluster));
+    allFinanceEntries.forEach((item) => addFallbackCluster(item.clusterId, item.clusterName));
+    allDrafts.forEach((item) => addFallbackCluster(item.clusterId, item.clusterName));
+    allSessions.forEach((item) => addFallbackCluster(item.clusterId, item.clusterName));
+    return Array.from(clusterMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [clusters, loadedClusters, allPanchayats, allFinanceEntries, allDrafts, allSessions]);
+
+  const selectedFinanceCluster = financeClusters.find((cluster) => cluster.id === selectedFinanceClusterId);
+  const isClusterOverview = isSuperAdmin && clusterId === 'all' && !selectedFinanceCluster;
+  const financeClusterId = selectedFinanceCluster?.id || clusterId;
+  const financeClusterName = selectedFinanceCluster?.name || clusterName;
+  const financeEntries = useMemo(() => selectedFinanceCluster
+    ? allFinanceEntries.filter((entry) => entry.clusterId === selectedFinanceCluster.id || entry.clusterName === selectedFinanceCluster.name)
+    : allFinanceEntries, [allFinanceEntries, selectedFinanceCluster]);
+  const drafts = useMemo(() => selectedFinanceCluster
+    ? allDrafts.filter((draft) => draft.clusterId === selectedFinanceCluster.id || draft.clusterName === selectedFinanceCluster.name)
+    : allDrafts, [allDrafts, selectedFinanceCluster]);
+  const draftEntries = drafts.filter((draft) => draft.status === 'Draft');
+  const financeEntryPermissions = (entry: FinanceEntry) => {
+    const report = drafts.find((draft) => draft.id === entry.draftId);
+    return {
+      canEdit: entry.status === 'Draft' || entry.status === 'Correction' || Boolean(report?.editPermission),
+      canRequestEdit: ['Pending', 'Approved', 'Correction'].includes(entry.status) && report?.editRequestStatus !== 'PENDING' && !report?.editPermission,
+      requestPending: report?.editRequestStatus === 'PENDING',
+    };
+  };
+  const sessions = useMemo(() => selectedFinanceCluster
+    ? allSessions.filter((session) => session.clusterId === selectedFinanceCluster.id || session.clusterName === selectedFinanceCluster.name)
+    : allSessions, [allSessions, selectedFinanceCluster]);
+  const panchayats = useMemo(() => selectedFinanceCluster
+    ? allPanchayats.filter((panchayat) => panchayat.clusterId === selectedFinanceCluster.id)
+    : allPanchayats, [allPanchayats, selectedFinanceCluster]);
+
+  const navigateToFinanceStatement = (targetId?: string) => {
+    const clusterScope = selectedFinanceCluster?.id || (clusterId !== 'all' ? clusterId : '');
+    const scopedTarget = clusterScope ? `finance:${clusterScope}:${targetId || 'all-approved'}` : targetId;
+    onNavigate('finance-statement', scopedTarget);
+  };
+
+  const openClusterStatement = (targetId: string) => navigateToFinanceStatement(targetId);
 
   // Edit Request Modal State for submitted / approved entries
   const [editRequestEntry, setEditRequestEntry] = useState<FinanceEntry | null>(null);
@@ -115,6 +227,32 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
   const balance = totalAdvance - totalExpenses;
 
+  const clusterSummaries = useMemo(() => financeClusters
+    .map((cluster) => {
+      const clusterEntries = allFinanceEntries.filter((entry) =>
+        entry.clusterId === cluster.id || entry.clusterName === cluster.name
+      );
+      const clusterDrafts = allDrafts.filter((draft) =>
+        draft.clusterId === cluster.id || draft.clusterName === cluster.name
+      );
+      const submittedDayNumbers = new Set<number>();
+      clusterEntries.filter((entry) => entry.status !== 'Draft').forEach((entry) => {
+        const dayNumber = Number((entry.sessionDay || '').match(/\d+/)?.[0] || 0);
+        if (dayNumber > 0) submittedDayNumbers.add(dayNumber);
+      });
+      clusterDrafts.filter((draft) => draft.status !== 'Draft').forEach((draft) => {
+        const dayNumber = Number((draft.sessionDay || '').match(/\d+/)?.[0] || 0);
+        if (dayNumber > 0) submittedDayNumbers.add(dayNumber);
+      });
+      return {
+        ...cluster,
+        submittedDays: submittedDayNumbers.size,
+        submittedAmount: clusterEntries
+          .filter((entry) => entry.status !== 'Draft')
+          .reduce((sum, entry) => sum + (entry.amount || 0), 0),
+      };
+    }), [financeClusters, allFinanceEntries, allDrafts]);
+
   // Day-wise grouping (Day 1 through Day 8) with auto-mapped session dates
   const dayCards = useMemo(() => {
     const dayNumbers = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -128,25 +266,39 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       // Filter entries belonging to this day
       const dayEntries = financeEntries.filter((e) => {
         if (e.sessionId && matchedSession && e.sessionId === matchedSession.id) return true;
-        if (e.sessionDay && (e.sessionDay === `Day ${dayNum}` || e.sessionDay.includes(`Day ${dayNum}`))) return true;
+        const entryDayNumber = Number((e.sessionDay || '').match(/\d+/)?.[0] || 0);
+        if (entryDayNumber === dayNum) return true;
         if (matchedSession?.date && e.date === matchedSession.date) return true;
         return false;
       });
+      const draftIds = new Set(dayEntries.map((entry) => entry.draftId).filter(Boolean));
+      const dayDraft = drafts.find((draft) => draftIds.has(draft.id))
+        || drafts.find((draft) => {
+          const draftDay = Number(draft.sessionDay.match(/\d+/)?.[0] || 0);
+          return draftDay === dayNum
+            && (!financeClusterId || financeClusterId === 'all' || draft.clusterId === financeClusterId);
+        })
+        || null;
 
-      const dayTotal = dayEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const entryTotal = dayEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+      const dayTotal = entryTotal || dayDraft?.totalAmount || 0;
       const billsCount = dayEntries.filter((e) => Boolean(e.billUrl)).length;
-
-      // Group split data: assume standard 24 volunteers or custom entered in remarks
-      const volunteerCount = 24;
-      const perPersonExpense = volunteerCount > 0 ? Math.round(dayTotal / volunteerCount) : 0;
 
       // Determine day status
       let status: 'Approved' | 'Pending' | 'Draft' | 'Empty' = 'Empty';
-      if (dayEntries.length > 0) {
-        if (dayEntries.every((e) => e.status === 'Approved')) {
+      const hasAnySubmission = Boolean(dayDraft) || dayEntries.length > 0;
+
+      if (hasAnySubmission) {
+        if (dayDraft?.status === 'Approved' || dayEntries.every((e) => e.status === 'Approved')) {
           status = 'Approved';
-        } else if (dayEntries.some((e) => e.status === 'Draft')) {
+        } else if (dayDraft?.status === 'Draft' || dayEntries.some((e) => e.status === 'Draft')) {
           status = 'Draft';
+        } else if (
+          dayDraft?.status === 'Pending' ||
+          dayDraft?.status === 'Correction Requested' ||
+          dayEntries.some((e) => e.status === 'Pending' || e.status === 'Correction')
+        ) {
+          status = 'Pending';
         } else {
           status = 'Pending';
         }
@@ -155,17 +307,17 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       return {
         dayNumber: dayNum,
         dayLabel: `Day ${String(dayNum).padStart(2, '0')}`,
-        sessionName: matchedSession?.name || `Day ${dayNum} Holistic Session`,
-        date: matchedSession?.date || 'Scheduled Date TBD',
+        sessionName: dayDraft?.title || matchedSession?.name || `Day ${dayNum} Holistic Session`,
+        date: dayDraft?.sessionDate || matchedSession?.date?.slice(0, 10) || 'Scheduled Date TBD',
         entries: dayEntries,
+        draft: dayDraft,
+        draftId: dayDraft?.id || draftIds.values().next().value || null,
         dayTotal,
         billsCount,
-        volunteerCount,
-        perPersonExpense,
         status,
       };
     });
-  }, [sessions, financeEntries]);
+  }, [sessions, financeEntries, drafts, financeClusterId]);
 
   // Filtered entries for table and mobile cards
   const filteredEntries = useMemo(() => {
@@ -198,45 +350,75 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setShowModal(true);
   };
 
-  const handleSubmitDraftPackage = (draftId: string) => {
-    if (onSubmitDraft) {
-      onSubmitDraft(draftId);
+  const handleSubmitDraftPackage = async (draftId: string, missingBillReason?: string) => {
+    const draft = drafts.find((item) => item.id === draftId);
+    const draftEntries = financeEntries.filter((entry) => entry.draftId === draftId);
+    const plannedDate = draft?.sessionDate || draftEntries.find((entry) => entry.date)?.date;
+    if (!plannedDate) {
+      alert('Please edit this draft and select a planned date before submitting.');
+      return;
     }
-    financeEntries.forEach((e) => {
-      if (e.draftId === draftId) {
-        onUpdateFinanceEntry(e.id, { status: 'Approved' });
+    const missingBills = draftEntries.filter((entry) => !entry.billUrl && !entry.billReference);
+    if (missingBills.length > 0 && !missingBillReason) {
+      const reason = window.prompt(
+        `Bills are required for this submission. Please explain why the missing bill(s) are being submitted for review: ${missingBills.slice(0, 2).map((entry) => entry.description || 'Expense').join(', ')}${missingBills.length > 2 ? ' and more' : ''}`,
+        'Missing bills for this report; awaiting approval.'
+      );
+      if (!reason || !reason.trim()) {
+        alert('A reason is required for missing bills before this report can be submitted.');
+        return;
       }
-    });
+      missingBillReason = reason.trim();
+    }
+    if (onSubmitDraft) {
+      await onSubmitDraft(draftId, missingBillReason);
+    } else {
+      financeEntries.forEach((entry) => {
+        if (entry.draftId === draftId) onUpdateFinanceEntry(entry.id, { status: 'Pending' });
+      });
+    }
     showToast('Draft submitted for approval successfully!');
   };
 
-  const handleDeleteDraftPackage = (draftId: string) => {
+  const handleDeleteDraftPackage = async (draftId: string) => {
     if (confirm('Are you sure you want to delete this formatted draft session?')) {
       if (onDeleteDraft) {
-        onDeleteDraft(draftId);
-      }
-      financeEntries.forEach((e) => {
-        if (e.draftId === draftId) {
-          onDeleteFinanceEntry(e.id);
+        try {
+          await onDeleteDraft(draftId);
+        } catch (error) {
+          alert(error instanceof Error ? error.message : 'Unable to delete this finance draft.');
+          return;
         }
-      });
+      } else {
+        for (const entry of financeEntries.filter((item) => item.draftId === draftId)) await onDeleteFinanceEntry(entry.id);
+      }
       showToast('Draft removed.');
     }
   };
 
-  const handleRaiseEditRequest = () => {
+  const handleRaiseEditRequest = async () => {
     if (!editRequestEntry) return;
     if (!editRequestReason.trim()) {
       alert('Please provide a reason or justification for requesting an edit.');
       return;
     }
 
-    onUpdateFinanceEntry(editRequestEntry.id, {
-      status: 'Correction',
-      remarks: `${editRequestEntry.remarks || ''} [Edit Request: ${editRequestReason.trim()}]`,
-    });
+    try {
+      if (onRequestFinanceEdit) {
+        await onRequestFinanceEdit(editRequestEntry.id, editRequestReason.trim());
+      } else {
+        onUpdateFinanceEntry(editRequestEntry.id, {
+          status: 'Pending',
+          remarks: `${editRequestEntry.remarks || ''} [Edit Request: ${editRequestReason.trim()}]`.trim(),
+        });
+      }
+      showToast('Edit request submitted to Admin for unlock/review.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to submit the edit request.';
+      alert(message);
+      return;
+    }
 
-    showToast('Edit request submitted to Admin for unlock/review.');
     setEditRequestEntry(null);
     setEditRequestReason('');
   };
@@ -269,7 +451,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               Finance &amp; Expenses
             </h1>
             <Badge color="primary" size="sm">
-              {clusterName}
+              {isClusterOverview ? 'All Clusters' : financeClusterName}
             </Badge>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
@@ -277,8 +459,8 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          {/* View Mode Toggle: Day Cards vs Detailed Entries */}
+        {!isClusterOverview && <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          {/* Day Cards view */}
           <div className="inline-flex rounded-xl bg-gray-100 dark:bg-gray-800 p-1 border border-gray-200 dark:border-gray-700">
             <button
               type="button"
@@ -291,54 +473,30 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             >
               Day Cards
             </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('entries')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                viewMode === 'entries'
-                  ? 'bg-white text-gray-900 dark:bg-gray-900 dark:text-white shadow-xs'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              All Entries
-            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => exportFinanceExcel(financeEntries, clusterName, collegeName)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-            title="Export full finance sheet to Excel (.xlsx)"
-          >
-            <Download className="h-4 w-4 text-emerald-600" />
-            <span>Excel</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => onNavigate('finance-statement')}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition cursor-pointer"
-          >
-            <FileSpreadsheet className="h-4 w-4 text-brand-500" />
-            <span>TQI Statement</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEditingDraft(null);
-              setShowModal(true);
-            }}
-            className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add / Scan Bill</span>
-          </button>
-        </div>
+          {canManageFinanceEntries && (
+            <button
+              type="button"
+              onClick={() => {
+                const defaultDay = `Day ${sessions[0]?.dayNumber || 1}`;
+                const editableDraft = drafts.find((draft) => draft.status === 'Draft' && draft.sessionDay === defaultDay);
+                setFinanceModalKey((prev) => prev + 1);
+                setEditingDraft(editableDraft || null);
+                setSelectedFinanceDay(defaultDay);
+                setShowModal(true);
+              }}
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-brand-500 px-3.5 py-2 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Add / Scan Bill</span>
+            </button>
+          )}
+        </div>}
       </div>
 
       {/* 2. Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      {!isClusterOverview && <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Advance</div>
           <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono text-gray-900 dark:text-white">₹{totalAdvance.toLocaleString()}</div>
@@ -360,40 +518,88 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-warning-500">Saved Drafts</div>
           <div className="mt-1.5 text-xl sm:text-2xl font-bold font-mono text-warning-600 dark:text-warning-400">₹{totalDraftsAmount.toLocaleString()}</div>
-          <p className="mt-0.5 text-[11px] text-warning-500/80 truncate">{drafts.length} formatted drafts</p>
+          <p className="mt-0.5 text-[11px] text-warning-500/80 truncate">{draftEntries.length} formatted drafts</p>
         </div>
-      </div>
+      </div>}
 
       {/* 3. VIEW MODE A: DAY-WISE CARD LAYOUT (Day 1 - Day 8) */}
-      {viewMode === 'days' && (
+      {isClusterOverview ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">Finance by Cluster</h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Select a cluster to view its eight session days and submission status.</p>
+          </div>
+          {clusterSummaries.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+              No clusters are available to display.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {clusterSummaries.map((cluster) => (
+                <button
+                  key={cluster.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedFinanceClusterId(cluster.id);
+                    setViewMode('days');
+                  }}
+                  className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-theme-xs transition hover:border-brand-500/50 hover:shadow-theme-md dark:border-gray-800 dark:bg-white/[0.02]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{cluster.district || 'District not set'}</p>
+                    </div>
+                    <ArrowRight className="h-4 w-4 text-brand-500 transition-transform group-hover:translate-x-1" />
+                  </div>
+                  <div className="mt-4 flex items-end justify-between border-t border-gray-100 pt-3 dark:border-gray-800">
+                    <div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Submitted days</div>
+                      <div className="mt-1 text-lg font-bold text-gray-900 dark:text-white">{cluster.submittedDays}<span className="text-xs font-medium text-gray-400"> / 8</span></div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">Submitted expenses</div>
+                      <div className="mt-1 text-sm font-bold font-mono text-brand-600 dark:text-brand-400">₹{cluster.submittedAmount.toLocaleString()}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      ) : viewMode === 'days' && (
         <div className="space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-gray-200 dark:border-gray-800 pb-3">
             <div>
               <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                {isSuperAdmin && clusterId === 'all' && selectedFinanceCluster && (
+                  <button type="button" onClick={() => setSelectedFinanceClusterId(null)} className="mr-1 rounded-lg border border-gray-200 px-2 py-1 text-xs font-semibold text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800">All Clusters</button>
+                )}
                 <span>Day-Wise Expense &amp; Group Split Cards</span>
                 <span className="text-xs font-normal text-gray-500">
-                  ({collegeName} &bull; {clusterName})
+                  ({collegeName} &bull; {financeClusterName})
                 </span>
               </h2>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Scheduled session days are auto-mapped. Group expenditures are calculated and split per person.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => onNavigate('finance-statement')}
-              className="text-xs font-bold text-brand-500 hover:text-brand-600 transition flex items-center gap-1 cursor-pointer"
-            >
-              <span>View Full TQI Statement Sheet</span>
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
             {dayCards.map((day) => (
               <div
                 key={day.dayNumber}
-                className="group relative rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-500/50 hover:shadow-theme-md dark:border-gray-800 dark:bg-white/[0.02] flex flex-col justify-between"
+                role="button"
+                tabIndex={0}
+                onClick={() => openClusterStatement(day.draft?.id || day.draftId || `Day ${day.dayNumber}`)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    openClusterStatement(day.draft?.id || day.draftId || `Day ${day.dayNumber}`);
+                  }
+                }}
+                className="group relative rounded-2xl border border-gray-200 bg-white p-5 shadow-theme-xs transition-all hover:border-brand-500/50 hover:shadow-theme-md focus:outline-none focus:ring-2 focus:ring-brand-500 dark:border-gray-800 dark:bg-white/[0.02] flex flex-col justify-between cursor-pointer"
               >
                 <div>
                   {/* Top Bar: Day Badge + Status + Auto Date */}
@@ -402,11 +608,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       {day.dayLabel}
                     </span>
                     {day.status === 'Approved' && <Badge color="success" size="sm">Approved</Badge>}
-                    {day.status === 'Pending' && <Badge color="primary" size="sm">Pending</Badge>}
-                    {day.status === 'Draft' && <Badge color="warning" size="sm">Draft</Badge>}
+                    {day.status === 'Pending' && <Badge color="primary" size="sm">Submitted</Badge>}
+                    {day.status === 'Draft' && (
+                      <Badge color="warning" size="sm">Draft</Badge>
+                    )}
                     {day.status === 'Empty' && (
                       <span className="text-[10px] text-gray-400 font-medium px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800">
-                        No Entries
+                        Not Submitted
                       </span>
                     )}
                   </div>
@@ -430,16 +638,6 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       </span>
                     </div>
 
-                    {/* Group Expense Split (e.g., 24 volunteers) */}
-                    <div className="flex items-center justify-between text-[11px] border-t border-gray-200/60 dark:border-gray-700/60 pt-1.5">
-                      <span className="text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                        <Users className="w-3 h-3 text-brand-500" />
-                        <span>Per Person ({day.volunteerCount}):</span>
-                      </span>
-                      <span className="font-semibold font-mono text-brand-600 dark:text-brand-400">
-                        ₹{day.perPersonExpense.toLocaleString()}
-                      </span>
-                    </div>
                   </div>
 
                   {/* Bills count & Entries count pills */}
@@ -453,37 +651,6 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                 </div>
 
-                {/* Bottom Actions */}
-                <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => exportFinanceDayPdf(day.dayNumber, day.date, day.entries, clusterName, collegeName)}
-                    className="p-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-                    title={`Export Day ${day.dayNumber} PDF statement`}
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                  </button>
-
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => onNavigate('finance-statement', `day-${day.dayNumber}`)}
-                      className="px-2.5 py-1.5 rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 text-xs font-semibold transition"
-                    >
-                      Statement
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditingDraft(null);
-                        setShowModal(true);
-                      }}
-                      className="px-3 py-1.5 rounded-lg bg-brand-500 text-white hover:bg-brand-600 text-xs font-semibold transition shadow-xs"
-                    >
-                      + Entry
-                    </button>
-                  </div>
-                </div>
               </div>
             ))}
           </div>
@@ -491,7 +658,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       )}
 
       {/* 4. VIEW MODE B: DETAILED ENTRIES & DRAFTS */}
-      {viewMode === 'entries' && (
+      {!isClusterOverview && viewMode === 'entries' && (
         <div className="space-y-4">
           {/* Filter Tabs */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-gray-200 dark:border-gray-800 pb-3">
@@ -550,25 +717,28 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <h3 className="text-sm font-bold text-gray-900 dark:text-white">
                   Saved Draft Sheets (Ready for TQI Formatting &amp; Submission)
                 </h3>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditingDraft(null);
-                    setShowModal(true);
-                  }}
-                  className="rounded-xl bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
-                >
-                  + New Draft Session
-                </button>
+                {canManageFinanceEntries && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingDraft(null);
+                      setSelectedFinanceDay(null);
+                      setShowModal(true);
+                    }}
+                    className="rounded-xl bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition cursor-pointer"
+                  >
+                    + New Draft Session
+                  </button>
+                )}
               </div>
 
-              {drafts.length === 0 ? (
+              {draftEntries.length === 0 ? (
                 <div className="p-10 text-center text-gray-400 text-xs rounded-2xl border border-gray-200 bg-white shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
                   No saved drafts currently.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {drafts.map((draft) => (
+                  {draftEntries.map((draft) => (
                     <div
                       key={draft.id}
                       className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02] flex flex-col justify-between"
@@ -622,7 +792,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       <div className="pt-3.5 mt-3.5 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-2">
                         <button
                           type="button"
-                          onClick={() => onNavigate('finance-statement', draft.id)}
+                          onClick={() => navigateToFinanceStatement(draft.id)}
                           className="rounded-xl border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-600 hover:bg-brand-100 dark:border-brand-900/40 dark:bg-brand-500/10 dark:text-brand-400 transition cursor-pointer"
                         >
                           Statement Sheet
@@ -772,42 +942,29 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                         </span>
                       )}
 
-                      {entry.status === 'Approved' ? (
+                      {canManageFinanceEntries && financeEntryPermissions(entry).requestPending && <span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Edit Request Pending</span>}
+                      {canManageFinanceEntries && financeEntryPermissions(entry).canRequestEdit && (
+                        <button type="button" onClick={() => { setEditRequestEntry(entry); setEditRequestReason(''); }} className="p-1 text-amber-500 hover:text-amber-600 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer" title="Request permission to edit the submitted report"><AlertTriangle className="h-4 w-4" /></button>
+                      )}
+                      {canManageFinanceEntries && financeEntryPermissions(entry).canEdit && (
+                        <button type="button" onClick={() => setEditingEntry(entry)} className="p-1 text-gray-500 hover:text-brand-500 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer" title="Edit"><Edit3 className="h-4 w-4" /></button>
+                      )}
+
+                      {canManageFinanceEntries && financeEntryPermissions(entry).canEdit && (
                         <button
                           type="button"
                           onClick={() => {
-                            setEditRequestEntry(entry);
-                            setEditRequestReason('');
+                            if (confirm(`Delete expense "${entry.description}"?`)) {
+                              onDeleteFinanceEntry(entry.id);
+                              showToast('Finance entry deleted');
+                            }
                           }}
-                          className="p-1 text-amber-500 hover:text-amber-600 rounded-lg hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer"
-                          title="Raise Edit Request"
+                          className="p-1 text-gray-400 hover:text-error-600 rounded-lg hover:bg-error-50 dark:hover:bg-error-500/10 cursor-pointer"
+                          title="Delete"
                         >
-                          <AlertTriangle className="h-4 w-4" />
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => setEditingEntry(entry)}
-                          className="p-1 text-gray-500 hover:text-brand-500 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 cursor-pointer"
-                          title="Edit"
-                        >
-                          <Edit3 className="h-4 w-4" />
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (confirm(`Delete expense "${entry.description}"?`)) {
-                            onDeleteFinanceEntry(entry.id);
-                            showToast('Finance entry deleted');
-                          }
-                        }}
-                        className="p-1 text-gray-400 hover:text-error-600 rounded-lg hover:bg-error-50 dark:hover:bg-error-500/10 cursor-pointer"
-                        title="Delete"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
                     </div>
                   </div>
                 </div>
@@ -890,7 +1047,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                           <button
                             type="button"
                             onClick={() =>
-                              onNavigate('finance-statement', entry.draftId || entry.sessionDay || 'all-approved')
+                              navigateToFinanceStatement(entry.draftId || entry.sessionDay || 'all-approved')
                             }
                             className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
                             title="View Statement Sheet"
@@ -898,56 +1055,30 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                             <Eye className="h-4 w-4" />
                           </button>
 
-                          {entry.status === 'Approved' ? (
+                          {canManageFinanceEntries && financeEntryPermissions(entry).requestPending && <span className="rounded bg-amber-50 px-2 py-1 text-[10px] font-semibold text-amber-700">Edit Request Pending</span>}
+                          {canManageFinanceEntries && financeEntryPermissions(entry).canRequestEdit && (
+                            <button type="button" onClick={() => { setEditRequestEntry(entry); setEditRequestReason(''); }} className="rounded-lg p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10 transition cursor-pointer" title="Request permission to edit the submitted report"><AlertTriangle className="h-4 w-4" /></button>
+                          )}
+                          {canManageFinanceEntries && financeEntryPermissions(entry).canEdit && (
+                            <button type="button" onClick={() => setEditingEntry(entry)} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer" title="Edit Entry"><Edit3 className="h-4 w-4" /></button>
+                          )}
+
+
+                          {canManageFinanceEntries && financeEntryPermissions(entry).canEdit && (
                             <button
                               type="button"
                               onClick={() => {
-                                setEditRequestEntry(entry);
-                                setEditRequestReason('');
+                                if (confirm(`Delete finance entry "${entry.description}"?`)) {
+                                  onDeleteFinanceEntry(entry.id);
+                                  showToast('Finance entry deleted');
+                                }
                               }}
-                              className="rounded-lg p-1.5 text-amber-500 hover:bg-amber-50 hover:text-amber-600 dark:hover:bg-amber-500/10 transition cursor-pointer"
-                              title="Raise Edit / Re-upload Request"
+                              className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition cursor-pointer"
+                              title="Delete"
                             >
-                              <AlertTriangle className="h-4 w-4" />
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => setEditingEntry(entry)}
-                              className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-brand-500 dark:hover:bg-white/5 dark:hover:text-brand-400 transition cursor-pointer"
-                              title="Edit Entry"
-                            >
-                              <Edit3 className="h-4 w-4" />
+                              <Trash2 className="h-4 w-4" />
                             </button>
                           )}
-
-                          {entry.status !== 'Approved' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                onUpdateFinanceEntry(entry.id, { status: 'Pending' });
-                                showToast('Entry submitted for review!');
-                              }}
-                              className="rounded-lg p-1.5 text-gray-400 hover:bg-success-50 hover:text-success-600 dark:hover:bg-success-500/10 dark:hover:text-success-400 transition cursor-pointer"
-                              title="Submit for Review"
-                            >
-                              <Send className="h-4 w-4" />
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (confirm(`Delete finance entry "${entry.description}"?`)) {
-                                onDeleteFinanceEntry(entry.id);
-                                showToast('Finance entry deleted');
-                              }
-                            }}
-                            className="rounded-lg p-1.5 text-gray-400 hover:bg-error-50 hover:text-error-600 dark:hover:bg-error-500/10 dark:hover:text-error-400 transition cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1248,26 +1379,37 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       {/* New / Edit Finance Entry Modal */}
       {showModal && (
         <NewFinanceModal
+          key={financeModalKey}
           isOpen={showModal}
+          defaultSessionDay={selectedFinanceDay || undefined}
           initialDraft={editingDraft}
           onClose={() => {
+            setFinanceModalKey((prev) => prev + 1);
             setShowModal(false);
+            setSelectedFinanceDay(null);
             setEditingDraft(null);
             if (onCloseNewModal) onCloseNewModal();
           }}
-          clusterName={clusterName}
+          clusterName={financeClusterName}
           collegeName={collegeName}
-          spocName="Narendhar"
-          financerName="TQI Finance Team"
-          onSaveDraftPackage={(draftPkg) => {
+          sessions={sessions}
+          clusterId={financeClusterId}
+          spocName={spocName}
+          financerName={financerName}
+          onSaveDraftPackage={async (draftPkg) => {
             if (onSaveDraft) {
-              onSaveDraft(draftPkg);
+              await onSaveDraft(draftPkg);
             }
             showToast(`Draft sheet "${draftPkg.sessionDay}" saved in TQI format!`);
           }}
-          onSubmitFinance={(entries, isDraft) => {
-            entries.forEach((entry) => onAddFinanceEntry(entry));
-            showToast(isDraft ? 'Draft entries saved!' : 'Finance entries submitted for approval!');
+          onSubmitFinance={async (entries, isDraft) => {
+            await Promise.all(entries.map((entry) => onAddFinanceEntry(entry)));
+            if (!isDraft) {
+              const draftId = entries.find((entry) => entry.draftId)?.draftId;
+              if (!draftId || !onSubmitDraft) throw new Error('Finance report was saved, but submission is unavailable.');
+              await onSubmitDraft(draftId);
+            }
+            showToast(isDraft ? 'Draft entries saved!' : 'Finance report submitted for approval.');
           }}
         />
       )}

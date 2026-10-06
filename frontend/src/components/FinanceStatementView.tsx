@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { TabType, FinanceEntry, FinanceDraft, RouteDraftItem, FoodDraftItem } from '../types';
+import { TabType, FinanceEntry, FinanceDraft, RouteDraftItem, FoodDraftItem, Session, UserRole } from '../types';
 import { TqiLogo } from './TqiLogo';
+import { NewFinanceModal } from './NewFinanceModal';
 import { exportFinanceStatementAsPdf } from '../utils/pdf/exportStatement';
 import { checkImageClarity, extractRouteAndDetailsFromText } from '../utils/billParser';
 import {
@@ -11,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-
+\
 interface StatementItem {
   id: string;
   sNo: number;
@@ -22,6 +23,7 @@ interface StatementItem {
   total: number;
   billUrl: string | null;
   billFileName?: string;
+  billDetectedAmount?: number;
   remarks: string;
   rawType?: 'route' | 'food' | 'stationery' | 'other' | 'entry';
   rawId?: string;
@@ -34,19 +36,26 @@ interface FinanceStatementViewProps {
   onNavigate: (tab: TabType, targetId?: string) => void;
   entries?: FinanceEntry[];
   drafts?: FinanceDraft[];
+  sessions?: Session[];
+  clusterId?: string;
   activeDraftId?: string;
+  canManageDrafts?: boolean;
+  userRole?: UserRole;
   clusterName?: string;
   collegeName?: string;
   spocName?: string;
   financerName?: string;
   sessionDay?: string;
   date?: string;
-  onSaveDraft?: (draft: FinanceDraft) => void;
+  onSaveDraft?: (draft: FinanceDraft) => void | Promise<void>;
   onDeleteDraft?: (draftId: string) => void;
-  onSubmitDraft?: (draftId: string) => void;
-  onAddFinanceEntry?: (entry: Omit<FinanceEntry, 'id'>) => void;
-  onUpdateFinanceEntry?: (id: string, updated: Partial<FinanceEntry>) => void;
-  onDeleteFinanceEntry?: (id: string) => void;
+  onSubmitDraft?: (draftId: string, missingBillReason?: string) => void | Promise<void>;
+  onApproveReport?: (draftId?: string) => void | Promise<void>;
+  onRejectReport?: (draftId?: string, reason?: string) => void | Promise<void>;
+  onAddFinanceEntry?: (entry: Omit<FinanceEntry, 'id'>) => void | Promise<void>;
+  onUpdateFinanceEntry?: (id: string, updated: Partial<FinanceEntry>) => void | Promise<void>;
+  onDeleteFinanceEntry?: (id: string) => void | Promise<void>;
+  onRequestFinanceEdit?: (entryId: string, reason: string) => void | Promise<void>;
 }
 
 export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
@@ -55,23 +64,32 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   onNavigate,
   entries = [],
   drafts = [],
+  sessions = [],
+  clusterId = '',
   activeDraftId,
+  canManageDrafts = true,
+  userRole = 'Cluster Admin',
   clusterName = 'Cluster',
   collegeName = 'Partner Institution',
-  spocName = 'Coordinator / SPOC',
+  spocName = '',
   financerName = 'TQI Finance Team',
   sessionDay = 'Day 1',
-  date = '2026-08-20',
+  date = '',
   onSaveDraft,
   onDeleteDraft,
   onSubmitDraft,
+  onApproveReport,
+  onRejectReport,
   onAddFinanceEntry,
   onUpdateFinanceEntry,
   onDeleteFinanceEntry,
+  onRequestFinanceEdit,
 }) => {
-  const [selectedViewKey, setSelectedViewKey] = useState<string>(
-    activeDraftId || (drafts.length > 0 ? drafts[0].id : 'all-approved')
-  );
+  const defaultStatementViewKey =
+    activeDraftId ||
+    (drafts.length > 0 ? drafts[0].id : canManageDrafts ? `Day ${sessions[0]?.dayNumber || 1}` : 'all-approved');
+
+  const [selectedViewKey, setSelectedViewKey] = useState<string>(defaultStatementViewKey);
 
   // Bill Lightbox Modal state
   const [activeBillViewer, setActiveBillViewer] = useState<{
@@ -91,6 +109,17 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
   // Add Expense Row Modal state
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [showDraftEditor, setShowDraftEditor] = useState(false);
+  const [isCreatingAdditionalDraft, setIsCreatingAdditionalDraft] = useState(false);
+  const [editRequestReason, setEditRequestReason] = useState('');
+  const [isEditRequestOpen, setIsEditRequestOpen] = useState(false);
+  const [isSubmittingEditRequest, setIsSubmittingEditRequest] = useState(false);
+  const [isSubmitConfirmOpen, setIsSubmitConfirmOpen] = useState(false);
+  const [missingBillReason, setMissingBillReason] = useState('');
+  const [isApprovalOpen, setIsApprovalOpen] = useState(false);
+  const [isRejectOpen, setIsRejectOpen] = useState(false);
+  const [approvedCheck, setApprovedCheck] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
   const [newExpenseForm, setNewExpenseForm] = useState<{
     category: 'Travel' | 'Food' | 'Stationery' | 'Other';
     description: string;
@@ -100,6 +129,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     remarks: string;
     billUrl: string | null;
     billFileName: string;
+    billDetectedAmount?: number;
   }>({
     category: 'Travel',
     description: '',
@@ -109,6 +139,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     remarks: '',
     billUrl: null,
     billFileName: '',
+    billDetectedAmount: undefined,
   });
 
   // Edit Metadata Modal state
@@ -133,6 +164,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
   // Full Statement / All Bills Modal state
   const [showFullStatementModal, setShowFullStatementModal] = useState<boolean>(false);
+  const [showFullStatementPreview, setShowFullStatementPreview] = useState<boolean>(false);
   const [showAllBillsModal, setShowAllBillsModal] = useState<boolean>(false);
   const [activeGalleryIndex, setActiveGalleryIndex] = useState<number>(0);
 
@@ -148,19 +180,91 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     return drafts.find((d) => d.id === selectedViewKey) || null;
   }, [drafts, selectedViewKey]);
 
+  const scheduledSession = useMemo(() => {
+    const dayNumber = Number((currentDraft?.sessionDay || selectedViewKey).match(/\d+/)?.[0] || 0);
+    if (!dayNumber) return undefined;
+    return sessions.find((session) => Number(session.dayNumber) === dayNumber && (!clusterId || session.clusterId === clusterId));
+  }, [sessions, clusterId, currentDraft, selectedViewKey]);
+
+  const selectedEntries = useMemo(() => {
+    if (selectedViewKey === 'all-approved') {
+      return entries.filter((entry) => entry.status === 'Approved');
+    }
+    if (currentDraft || entries.some((entry) => entry.draftId === selectedViewKey)) {
+      const selectedDraftId = currentDraft?.id || selectedViewKey;
+      return entries.filter((entry) => entry.draftId === selectedDraftId);
+    }
+
+    const selectedDayNumber = Number((currentDraft?.sessionDay || selectedViewKey).match(/\d+/)?.[0] || 0);
+    const matchingSession = scheduledSession || sessions.find((session) =>
+      selectedDayNumber > 0 && Number(session.dayNumber) === selectedDayNumber && (!clusterId || session.clusterId === clusterId)
+    );
+
+    const matchingDayEntries = entries.filter((entry) => {
+      const matchesDraft = Boolean(entry.draftId && (
+        entry.draftId === currentDraft?.id || entry.draftId === selectedViewKey
+      ));
+      const entryDayNumber = Number((entry.sessionDay || '').match(/\d+/)?.[0] || 0);
+      const matchesDay = selectedDayNumber > 0 && entryDayNumber === selectedDayNumber;
+      const matchesSession = Boolean(matchingSession && entry.sessionId === matchingSession.id);
+      const matchesDate = Boolean(matchingSession?.date && entry.date?.slice(0, 10) === matchingSession.date.slice(0, 10));
+      const matchesSelectedKey = entry.sessionDay === selectedViewKey;
+      return matchesDraft || matchesDay || matchesSession || matchesDate || matchesSelectedKey;
+    });
+    // A day card is a navigation fallback, not a request to combine separate
+    // report drafts for that day. Select one report ID deterministically.
+    const reportIds = Array.from(new Set(matchingDayEntries.map((entry) => entry.draftId).filter(Boolean))) as string[];
+    if (reportIds.length > 1) {
+      const newestReportId = reportIds.sort((left, right) => {
+        const leftTime = Number(left.match(/(\d{10,})$/)?.[1] || 0);
+        const rightTime = Number(right.match(/(\d{10,})$/)?.[1] || 0);
+        return rightTime - leftTime || right.localeCompare(left);
+      })[0];
+      return matchingDayEntries.filter((entry) => entry.draftId === newestReportId);
+    }
+    return matchingDayEntries;
+  }, [entries, selectedViewKey, currentDraft, scheduledSession, sessions, clusterId]);
+
+  const selectedDraftId = currentDraft?.id || (entries.some((entry) => entry.draftId === selectedViewKey) ? selectedViewKey : null) || selectedEntries.find((entry) => entry.draftId)?.draftId || null;
+  const selectedSheetStatus: string = currentDraft?.status || (selectedEntries.some((entry) => entry.status === 'Pending')
+    ? 'Pending'
+    : selectedEntries.length > 0 && selectedEntries.every((entry) => entry.status === 'Approved')
+      ? 'Approved'
+      : selectedEntries.some((entry) => entry.status === 'Correction')
+        ? 'Correction Requested'
+        : selectedEntries.some((entry) => entry.status === 'Draft')
+          ? 'Draft'
+          : '');
+  const editRequestStatus = currentDraft?.editRequestStatus || 'NONE';
+  const editPermissionGranted = Boolean(currentDraft?.editPermission) || editRequestStatus === 'APPROVED';
+  const reportHistory = currentDraft?.history || [];
+  const latestRejectionIndex = reportHistory.reduce((latest, item, index) => item.event === 'Finance report rejected' ? index : latest, -1);
+  const latestSubmissionIndex = reportHistory.reduce((latest, item, index) => /report (?:re)?submitted/i.test(item.event) ? index : latest, -1);
+  const hasUnresolvedCorrection = latestRejectionIndex >= 0 && latestRejectionIndex > latestSubmissionIndex;
+  const correctionFeedback = [...reportHistory].reverse()
+    .find((item) => item.event === 'Finance report rejected' && item.details.trim())?.details;
+  const rejectedReportNeedsCorrection = currentDraft?.reportStatus === 'REJECTED';
+  const canEditSelectedSheet = canManageDrafts && selectedViewKey !== 'all-approved' &&
+    (selectedSheetStatus === 'Draft' || rejectedReportNeedsCorrection || editPermissionGranted);
+  const canAddEntryToSelectedSheet = canManageDrafts && selectedViewKey !== 'all-approved' &&
+    ((selectedSheetStatus === 'Draft' && !hasUnresolvedCorrection) || selectedSheetStatus === '');
+  const canRequestEditSelectedSheet = canManageDrafts && selectedViewKey !== 'all-approved' &&
+    ['Approved', 'Pending'].includes(selectedSheetStatus) && selectedEntries.length > 0 && Boolean(onRequestFinanceEdit) && !editPermissionGranted && editRequestStatus !== 'PENDING';
+  const isSuperAdmin = userRole === 'Super Admin';
+
   // Derive statement metadata
   const statementMeta = useMemo(() => {
     if (currentDraft) {
       return {
-        collegeName: currentDraft.collegeName || collegeName,
+        collegeName: collegeName || currentDraft.collegeName,
         clusterName: currentDraft.clusterName || clusterName,
-        sessionName: currentDraft.title,
-        sessionDay: currentDraft.sessionDay || sessionDay,
-        date: currentDraft.sessionDate || date,
-        spocName: currentDraft.spocName || spocName,
-        financerName: currentDraft.financerName || financerName,
-        isDraft: true,
-        status: currentDraft.status || 'Draft',
+        sessionName: scheduledSession?.name || scheduledSession?.title || currentDraft.title,
+        sessionDay: scheduledSession ? `Day ${scheduledSession.dayNumber}` : currentDraft.sessionDay || sessionDay,
+        date: scheduledSession?.date?.slice(0, 10) || currentDraft.sessionDate || date,
+        spocName: spocName || currentDraft.spocName,
+        financerName: financerName || currentDraft.financerName,
+        isDraft: currentDraft.status === 'Draft',
+        status: currentDraft.status === 'Pending' ? 'Submitted' : currentDraft.status || 'Draft',
       };
     }
 
@@ -168,28 +272,36 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       return {
         collegeName,
         clusterName,
-        sessionName: 'Combined Cluster Finance Statement',
+        sessionName: 'Combined Finance Statement',
         sessionDay: 'All Sessions',
         date: date,
         spocName,
         financerName,
         isDraft: false,
-        status: 'Approved' as const,
+        status: selectedEntries.length > 0 ? 'Approved' : 'Not Submitted',
       };
     }
 
     return {
       collegeName,
       clusterName,
-      sessionName: `${selectedViewKey} Finance Statement`,
-      sessionDay: selectedViewKey,
-      date: date,
+      sessionName: scheduledSession?.name || scheduledSession?.title || `${selectedViewKey} Finance Statement`,
+      sessionDay: scheduledSession ? `Day ${scheduledSession.dayNumber}` : selectedViewKey,
+      date: scheduledSession?.date?.slice(0, 10) || selectedEntries.find((entry) => entry.date)?.date || date,
       spocName,
       financerName,
-      isDraft: false,
-      status: 'Approved' as const,
+      isDraft: selectedEntries.length > 0 && selectedEntries.every((entry) => entry.status === 'Draft'),
+      status: selectedEntries.length === 0
+        ? 'Not Submitted'
+        : selectedEntries.some((entry) => entry.status === 'Correction')
+          ? 'Correction Requested'
+          : selectedEntries.some((entry) => entry.status === 'Pending')
+            ? 'Submitted'
+            : selectedEntries.every((entry) => entry.status === 'Approved')
+              ? 'Approved'
+              : 'Draft',
     };
-  }, [currentDraft, selectedViewKey, collegeName, clusterName, sessionDay, date, spocName, financerName]);
+  }, [currentDraft, selectedViewKey, collegeName, clusterName, sessionDay, date, spocName, financerName, scheduledSession, selectedEntries]);
 
   // Synchronize metadata modal form whenever current view changes
   React.useEffect(() => {
@@ -206,6 +318,25 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
   // Compute table line items dynamically
   const tableItems: StatementItem[] = useMemo(() => {
+    // Finance entry rows are the persisted source of truth. Do not render
+    // unsaved expense arrays from report metadata as if they had been saved.
+    if (selectedEntries.length > 0 || currentDraft) {
+      return selectedEntries.map((entry, index) => ({
+        id: entry.id,
+        sNo: index + 1,
+        category: entry.category as StatementItem['category'],
+        description: entry.description,
+        count: entry.count ? String(entry.count) : '—',
+        countAmount: entry.countAmount || '—',
+        total: Number(entry.amount || 0),
+        billUrl: entry.billUrl || null,
+        billFileName: entry.billReference || '',
+        remarks: entry.remarks || '—',
+        rawType: 'entry',
+        rawId: entry.id,
+      }));
+    }
+
     // 1. If viewing a structured Draft
     if (currentDraft) {
       const items: StatementItem[] = [];
@@ -215,6 +346,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       if (currentDraft.routes) {
         currentDraft.routes.forEach((r, idx) => {
           const total = (r.volunteers || 0) * (r.perPerson || 0);
+          if (total <= 0 && !r.from?.trim() && !r.to?.trim()) return;
           items.push({
             id: r.id || `route-${idx}`,
             sNo: sNo++,
@@ -223,9 +355,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             count: r.volunteers ? String(r.volunteers) : '—',
             countAmount: r.volunteers && r.perPerson ? `${r.volunteers}×${r.perPerson}` : '—',
             total: total,
-            billUrl: r.bill?.url || 'https://images.unsplash.com/photo-1554415707-9e49fe74a6d0?w=600&auto=format&fit=crop&q=80',
-            billFileName: r.bill?.fileName || 'Travel_Tickets.jpg',
-            remarks: r.remarks || 'Bus / Auto transportation for volunteers',
+            billUrl: r.bill?.url || null,
+            billFileName: r.bill?.fileName || '',
+            remarks: r.remarks || '—',
             rawType: 'route',
             rawId: r.id,
           });
@@ -243,9 +375,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             count: '—',
             countAmount: '—',
             total: currentDraft.food.breakfast.amount || 0,
-            billUrl: currentDraft.food.breakfast.bill?.url || 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80',
-            billFileName: currentDraft.food.breakfast.bill?.fileName || 'Breakfast_Bill.jpg',
-            remarks: currentDraft.food.breakfast.remarks || 'Tiffin & Tea for volunteers at Annapoorna hotel',
+            billUrl: currentDraft.food.breakfast.bill?.url || null,
+            billFileName: currentDraft.food.breakfast.bill?.fileName || '',
+            remarks: currentDraft.food.breakfast.remarks || '—',
             rawType: 'food',
             foodKey: 'breakfast',
           });
@@ -260,9 +392,9 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             count: '—',
             countAmount: '—',
             total: currentDraft.food.lunch.amount || 0,
-            billUrl: currentDraft.food.lunch.bill?.url || 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80',
-            billFileName: currentDraft.food.lunch.bill?.fileName || 'Lunch_Receipt.jpg',
-            remarks: currentDraft.food.lunch.remarks || 'Meals packet allowance',
+            billUrl: currentDraft.food.lunch.bill?.url || null,
+            billFileName: currentDraft.food.lunch.bill?.fileName || '',
+            remarks: currentDraft.food.lunch.remarks || '—',
             rawType: 'food',
             foodKey: 'lunch',
           });
@@ -278,8 +410,8 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             countAmount: '—',
             total: currentDraft.food.dinner.amount || 0,
             billUrl: currentDraft.food.dinner.bill?.url || null,
-            billFileName: currentDraft.food.dinner.bill?.fileName || 'Dinner_Receipt.jpg',
-            remarks: currentDraft.food.dinner.remarks || 'Volunteer dinner',
+            billFileName: currentDraft.food.dinner.bill?.fileName || '',
+            remarks: currentDraft.food.dinner.remarks || '—',
             rawType: 'food',
             foodKey: 'dinner',
           });
@@ -295,8 +427,8 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             countAmount: '—',
             total: currentDraft.food.refreshments.amount || 0,
             billUrl: currentDraft.food.refreshments.bill?.url || null,
-            billFileName: currentDraft.food.refreshments.bill?.fileName || 'Tea_Snacks_Bill.jpg',
-            remarks: currentDraft.food.refreshments.remarks || 'Tea and evening snacks',
+            billFileName: currentDraft.food.refreshments.bill?.fileName || '',
+            remarks: currentDraft.food.refreshments.remarks || '—',
             rawType: 'food',
             foodKey: 'refreshments',
           });
@@ -314,8 +446,8 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           countAmount: '—',
           total: currentDraft.stationery.amount || 0,
           billUrl: currentDraft.stationery.bill?.url || null,
-          billFileName: currentDraft.stationery.bill?.fileName || 'Stationery_Bill.jpg',
-          remarks: currentDraft.stationery.remarks || 'Chart papers, markers and activity kits',
+          billFileName: currentDraft.stationery.bill?.fileName || '',
+          remarks: currentDraft.stationery.remarks || '—',
           rawType: 'stationery',
         });
       }
@@ -328,12 +460,12 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               id: ot.id || `other-${idx}`,
               sNo: sNo++,
               category: 'Other',
-              description: ot.description || 'First Aid Kit & Water Cans',
+              description: ot.description || 'Expense',
               count: '—',
               countAmount: '—',
               total: ot.amount || 0,
               billUrl: ot.bill?.url || null,
-              billFileName: ot.bill?.fileName || 'Other_Expense_Slip.jpg',
+              billFileName: ot.bill?.fileName || '',
               remarks: ot.remarks || '—',
               rawType: 'other',
               rawId: ot.id,
@@ -346,66 +478,10 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     }
 
     // 2. Otherwise use entries list
-    const sourceEntries =
-      selectedViewKey === 'all-approved'
-        ? entries.filter((e) => e.status === 'Approved')
-        : entries.filter((e) => e.sessionDay === selectedViewKey || e.status === 'Approved');
+    const sourceEntries = selectedEntries;
 
     if (sourceEntries.length === 0) {
-      return [
-        {
-          id: 'mock-1',
-          sNo: 1,
-          category: 'Travel',
-          description: 'KSR College → Salem / Ammapettai',
-          count: '20',
-          countAmount: '20×10',
-          total: 200,
-          billUrl: 'https://images.unsplash.com/photo-1554415707-9e49fe74a6d0?w=600&auto=format&fit=crop&q=80',
-          billFileName: 'Bus_Pass_KSR.jpg',
-          remarks: 'Bus transportation for 20 volunteers',
-          rawType: 'entry',
-        },
-        {
-          id: 'mock-2',
-          sNo: 2,
-          category: 'Food',
-          description: 'Breakfast',
-          count: '—',
-          countAmount: '—',
-          total: 1000,
-          billUrl: 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80',
-          billFileName: 'Annapoorna_Breakfast.jpg',
-          remarks: 'Tiffin & Tea for 20 volunteers at Annapoorna hotel',
-          rawType: 'entry',
-        },
-        {
-          id: 'mock-3',
-          sNo: 3,
-          category: 'Food',
-          description: 'Lunch',
-          count: '—',
-          countAmount: '—',
-          total: 500,
-          billUrl: 'https://images.unsplash.com/photo-1583337130417-3346a1be7dee?w=600&auto=format&fit=crop&q=80',
-          billFileName: 'Lunch_Packet_Slip.jpg',
-          remarks: 'Meals packet allowance',
-          rawType: 'entry',
-        },
-        {
-          id: 'mock-4',
-          sNo: 4,
-          category: 'Other',
-          description: 'First Aid Kit & Water Cans',
-          count: '—',
-          countAmount: '—',
-          total: 0,
-          billUrl: null,
-          billFileName: '',
-          remarks: '—',
-          rawType: 'entry',
-        },
-      ];
+      return [];
     }
 
     return sourceEntries.map((e, idx) => ({
@@ -416,13 +492,13 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       count: e.count ? String(e.count) : '—',
       countAmount: e.countAmount || '—',
       total: e.amount,
-      billUrl: e.billUrl || 'https://images.unsplash.com/photo-1554415707-9e49fe74a6d0?w=600&auto=format&fit=crop&q=80',
-      billFileName: 'Receipt_Voucher.jpg',
+      billUrl: e.billUrl || null,
+      billFileName: e.billReference || '',
       remarks: e.remarks || '—',
       rawType: 'entry',
       rawId: e.id,
     }));
-  }, [currentDraft, selectedViewKey, entries]);
+  }, [currentDraft, selectedViewKey, selectedEntries]);
 
   // Subtotals
   const travelTotal = useMemo(() => {
@@ -466,62 +542,129 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       }));
   }, [tableItems]);
 
+  const shouldDisplayDetailedStatement =
+    showFullStatementPreview ||
+    !!currentDraft ||
+    (statementMeta.status === 'Approved' && tableItems.length > 0) ||
+    (selectedViewKey === 'all-approved' && tableItems.length > 0) ||
+    (selectedViewKey !== 'all-approved' && (tableItems.length > 0 || canManageDrafts));
+
   // SUBMIT STATEMENT FOR APPROVAL (Volunteer / SPOC action only - No direct approve button)
-  const handleSubmitStatement = () => {
-    if (currentDraft && onSubmitDraft) {
-      onSubmitDraft(currentDraft.id);
-      showToast(`Finance Statement for "${statementMeta.sessionDay}" submitted for review!`);
+  const handleSubmitStatement = async () => {
+    const draftEntries = entries.filter((entry) => entry.draftId === selectedDraftId);
+    const draftId = selectedDraftId;
+
+    if (draftId && onSubmitDraft) {
+      if (!draftEntries.length) {
+        alert('Add at least one expense entry before submitting this report.');
+        return;
+      }
+      const incomplete = draftEntries.find((entry) => !entry.description.trim() || !Number.isFinite(Number(entry.amount)) || entry.amount <= 0);
+      if (incomplete) {
+        alert(`Complete the description and enter a valid amount greater than zero for "${incomplete.description || 'this expense'}".`);
+        return;
+      }
+      const missingBillEntries = draftEntries.filter((entry) => !entry.billUrl && !entry.billReference);
+      const mismatchedBillEntries = draftEntries.filter((entry) => {
+        const detectedAmount = Number(entry.billDetectedAmount ?? 0);
+        return Boolean(entry.billUrl) && detectedAmount > 0 && Math.abs(Number(entry.amount) - detectedAmount) > 0.01;
+      });
+      if (mismatchedBillEntries.length > 0) {
+        const entry = mismatchedBillEntries[0];
+        alert(`"${entry.description}" does not match the uploaded bill amount. Upload a valid bill or correct the entry amount before submitting.`);
+        return;
+      }
+      const plannedDate = currentDraft?.sessionDate || scheduledSession?.date?.slice(0, 10) || draftEntries.find((entry) => entry.date)?.date;
+      if (!plannedDate) {
+        alert('Please edit this draft and select a planned date before submitting.');
+        return;
+      }
+      const reasonForMissingBill = missingBillEntries.length > 0 ? missingBillReason.trim() : undefined;
+      if (missingBillEntries.length > 0 && !reasonForMissingBill) {
+        alert('A valid reason is required for every missing bill before this report can be submitted for review.');
+        return;
+      }
+      try {
+        await onSubmitDraft(draftId, reasonForMissingBill);
+        setIsSubmitConfirmOpen(false);
+        setMissingBillReason('');
+        showToast(`Finance Statement for "${statementMeta.sessionDay}" submitted for review!`);
+      } catch (error) {
+        alert(error instanceof Error ? error.message : 'Unable to submit this finance statement.');
+      }
     } else {
-      showToast('Finance statement submitted to TQI Finance Team successfully!');
+      alert('Save this day as a draft before submitting it for approval.');
     }
   };
 
-  // DELETE AN EXPENSE ROW
-  const handleDeleteRow = (item: StatementItem) => {
-    if (!confirm(`Are you sure you want to delete "${item.description}"?`)) return;
+  const requestSubmitConfirmation = () => {
+    if (!selectedDraftId || selectedEntries.length === 0) {
+      alert('Add at least one expense entry before submitting this report.');
+      return;
+    }
+    const invalidEntry = selectedEntries.find((entry) => !entry.description.trim() || !Number.isFinite(Number(entry.amount)) || entry.amount <= 0);
+    if (invalidEntry) {
+      alert(`Complete the description and enter a valid amount greater than zero for "${invalidEntry.description || 'this expense'}".`);
+      return;
+    }
+    const missingBillEntries = selectedEntries.filter((entry) => !entry.billUrl && !entry.billReference);
+    const mismatchedBillEntries = selectedEntries.filter((entry) => {
+      const detectedAmount = Number(entry.billDetectedAmount ?? 0);
+      return Boolean(entry.billUrl) && detectedAmount > 0 && Math.abs(Number(entry.amount) - detectedAmount) > 0.01;
+    });
+    if (mismatchedBillEntries.length > 0) {
+      const badEntry = mismatchedBillEntries[0];
+      alert(`"${badEntry.description}" does not match the uploaded bill amount. Upload a valid bill or correct the entry amount before submitting.`);
+      return;
+    }
+    if (!statementMeta.date) {
+      alert('Please select a planned date before submitting this finance report.');
+      return;
+    }
+    if (missingBillEntries.length > 0) {
+      setMissingBillReason('');
+    }
+    setIsSubmitConfirmOpen(true);
+  };
 
-    if (currentDraft && onSaveDraft) {
-      let updatedDraft: FinanceDraft = { ...currentDraft };
-
-      if (item.rawType === 'route' && item.rawId) {
-        updatedDraft.routes = updatedDraft.routes.filter((r) => r.id !== item.rawId);
-      } else if (item.rawType === 'food' && item.foodKey) {
-        updatedDraft.food = {
-          ...updatedDraft.food,
-          [item.foodKey]: { amount: 0, remarks: '', bill: null },
-        };
-      } else if (item.rawType === 'stationery') {
-        updatedDraft.stationery = { amount: 0, remarks: '', bill: null };
-      } else if (item.rawType === 'other' && item.rawId) {
-        updatedDraft.otherItems = updatedDraft.otherItems.filter((ot) => ot.id !== item.rawId);
-      }
-
-      // Recalculate draft total
-      const newTravel = updatedDraft.routes.reduce((s, r) => s + (r.volunteers || 0) * (r.perPerson || 0), 0);
-      const newFood =
-        (updatedDraft.food.breakfast?.amount || 0) +
-        (updatedDraft.food.lunch?.amount || 0) +
-        (updatedDraft.food.dinner?.amount || 0) +
-        (updatedDraft.food.refreshments?.amount || 0);
-      const newStationery = updatedDraft.stationery?.amount || 0;
-      const newOther = updatedDraft.otherItems.reduce((s, o) => s + (o.amount || 0), 0);
-
-      updatedDraft.totalAmount = newTravel + newFood + newStationery + newOther;
-      onSaveDraft(updatedDraft);
-      showToast(`Deleted "${item.description}"`);
-    } else if (item.rawType === 'entry' && item.rawId && onDeleteFinanceEntry) {
-      onDeleteFinanceEntry(item.rawId);
-      showToast(`Deleted "${item.description}"`);
-    } else {
-      showToast(`Item removed from view.`);
+  const handleSubmitEditRequest = async () => {
+    const entry = selectedEntries.find((item) => item.status === 'Approved') || selectedEntries[0];
+    if (!entry || !onRequestFinanceEdit) return;
+    if (!editRequestReason.trim()) {
+      alert('Please provide a reason for requesting an edit.');
+      return;
+    }
+    setIsSubmittingEditRequest(true);
+    try {
+      await onRequestFinanceEdit(entry.id, editRequestReason.trim());
+      setIsEditRequestOpen(false);
+      setEditRequestReason('');
+      showToast('Finance edit request submitted for review.');
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to request a finance edit.');
+    } finally {
+      setIsSubmittingEditRequest(false);
     }
   };
 
   // SAVE EDITED EXPENSE ROW
-  const handleSaveEditedRow = () => {
+  const handleSaveEditedRow = async () => {
     if (!editingItem) return;
 
-    if (currentDraft && onSaveDraft) {
+    if (editingItem.rawType === 'entry' && editingItem.rawId && onUpdateFinanceEntry) {
+      await onUpdateFinanceEntry(editingItem.rawId, {
+        description: editingItem.description,
+        category: editingItem.category as FinanceEntry['category'],
+        amount: editingItem.total,
+        remarks: editingItem.remarks,
+        billUrl: editingItem.billUrl || undefined,
+        billReference: editingItem.billFileName || undefined,
+        billDetectedAmount: editingItem.billDetectedAmount ?? (editingItem.billUrl ? editingItem.total : undefined),
+        count: parseInt(editingItem.count) || undefined,
+        countAmount: editingItem.countAmount || undefined,
+      });
+      showToast(`Updated "${editingItem.description}"`);
+    } else if (currentDraft && onSaveDraft) {
       const updatedDraft: FinanceDraft = { ...currentDraft };
 
       if (editingItem.rawType === 'route' && editingItem.rawId) {
@@ -614,18 +757,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       const newOther = updatedDraft.otherItems.reduce((s, o) => s + (o.amount || 0), 0);
       updatedDraft.totalAmount = newTravel + newFood + newStationery + newOther;
 
-      onSaveDraft(updatedDraft);
-      showToast(`Updated "${editingItem.description}"`);
-    } else if (editingItem.rawType === 'entry' && editingItem.rawId && onUpdateFinanceEntry) {
-      onUpdateFinanceEntry(editingItem.rawId, {
-        description: editingItem.description,
-        category: editingItem.category as any,
-        amount: editingItem.total,
-        remarks: editingItem.remarks,
-        billUrl: editingItem.billUrl || undefined,
-        count: parseInt(editingItem.count) || undefined,
-        countAmount: editingItem.countAmount || undefined,
-      });
+      await onSaveDraft(updatedDraft);
       showToast(`Updated "${editingItem.description}"`);
     }
 
@@ -633,7 +765,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   };
 
   // ADD NEW EXPENSE ROW TO STATEMENT
-  const handleAddNewExpenseRow = () => {
+  const handleAddNewExpenseRow = async () => {
     if (!newExpenseForm.description && !newExpenseForm.totalAmount) {
       alert('Please fill in description or amount');
       return;
@@ -643,6 +775,28 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     const vols = parseInt(newExpenseForm.count) || 0;
     const perP = parseFloat(newExpenseForm.perPerson) || 0;
     const finalAmount = totalAmt > 0 ? totalAmt : vols * perP;
+    const newEntryDraftId = currentDraft?.id || selectedDraftId ||
+      (selectedViewKey !== 'all-approved' ? `draft-day-${Date.now()}` : undefined);
+    const newFinanceEntry: Omit<FinanceEntry, 'id'> = {
+      date: statementMeta.date,
+      description: newExpenseForm.description || 'Expense Entry',
+      category: newExpenseForm.category,
+      amount: finalAmount,
+      panchayatId: 'dharmapuri-main',
+      panchayatName: statementMeta.clusterName,
+      villageName: 'Cluster Center',
+      status: 'Draft',
+      billUrl: newExpenseForm.billUrl || undefined,
+      billDetectedAmount: newExpenseForm.billDetectedAmount ?? (newExpenseForm.billUrl ? finalAmount : undefined),
+      remarks: newExpenseForm.remarks,
+      count: vols || undefined,
+      countAmount: vols && perP ? `${vols}×${perP}` : undefined,
+      sessionDay: statementMeta.sessionDay,
+      sessionId: scheduledSession?.id,
+      clusterId: clusterId || undefined,
+      clusterName,
+      draftId: newEntryDraftId,
+    };
 
     if (currentDraft && onSaveDraft) {
       const updatedDraft: FinanceDraft = { ...currentDraft };
@@ -728,24 +882,12 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       const newOther = updatedDraft.otherItems.reduce((s, o) => s + (o.amount || 0), 0);
       updatedDraft.totalAmount = newTravel + newFood + newStationery + newOther;
 
-      onSaveDraft(updatedDraft);
+      await onSaveDraft(updatedDraft);
+      await onAddFinanceEntry?.(newFinanceEntry);
       showToast(`Added "${newExpenseForm.description}" to statement`);
     } else if (onAddFinanceEntry) {
-      onAddFinanceEntry({
-        date: statementMeta.date,
-        description: newExpenseForm.description || 'Expense Entry',
-        category: newExpenseForm.category as any,
-        amount: finalAmount,
-        panchayatId: 'dharmapuri-main',
-        panchayatName: statementMeta.clusterName,
-        villageName: 'Cluster Center',
-        status: 'Draft',
-        billUrl: newExpenseForm.billUrl || undefined,
-        remarks: newExpenseForm.remarks,
-        count: vols || undefined,
-        countAmount: vols && perP ? `${vols}×${perP}` : undefined,
-        sessionDay: statementMeta.sessionDay,
-      });
+      await onAddFinanceEntry(newFinanceEntry);
+      if (newEntryDraftId) setSelectedViewKey(newEntryDraftId);
       showToast(`Added expense row`);
     }
 
@@ -763,7 +905,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
   };
 
   // SAVE METADATA CHANGES
-  const handleSaveMetadata = () => {
+  const handleSaveMetadata = async () => {
     if (currentDraft && onSaveDraft) {
       const updatedDraft: FinanceDraft = {
         ...currentDraft,
@@ -775,7 +917,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
         spocName: metaForm.spocName,
         financerName: metaForm.financerName,
       };
-      onSaveDraft(updatedDraft);
+      await onSaveDraft(updatedDraft);
       showToast('Statement details updated');
     } else {
       showToast('Metadata updated for preview');
@@ -804,13 +946,11 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     pushMergedBanner('TALENT QUEST FOR INDIA');
     pushMergedBanner('Academic Year 2026 – 2027');
     pushMergedBanner('OFFICIAL FINANCE STATEMENT');
-    pushMergedBanner(`${statementMeta.clusterName} Cluster`);
     wsData.push([]); // spacer
 
     // ── Meta grid: three label/value pairs per row (A:B, D:E, G:H) ──
     wsData.push([
       'COLLEGE', statementMeta.collegeName, '',
-      'CLUSTER', statementMeta.clusterName, '',
       'SESSION', statementMeta.sessionName,
     ]);
     wsData.push([
@@ -873,7 +1013,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     wsData.push([]);
     wsData.push([
       'Coordinator / SPOC', statementMeta.spocName, '', '',
-      'Cluster Admin (Financer)', statementMeta.financerName, '', '',
+      'Finance Officer', statementMeta.financerName, '', '',
     ]);
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -945,7 +1085,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
         <div class="header-title">Talent Quest for India</div>
         <div style="font-size: 15px; text-align: center; color: #434652; font-weight: bold; margin-bottom: 2px;">Academic year ${academicYear}</div>
         <div style="font-size: 15px; text-align: center; color: #002869; font-weight: bold; text-transform: uppercase; margin-bottom: 2px;">Finance report</div>
-        <div class="header-sub">${statementMeta.clusterName} Cluster</div>
+        <div class="header-sub">${statementMeta.sessionName} · ${statementMeta.sessionDay}</div>
 
         <table class="meta-table">
           <tr>
@@ -960,12 +1100,12 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           </tr>
           <tr>
             <td>
-              <div class="meta-label">CLUSTER</div>
-              <div class="meta-val">${statementMeta.clusterName}</div>
-            </td>
-            <td>
               <div class="meta-label">SPOC</div>
               <div class="meta-val">${statementMeta.spocName}</div>
+            </td>
+            <td>
+              <div class="meta-label">FINANCER</div>
+              <div class="meta-val">${statementMeta.financerName}</div>
             </td>
           </tr>
           <tr>
@@ -974,8 +1114,8 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               <div class="meta-val">${statementMeta.sessionName} (${statementMeta.sessionDay})</div>
             </td>
             <td>
-              <div class="meta-label">FINANCER</div>
-              <div class="meta-val">${statementMeta.financerName}</div>
+              <div class="meta-label">STATUS</div>
+              <div class="meta-val">${statementMeta.status}</div>
             </td>
           </tr>
         </table>
@@ -1066,7 +1206,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
     showToast('Preparing official TQI PDF Statement...');
     try {
       await exportFinanceStatementAsPdf({
-        clusterName: statementMeta.clusterName,
+        clusterName: '',
         collegeName: statementMeta.collegeName,
         sessionName: statementMeta.sessionName,
         sessionDay: statementMeta.sessionDay,
@@ -1115,6 +1255,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               ...prev,
               billUrl: dataUrl,
               billFileName: file.name,
+              billDetectedAmount: extracted.amount ?? prev.billDetectedAmount,
               category: extracted.category || prev.category,
               description: extracted.origin && extracted.destination 
                 ? `Travel: ${extracted.origin} → ${extracted.destination}`
@@ -1129,6 +1270,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                     ...prev,
                     billUrl: dataUrl,
                     billFileName: file.name,
+                    billDetectedAmount: extracted.amount ?? prev.billDetectedAmount,
                     description: extracted.origin && extracted.destination 
                       ? `Travel: ${extracted.origin} → ${extracted.destination}`
                       : prev.description,
@@ -1142,6 +1284,22 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       };
       reader.readAsDataURL(file);
     }
+  };
+
+  const submitApproval = async () => {
+    if (!onApproveReport) return;
+    const draftId = currentDraft?.id || selectedDraftId || undefined;
+    await onApproveReport(draftId);
+    setIsApprovalOpen(false);
+    setApprovedCheck(false);
+  };
+
+  const submitRejection = async () => {
+    if (!onRejectReport || !rejectReason.trim()) return;
+    const draftId = currentDraft?.id || selectedDraftId || undefined;
+    await onRejectReport(draftId, rejectReason.trim());
+    setIsRejectOpen(false);
+    setRejectReason('');
   };
 
   return (
@@ -1165,48 +1323,115 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             Back to Finance
           </button>
 
-          {/* Select Statement Session */}
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-bold text-[#434652] dark:text-gray-300">Session Sheet:</span>
-            <Select
-              value={selectedViewKey}
-              onValueChange={(val) => setSelectedViewKey(val)}
-            >
-              <SelectTrigger id="finance-session-sheet-select" className="w-56 h-8 text-xs font-bold text-[#002869] dark:text-blue-200 border-[#c4c6d3] dark:border-gray-700 bg-[#faf8ff] dark:bg-gray-800">
-                <SelectValue placeholder="Select Session Sheet" />
-              </SelectTrigger>
-              <SelectContent>
-                {drafts.map((d) => (
-                  <SelectItem key={d.id} value={d.id}>
-                    [Draft] {d.title} ({d.sessionDay}) - &#8377;{d.totalAmount.toLocaleString()}
-                  </SelectItem>
-                ))}
-                <SelectItem value="all-approved">Combined Approved Statement (Cluster)</SelectItem>
-                {Array.from({ length: 8 }, (_, i) => `Day ${i + 1}`).map((day) => (
-                  <SelectItem key={day} value={day}>
-                    {day} Statement
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
         </div>
 
-        {/* Action Buttons: Submit, View Statement, All Bills, Excel, Word, Print/PDF */}
+        {/* Action Buttons: Draft entry/edit/submit actions live on the selected statement */}
         <div className="flex flex-wrap items-center gap-2">
-          {/* Submit for Approval (SPOC / Volunteer workflow) */}
-          <button
-            onClick={handleSubmitStatement}
-            className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] hover:bg-[#0f5c29] text-white rounded-md text-[12.5px] font-bold shadow-xs transition-all cursor-pointer"
-            title="Submit this statement for cluster review and approval"
-          >
-            <span className="material-symbols-outlined text-[17px]">send</span>
-            Submit for Approval
-          </button>
+          {canManageDrafts && selectedViewKey !== 'all-approved' && canAddEntryToSelectedSheet && (
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  if (canEditSelectedSheet && (currentDraft || (selectedDraftId && selectedEntries.length > 0))) {
+                    setIsCreatingAdditionalDraft(false);
+                    setNewExpenseForm({ category: 'Travel', description: '', count: '', perPerson: '', totalAmount: '', remarks: '', billUrl: null, billFileName: '' });
+                    setShowAddModal(true);
+                  } else {
+                    setIsCreatingAdditionalDraft(!canEditSelectedSheet);
+                    setShowDraftEditor(true);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#002869] hover:bg-[#001f52] text-white rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
+                title={canEditSelectedSheet ? 'Add an expense to this day' : 'Start a new draft without changing this submitted sheet'}
+              >
+                <span className="material-symbols-outlined text-[17px]">add</span>
+                Add Expense
+              </button>
+              {currentDraft && canEditSelectedSheet && (
+                <button
+                  type="button"
+                  onClick={() => setShowDraftEditor(true)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-[#f4f3fb] text-[#002869] border border-[#c4c6d3] rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
+                  title="Edit this finance draft"
+                >
+                  <span className="material-symbols-outlined text-[17px]">edit</span>
+                  {editPermissionGranted ? 'Edit Report' : 'Edit'}
+                </button>
+              )}
+              {selectedSheetStatus === 'Draft' && currentDraft && (
+                <button
+                  type="button"
+                  onClick={() => void onSaveDraft?.(currentDraft)}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-white hover:bg-[#f4f3fb] text-[#002869] border border-[#c4c6d3] rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
+                >
+                  Save Draft
+                </button>
+              )}
+              {['Draft', 'Correction Requested', 'Rejected'].includes(selectedSheetStatus) && selectedDraftId && (
+                <button
+                  type="button"
+                  onClick={requestSubmitConfirmation}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] hover:bg-[#0f5c29] text-white rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
+                  title="Submit this statement for approval"
+                >
+                  <span className="material-symbols-outlined text-[17px]">send</span>
+                  {selectedSheetStatus === 'Draft' && !hasUnresolvedCorrection ? 'Submit for Approval' : 'Resubmit for Approval'}
+                </button>
+              )}
+              {editPermissionGranted && ['Pending', 'Approved'].includes(selectedSheetStatus) && selectedDraftId && (
+                <>
+                  <button type="button" onClick={() => currentDraft && void onSaveDraft?.(currentDraft)} className="flex items-center gap-1.5 px-3.5 py-2 bg-white text-[#002869] border border-[#c4c6d3] rounded-md text-[12px] font-bold cursor-pointer">Save Changes</button>
+                  <button type="button" onClick={requestSubmitConfirmation} className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] text-white rounded-md text-[12px] font-bold cursor-pointer">Resubmit for Approval</button>
+                </>
+              )}
+            </>
+          )}
+
+          {canManageDrafts && editRequestStatus === 'PENDING' && (
+            <button type="button" disabled className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 text-amber-800 border border-amber-200 rounded-md text-[12px] font-bold opacity-80 cursor-not-allowed">Edit Request Pending</button>
+          )}
+          {canManageDrafts && editPermissionGranted && (
+            <span className="flex items-center gap-1.5 px-3.5 py-2 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md text-[12px] font-bold">Edit Permission Granted</span>
+          )}
+          {canRequestEditSelectedSheet && (
+            <button
+              type="button"
+              onClick={() => setIsEditRequestOpen(true)}
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-md text-[12px] font-bold transition-all cursor-pointer"
+              title="Request permission to edit this submitted finance statement"
+            >
+              <span className="material-symbols-outlined text-[17px]">lock_open</span>
+              Request Edit
+            </button>
+          )}
+
+          {isSuperAdmin && (selectedSheetStatus === 'Pending' || statementMeta.status === 'Pending') && (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsApprovalOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-[#137333] hover:bg-[#0f5c29] text-white rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[17px]">check_circle</span>
+                Approve Report
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsRejectOpen(true)}
+                className="flex items-center gap-1.5 px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-md text-[12px] font-bold transition-all cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-[17px]">close</span>
+                Reject Report
+              </button>
+            </>
+          )}
 
           {/* View Statement Modal Trigger */}
           <button
-            onClick={() => setShowFullStatementModal(true)}
+            onClick={() => {
+              setShowFullStatementPreview(true);
+              setShowFullStatementModal(true);
+            }}
             className="flex items-center gap-1.5 px-3.5 py-2 bg-[#002869] hover:bg-[#001f52] dark:bg-blue-600 dark:hover:bg-blue-700 text-white rounded-md text-[12px] font-bold shadow-xs transition-all cursor-pointer"
             title="Open clean preview statement with all attached bills"
           >
@@ -1285,6 +1510,25 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           </div>
         </div>
       )}
+      {currentDraft?.editRequestStatus === 'PENDING' && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900 print:hidden">
+          <strong>Edit Request Pending</strong> — Super Admin approval is required before this report can be changed.
+          {currentDraft.editRequestedAt && <span className="ml-1">Requested {new Date(currentDraft.editRequestedAt).toLocaleString()}</span>}
+        </div>
+      )}
+      {currentDraft?.editPermission && (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-900 print:hidden"><strong>Edit Permission Granted</strong> — make the approved corrections and resubmit this report.</div>
+      )}
+      {currentDraft?.editRequestStatus === 'REJECTED' && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900 print:hidden"><strong>Edit Request Rejected.</strong> {currentDraft.editRejectionReason}</div>
+      )}
+      {hasUnresolvedCorrection && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-900 print:hidden">
+          <strong>Correction required.</strong>{' '}
+          {correctionFeedback || 'Review the comments below, edit the existing expense rows, then resubmit this report.'}
+          <span className="ml-1">Edit the existing expense rows and resubmit when corrected.</span>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* OFFICIAL TQI FINANCE SHEET DOCUMENT (PRINTABLE & UNBOXED HEADER) */}
@@ -1309,7 +1553,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
               Finance report
             </div>
             <div className="text-[13.5px] sm:text-[14.5px] font-bold text-[#592600] dark:text-amber-400">
-              {statementMeta.clusterName} Cluster
+              {statementMeta.sessionName} · {statementMeta.sessionDay}
             </div>
           </div>
         </div>
@@ -1319,17 +1563,20 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           <div className="flex items-center justify-between mb-3 border-b border-[#dae2ff] dark:border-gray-700 pb-2">
             <span className="text-[11px] font-extrabold text-[#002869] dark:text-blue-400 uppercase tracking-wider flex items-center gap-1.5">
               <span className="material-symbols-outlined text-[16px]">info</span>
-              Session &amp; Cluster Details
+              Session Details
             </span>
             <div className="flex items-center gap-2">
+              {canEditSelectedSheet && currentDraft && <button type="button" onClick={() => setShowEditMetaModal(true)} className="rounded-md border border-[#c4c6d3] bg-white px-2.5 py-1 text-[10px] font-bold text-[#002869] hover:bg-[#dae2ff] dark:bg-gray-900 dark:text-blue-300">Edit Report Details</button>}
               <span
                 className={`text-[11px] font-extrabold px-2.5 py-0.5 rounded-full ${
                   statementMeta.status === 'Approved'
                     ? 'bg-[#e6f4ea] dark:bg-emerald-950/60 text-[#137333] dark:text-emerald-400'
-                    : 'bg-[#ffdbc8] dark:bg-amber-950/60 text-[#592600] dark:text-amber-300'
+                    : statementMeta.status === 'Rejected' || statementMeta.status === 'Correction Requested'
+                      ? 'bg-[#fde8e8] dark:bg-red-950/60 text-[#b42318] dark:text-red-300'
+                      : 'bg-[#ffdbc8] dark:bg-amber-950/60 text-[#592600] dark:text-amber-300'
                 }`}
               >
-                Status: {statementMeta.status}
+                Status: {isSuperAdmin && (statementMeta.status === 'Pending' || statementMeta.status === 'Submitted') ? 'Pending Approval' : statementMeta.status}
               </span>
             </div>
           </div>
@@ -1343,15 +1590,6 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                 </span>
                 <span className="font-bold text-[#000000] dark:text-gray-100 text-[13.5px]">
                   {statementMeta.collegeName}
-                </span>
-              </div>
-
-              <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-2">
-                <span className="text-[11.5px] font-bold text-[#747783] dark:text-gray-400 uppercase tracking-wide w-24 shrink-0">
-                  CLUSTER:
-                </span>
-                <span className="font-bold text-[#002869] dark:text-blue-300 text-[13.5px]">
-                  {statementMeta.clusterName}
                 </span>
               </div>
 
@@ -1396,174 +1634,189 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
           </div>
         </div>
 
-        {/* 3. EXPENSE DETAILS SECTION */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="text-[14px] font-bold text-[#000000] dark:text-white uppercase tracking-wider flex items-center gap-2">
-              <span>Expense Details</span>
-              <span className="text-[11px] font-semibold text-[#747783] dark:text-gray-400 lowercase font-normal">
-                ({tableItems.length} items logged)
-              </span>
-            </h2>
-          </div>
-
-          {/* Main Expense Table (Mobile Cards View) */}
-          <div className="block md:hidden space-y-3 print:hidden">
-            {tableItems.map((item) => (
-              <div
-                key={item.id}
-                className="p-3.5 rounded-xl border border-[#c4c6d3] dark:border-gray-700 bg-[#faf8ff]/50 dark:bg-gray-800/50 space-y-2"
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[11px] font-mono text-[#747783] dark:text-gray-400">#{item.sNo}</span>
-                    <span className="inline-block px-2 py-0.5 rounded text-[10.5px] font-bold bg-[#dae2ff] dark:bg-blue-950/70 text-[#002869] dark:text-blue-300">
-                      {item.category}
-                    </span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-[#002869] dark:text-blue-300">
-                    ₹{item.total.toLocaleString()}
+        {shouldDisplayDetailedStatement ? (
+          <>
+            {/* 3. EXPENSE DETAILS SECTION */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-[14px] font-bold text-[#000000] dark:text-white uppercase tracking-wider flex items-center gap-2">
+                  <span>Expense Details</span>
+                  <span className="text-[11px] font-semibold text-[#747783] dark:text-gray-400 lowercase font-normal">
+                    ({tableItems.length} items logged)
                   </span>
-                </div>
+                </h2>
 
-                <div>
-                  <p className="text-xs font-bold text-[#1a1b21] dark:text-gray-100">
-                    {item.description}
-                  </p>
-                  {item.count && item.countAmount && (
-                    <p className="text-[11px] text-[#555555] dark:text-gray-400 mt-0.5 font-mono">
-                      Formula: {item.count} × {item.countAmount}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between pt-1.5 border-t border-[#c4c6d3]/60 dark:border-gray-700 text-[11px]">
-                  <span className="text-[#555555] dark:text-gray-400 truncate max-w-[170px]">
-                    {item.remarks || 'Expense item'}
-                  </span>
-
-                  {item.billUrl ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setBillZoom(1);
-                        setBillRotate(0);
-                        setActiveBillViewer({
-                          url: item.billUrl,
-                          title: item.category + ': ' + item.description,
-                          category: item.category,
-                          amount: item.total,
-                          fileName: item.billFileName || (item.category + '_Bill.jpg'),
-                          itemId: item.id,
-                        });
-                      }}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6f4ea] dark:bg-emerald-950/60 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded text-[11px] font-bold cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-[14px]">receipt_long</span>
-                      <span>View Bill</span>
-                    </button>
-                  ) : (
-                    <span className="text-[#747783] dark:text-gray-500 text-[10.5px]">No receipt</span>
-                  )}
-                </div>
               </div>
-            ))}
 
-            {/* Mobile Category Totals Summary */}
-            <div className="p-3.5 rounded-xl border border-[#dae2ff] dark:border-gray-700 bg-[#faf8ff] dark:bg-gray-800/80 space-y-1.5 text-xs">
-              <div className="text-[11px] font-bold text-[#002869] dark:text-blue-300 uppercase tracking-wider mb-2">Category Subtotals</div>
-              {travelTotal > 0 && (
-                <div className="flex justify-between text-[#434652] dark:text-gray-300">
-                  <span>Travel Total:</span>
-                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{travelTotal.toLocaleString()}</span>
-                </div>
-              )}
-              {foodTotal > 0 && (
-                <div className="flex justify-between text-[#434652] dark:text-gray-300">
-                  <span>Food Total:</span>
-                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{foodTotal.toLocaleString()}</span>
-                </div>
-              )}
-              {stationeryTotal > 0 && (
-                <div className="flex justify-between text-[#434652] dark:text-gray-300">
-                  <span>Stationery Total:</span>
-                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{stationeryTotal.toLocaleString()}</span>
-                </div>
-              )}
-              {otherTotal > 0 && (
-                <div className="flex justify-between text-[#434652] dark:text-gray-300">
-                  <span>Other Total:</span>
-                  <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{otherTotal.toLocaleString()}</span>
-                </div>
-              )}
-              <div className="flex justify-between pt-2 border-t border-[#dae2ff] dark:border-gray-700 font-bold text-sm text-[#001947] dark:text-white">
-                <span>Grand Total:</span>
-                <span className="font-mono text-base text-[#002869] dark:text-blue-400">₹{grandTotal.toLocaleString()}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Main Expense Table (Desktop View) */}
-          <div className="hidden md:block border border-[#c4c6d3] dark:border-gray-700 overflow-x-auto rounded-md print:block">
-            <table className="w-full text-left text-[12px] border-collapse min-w-[700px]">
-              <thead className="bg-[#faf8ff] dark:bg-gray-800 border-b border-[#c4c6d3] dark:border-gray-700 font-bold text-[#000000] dark:text-gray-100">
-                <tr>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-12 text-center">S.No</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-24">Category</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">Description</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-16">Count</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Count×Amount</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right w-24">Total</th>
-                  <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Bills</th>
-                  <th className="p-2.5">Remarks</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#c4c6d3] dark:divide-gray-700">
+              {/* Main Expense Table (Mobile Cards View) */}
+              <div className="block md:hidden space-y-3 print:hidden">
                 {tableItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-[#faf8ff]/80 dark:hover:bg-gray-800/40 transition-colors group text-[#1a1b21] dark:text-gray-200">
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-mono text-center text-gray-500 dark:text-gray-400">{item.sNo}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">
-                      <span className="font-semibold text-[#002869] dark:text-blue-300">{item.category}</span>
-                    </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-medium text-[#1a1b21] dark:text-gray-100">
-                      {item.description}
-                    </td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.count}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.countAmount}</td>
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
-                      ₹{item.total.toLocaleString()}
-                    </td>
-                    
-                    {/* BILLS COLUMN: Clickable Viewer & Thumbnail */}
-                    <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center">
+                  <div
+                    key={item.id}
+                    className="p-3.5 rounded-xl border border-[#c4c6d3] dark:border-gray-700 bg-[#faf8ff]/50 dark:bg-gray-800/50 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] font-mono text-[#747783] dark:text-gray-400">#{item.sNo}</span>
+                        <span className="inline-block px-2 py-0.5 rounded text-[10.5px] font-bold bg-[#dae2ff] dark:bg-blue-950/70 text-[#002869] dark:text-blue-300">
+                          {item.category}
+                        </span>
+                      </div>
+                      <span className="font-mono text-xs font-bold text-[#002869] dark:text-blue-300">
+                        ₹{item.total.toLocaleString()}
+                      </span>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-bold text-[#1a1b21] dark:text-gray-100">
+                        {item.description}
+                      </p>
+                      {item.count && item.countAmount && (
+                        <p className="text-[11px] text-[#555555] dark:text-gray-400 mt-0.5 font-mono">
+                          Formula: {item.count} × {item.countAmount}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1.5 border-t border-[#c4c6d3]/60 dark:border-gray-700 text-[11px]">
+                      <span className="text-[#555555] dark:text-gray-400 truncate max-w-[170px]">
+                        {item.remarks || 'Expense item'}
+                      </span>
+
                       {item.billUrl ? (
                         <button
+                          type="button"
                           onClick={() => {
                             setBillZoom(1);
                             setBillRotate(0);
                             setActiveBillViewer({
-                              url: item.billUrl!,
-                              title: `${item.category}: ${item.description}`,
+                              url: item.billUrl,
+                              title: item.category + ': ' + item.description,
                               category: item.category,
                               amount: item.total,
-                              fileName: item.billFileName || `${item.category}_Bill.jpg`,
+                              fileName: item.billFileName || (item.category + '_Bill.jpg'),
                               itemId: item.id,
                             });
                           }}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] hover:bg-[#ceead6] dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded-md text-[11.5px] font-bold transition-all cursor-pointer shadow-2xs"
-                          title="Click to view full receipt / bill"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#e6f4ea] dark:bg-emerald-950/60 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded text-[11px] font-bold cursor-pointer"
                         >
-                          <span className="material-symbols-outlined text-[15px]">receipt_long</span>
-                          <span>View</span>
+                          <span className="material-symbols-outlined text-[14px]">receipt_long</span>
+                          <span>View Bill</span>
                         </button>
                       ) : (
-                        <span className="text-[#747783] dark:text-gray-500 text-[11px] font-medium">—</span>
+                        <span className="text-[#747783] dark:text-gray-500 text-[10.5px]">No receipt</span>
                       )}
-                    </td>
-
-                    <td className="p-2.5 text-[#555555] dark:text-gray-400 text-[11.5px]">{item.remarks}</td>
-                  </tr>
+                    </div>
+                    {canEditSelectedSheet && (
+                      <div className="flex justify-end gap-2 border-t border-[#c4c6d3]/60 pt-2">
+                        <button type="button" onClick={() => setEditingItem(item)} className="rounded-md border border-[#c4c6d3] px-2.5 py-1 text-[11px] font-semibold text-[#002869]">Edit</button>
+                      </div>
+                    )}
+                  </div>
                 ))}
+
+                {/* Mobile Category Totals Summary */}
+                <div className="p-3.5 rounded-xl border border-[#dae2ff] dark:border-gray-700 bg-[#faf8ff] dark:bg-gray-800/80 space-y-1.5 text-xs">
+                  <div className="text-[11px] font-bold text-[#002869] dark:text-blue-300 uppercase tracking-wider mb-2">Category Subtotals</div>
+                  {travelTotal > 0 && (
+                    <div className="flex justify-between text-[#434652] dark:text-gray-300">
+                      <span>Travel Total:</span>
+                      <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{travelTotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {foodTotal > 0 && (
+                    <div className="flex justify-between text-[#434652] dark:text-gray-300">
+                      <span>Food Total:</span>
+                      <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{foodTotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {stationeryTotal > 0 && (
+                    <div className="flex justify-between text-[#434652] dark:text-gray-300">
+                      <span>Stationery Total:</span>
+                      <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{stationeryTotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {otherTotal > 0 && (
+                    <div className="flex justify-between text-[#434652] dark:text-gray-300">
+                      <span>Other Total:</span>
+                      <span className="font-mono font-bold text-[#002869] dark:text-blue-300">₹{otherTotal.toLocaleString()}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between pt-2 border-t border-[#dae2ff] dark:border-gray-700 font-bold text-sm text-[#001947] dark:text-white">
+                    <span>Grand Total:</span>
+                    <span className="font-mono text-base text-[#002869] dark:text-blue-400">₹{grandTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Main Expense Table (Desktop View) */}
+              <div className="hidden md:block border border-[#c4c6d3] dark:border-gray-700 overflow-x-auto rounded-md print:block">
+                <table className="w-full text-left text-[12px] border-collapse min-w-[700px]">
+                  <thead className="bg-[#faf8ff] dark:bg-gray-800 border-b border-[#c4c6d3] dark:border-gray-700 font-bold text-[#000000] dark:text-gray-100">
+                    <tr>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-12 text-center">S.No</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 w-24">Category</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">Description</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-16">Count</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Count×Amount</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right w-24">Total</th>
+                      <th className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center w-24">Bills</th>
+                      <th className="p-2.5">Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#c4c6d3] dark:divide-gray-700">
+                    {tableItems.map((item) => (
+                      <tr key={item.id} className="hover:bg-[#faf8ff]/80 dark:hover:bg-gray-800/40 transition-colors group text-[#1a1b21] dark:text-gray-200">
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-mono text-center text-gray-500 dark:text-gray-400">{item.sNo}</td>
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700">
+                          <span className="font-semibold text-[#002869] dark:text-blue-300">{item.category}</span>
+                        </td>
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 font-medium text-[#1a1b21] dark:text-gray-100">
+                          {item.description}
+                        </td>
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.count}</td>
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center font-mono">{item.countAmount}</td>
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-right font-mono font-bold text-[#002869] dark:text-blue-300">
+                          ₹{item.total.toLocaleString()}
+                        </td>
+                        
+                        {/* BILLS COLUMN: Clickable Viewer & Thumbnail */}
+                        <td className="p-2.5 border-r border-[#c4c6d3] dark:border-gray-700 text-center">
+                          {item.billUrl ? (
+                            <button
+                              onClick={() => {
+                                setBillZoom(1);
+                                setBillRotate(0);
+                                setActiveBillViewer({
+                                  url: item.billUrl!,
+                                  title: `${item.category}: ${item.description}`,
+                                  category: item.category,
+                                  amount: item.total,
+                                  fileName: item.billFileName || `${item.category}_Bill.jpg`,
+                                  itemId: item.id,
+                                });
+                              }}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-[#e6f4ea] hover:bg-[#ceead6] dark:bg-emerald-950/60 dark:hover:bg-emerald-900/80 text-[#137333] dark:text-emerald-400 border border-[#137333]/30 dark:border-emerald-700/50 rounded-md text-[11.5px] font-bold transition-all cursor-pointer shadow-2xs"
+                              title="Click to view full receipt / bill"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">receipt_long</span>
+                              <span>View</span>
+                            </button>
+                          ) : (
+                            <span className="text-[#747783] dark:text-gray-500 text-[11px] font-medium">—</span>
+                          )}
+                        </td>
+
+                        <td className="p-2.5 text-[#555555] dark:text-gray-400 text-[11.5px]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span>{item.remarks}</span>
+                            {canEditSelectedSheet && <span className="flex shrink-0 items-center gap-1 print:hidden">
+                              <button type="button" onClick={() => setEditingItem(item)} className="rounded px-2 py-1 text-[10px] font-bold text-[#002869] hover:bg-[#dae2ff]" aria-label={`Edit ${item.description}`}>Edit</button>
+                            </span>}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
 
                 {/* Subtotals */}
                 {travelTotal > 0 && (
@@ -1628,6 +1881,54 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             </table>
           </div>
         </div>
+          </>
+        ) : canManageDrafts && selectedViewKey !== 'all-approved' ? (
+          <div className="rounded-2xl border border-dashed border-[#c4c6d3] bg-[#faf8ff] dark:bg-gray-800/60 p-8 text-center shadow-xs">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#dae2ff] text-[#002869] dark:bg-blue-950/60 dark:text-blue-300">
+              <span className="material-symbols-outlined text-[24px]">draft</span>
+            </div>
+            <h3 className="mt-4 text-base font-bold text-[#001947] dark:text-white">No expense entry yet</h3>
+            <p className="mt-2 text-sm text-[#555555] dark:text-gray-300">
+              Start by adding the first expense entry for this session.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreatingAdditionalDraft(true);
+                setNewExpenseForm({ category: 'Travel', description: '', count: '', perPerson: '', totalAmount: '', remarks: '', billUrl: null, billFileName: '' });
+                setShowDraftEditor(true);
+              }}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-md bg-[#002869] text-white text-xs font-bold hover:bg-[#001f52] transition-all cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-[16px]">add</span>
+              Add First Entry
+            </button>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-[#c4c6d3] bg-[#faf8ff] dark:bg-gray-800/60 p-8 text-center shadow-xs">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-[#dae2ff] text-[#002869] dark:bg-blue-950/60 dark:text-blue-300">
+              <span className="material-symbols-outlined text-[24px]">draft</span>
+            </div>
+            <h3 className="mt-4 text-base font-bold text-[#001947] dark:text-white">No submission yet</h3>
+            <p className="mt-2 text-sm text-[#555555] dark:text-gray-300">
+              This session does not have a submitted finance statement yet.
+            </p>
+          </div>
+        )}
+
+        {Boolean(currentDraft?.history?.length) && (
+          <section className="space-y-3 border-t border-[#dae2ff] pt-5 print:hidden">
+            <h3 className="text-sm font-bold text-[#002869]">Finance Report History</h3>
+            <ol className="space-y-2 text-xs text-gray-600 dark:text-gray-300">
+              {currentDraft.history?.map((item, index) => (
+                <li key={`${item.event}-${index}`} className="flex flex-wrap justify-between gap-x-4 gap-y-1">
+                  <span><strong>{item.event}</strong>{item.userName ? ` by ${item.userName}` : ''}{item.details ? ` — ${item.details}` : ''}</span>
+                  <time>{new Date(item.createdAt).toLocaleString()}</time>
+                </li>
+              ))}
+            </ol>
+          </section>
+        )}
 
         {/* 4. FOOTER SIGN-OFF SECTION */}
         <div className="pt-8 sm:pt-14 grid grid-cols-2 gap-12 text-center text-[12px]">
@@ -1655,6 +1956,189 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
       {/* ========================================================================= */}
       {/* BILL LIGHTBOX & VIEWER MODAL */}
       {/* ========================================================================= */}
+      {isSubmitConfirmOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-lg space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">{editPermissionGranted ? 'Resubmit Finance Report?' : 'Submit Finance Report?'}</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{editPermissionGranted ? 'Your requested changes will be submitted again for Super Admin review.' : 'This finance report will be submitted for Super Admin approval and locked for editing.'}</p>
+            </div>
+            <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <div><span className="font-semibold">Total Expenses:</span> ₹{grandTotal.toLocaleString()}</div>
+              <div><span className="font-semibold">Expense Entries:</span> {tableItems.length}</div>
+              <div><span className="font-semibold">Bills:</span> {allAttachedBills.length}</div>
+            </div>
+            {selectedEntries.some((entry) => !entry.billUrl && !entry.billReference) && (
+              <label className="block text-xs text-gray-700 dark:text-gray-200">
+                <span className="mb-1 block font-semibold text-gray-800 dark:text-gray-100">Reason for missing bill(s)</span>
+                <textarea
+                  value={missingBillReason}
+                  onChange={(event) => setMissingBillReason(event.target.value)}
+                  rows={4}
+                  className="w-full rounded-xl border border-gray-200 bg-white p-3 text-sm text-gray-900 outline-none focus:border-primary dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                  placeholder="Explain why this expense is being submitted without a bill and why Super Admin approval is needed."
+                />
+              </label>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setIsSubmitConfirmOpen(false)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+              <button type="button" onClick={() => void handleSubmitStatement()} disabled={selectedEntries.some((entry) => !entry.billUrl && !entry.billReference) && !missingBillReason.trim()} className="rounded-lg bg-[#137333] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{editPermissionGranted ? 'Resubmit' : 'Submit for Approval'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isApprovalOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Approve Finance Report?</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">This action will mark the report as approved for the cluster.</p>
+            </div>
+            <div className="space-y-1 rounded-xl bg-gray-50 p-3 text-xs text-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <div><span className="font-semibold">College:</span> {statementMeta.collegeName}</div>
+              <div><span className="font-semibold">Session:</span> {statementMeta.sessionName}</div>
+              <div><span className="font-semibold">Date:</span> {statementMeta.date}</div>
+              <div><span className="font-semibold">Financer:</span> {statementMeta.financerName}</div>
+              <div><span className="font-semibold">Total Amount:</span> ₹{grandTotal.toLocaleString()}</div>
+              <div><span className="font-semibold">Number of Expenses:</span> {tableItems.length}</div>
+            </div>
+            <label className="flex items-start gap-2 text-xs text-gray-700 dark:text-gray-200">
+              <input
+                type="checkbox"
+                checked={approvedCheck}
+                onChange={(event) => setApprovedCheck(event.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span>I have reviewed all expenses and supporting bills.</span>
+            </label>
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setIsApprovalOpen(false)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+              <button type="button" disabled={!approvedCheck || !onApproveReport} onClick={submitApproval} className="rounded-lg bg-[#137333] px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Confirm Approval</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isRejectOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-red-200 bg-white p-5 shadow-xl dark:border-red-900 dark:bg-gray-900">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Reject Finance Report</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Please provide a reason for the rejection.</p>
+            </div>
+            <textarea
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+              rows={4}
+              placeholder="Reason for rejection..."
+              className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-800 placeholder:text-gray-400 focus:border-red-500 focus:outline-none dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button type="button" onClick={() => setIsRejectOpen(false)} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">Cancel</button>
+              <button type="button" disabled={!rejectReason.trim() || !onRejectReport} onClick={submitRejection} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">Reject Report</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isEditRequestOpen && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-md space-y-4 rounded-2xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+            <div>
+              <h3 className="text-base font-bold text-gray-900 dark:text-white">Request Finance Edit</h3>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Explain why this approved finance entry needs to be unlocked.</p>
+            </div>
+            <textarea
+              value={editRequestReason}
+              onChange={(event) => setEditRequestReason(event.target.value)}
+              rows={4}
+              placeholder="Reason for requesting an edit..."
+              className="w-full resize-y rounded-xl border border-gray-300 bg-white p-3 text-sm text-gray-800 outline-none focus:border-amber-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsEditRequestOpen(false)}
+                className="rounded-xl border border-gray-200 px-4 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSubmitEditRequest()}
+                disabled={isSubmittingEditRequest}
+                className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {isSubmittingEditRequest ? 'Submitting…' : 'Submit Request'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showDraftEditor && (
+        <NewFinanceModal
+          key={isCreatingAdditionalDraft ? 'new-additional-draft' : activeDraftId || 'new-finance-draft'}
+          isOpen={showDraftEditor}
+          onClose={() => {
+            setShowDraftEditor(false);
+            setIsCreatingAdditionalDraft(false);
+          }}
+          clusterName={!isCreatingAdditionalDraft ? currentDraft?.clusterName || clusterName : clusterName}
+          collegeName={!isCreatingAdditionalDraft ? currentDraft?.collegeName || collegeName : collegeName}
+          spocName={!isCreatingAdditionalDraft ? currentDraft?.spocName || spocName : spocName}
+          financerName={!isCreatingAdditionalDraft ? currentDraft?.financerName || financerName : financerName}
+          sessions={sessions}
+          clusterId={!isCreatingAdditionalDraft ? currentDraft?.clusterId || clusterId : clusterId}
+          defaultSessionDay={currentDraft?.sessionDay || statementMeta.sessionDay}
+          initialDraft={isCreatingAdditionalDraft ? undefined : currentDraft || undefined}
+          onSubmitFinance={async (newEntries, isDraft) => {
+            if (!onAddFinanceEntry) throw new Error('Finance entry saving is unavailable. Return to Finance and try again.');
+            const draftId = isCreatingAdditionalDraft ? undefined : currentDraft?.id || selectedDraftId;
+            const existingDraftEntries = draftId
+              ? entries.filter((entry) => entry.draftId === draftId)
+              : [];
+            const unmatchedExisting = [...existingDraftEntries];
+
+            for (const [index, entry] of newEntries.entries()) {
+              const matchingExistingIndex = unmatchedExisting.findIndex((existing) =>
+                existing.category === entry.category && existing.description === entry.description
+              );
+              const matchingExisting = matchingExistingIndex >= 0
+                ? unmatchedExisting.splice(matchingExistingIndex, 1)[0]
+                : unmatchedExisting.length && existingDraftEntries.length > 0
+                  ? unmatchedExisting.shift()
+                  : undefined;
+              const scopedEntry = {
+                ...entry,
+                clusterId: entry.clusterId || clusterId,
+                clusterName: entry.clusterName || clusterName,
+              };
+
+              if (matchingExisting && onUpdateFinanceEntry) {
+                await onUpdateFinanceEntry(matchingExisting.id, scopedEntry);
+              } else if (!existingDraftEntries.length || index >= existingDraftEntries.length) {
+                await onAddFinanceEntry(scopedEntry);
+              }
+            }
+            if (onDeleteFinanceEntry) {
+              for (const unmatched of unmatchedExisting) await onDeleteFinanceEntry(unmatched.id);
+            }
+            if (!isDraft) {
+              const reportId = newEntries.find((entry) => entry.draftId)?.draftId || currentDraft?.id || selectedDraftId;
+              if (!reportId || !onSubmitDraft) throw new Error('Finance report was saved, but submission is unavailable.');
+              await onSubmitDraft(reportId);
+            }
+            setShowDraftEditor(false);
+            setIsCreatingAdditionalDraft(false);
+            showToast(isDraft ? 'Finance draft saved successfully.' : 'Finance report submitted for approval and locked.');
+          }}
+          onSaveDraftPackage={async (updatedDraft) => {
+            await onSaveDraft?.(updatedDraft);
+            setSelectedViewKey(updatedDraft.id);
+          }}
+        />
+      )}
       {activeBillViewer && (
         <div
           onClick={() => setActiveBillViewer(null)}
@@ -2114,7 +2598,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                 Cancel
               </button>
               <button
-                onClick={handleAddNewExpenseRow}
+                onClick={() => void handleAddNewExpenseRow()}
                 className="px-5 py-2 bg-[#fb7800] text-white rounded-md text-[12.5px] font-bold hover:bg-[#fb7800]/90 cursor-pointer shadow-xs"
               >
                 Add Line Item
@@ -2418,7 +2902,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                   Finance report
                 </div>
                 <div className="text-[12.5px] font-bold text-[#592600] dark:text-amber-400">
-                  {statementMeta.clusterName} Cluster
+                  {statementMeta.sessionName} · {statementMeta.sessionDay}
                 </div>
               </div>
 
@@ -2433,19 +2917,15 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                   <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.date}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">CLUSTER</span>
-                  <span className="font-bold text-[#002869] dark:text-blue-300">{statementMeta.clusterName}</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">SESSION</span>
+                  <span className="font-bold text-[#002869] dark:text-blue-300">{statementMeta.sessionName} · {statementMeta.sessionDay}</span>
                 </div>
                 <div>
                   <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">SPOC</span>
                   <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.spocName}</span>
                 </div>
                 <div>
-                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">SESSION</span>
-                  <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.sessionName} ({statementMeta.sessionDay})</span>
-                </div>
-                <div>
-                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">FINANCER</span>
+                  <span className="text-[#747783] dark:text-gray-400 font-bold uppercase text-[10.5px] block">FINANCE OFFICER</span>
                   <span className="font-semibold text-[#000000] dark:text-gray-100">{statementMeta.financerName}</span>
                 </div>
               </div>

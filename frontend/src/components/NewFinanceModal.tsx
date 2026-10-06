@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { BillScannerModal, BillAttachment } from './BillScannerModal';
-import { FinanceEntry, FinanceDraft } from '../types';
+import { FinanceEntry, FinanceDraft, Session } from '../types';
 import {
   X,
   Save,
@@ -20,13 +20,6 @@ import {
   Building2,
 } from './ui/icons';
 import { ActionButton } from './ui/action-button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
 
 interface RouteItem {
   id: string;
@@ -60,9 +53,13 @@ interface NewFinanceModalProps {
   collegeName?: string;
   spocName?: string;
   financerName?: string;
+  sessions?: Session[];
+  clusterId?: string;
+  defaultSessionDay?: string;
   initialDraft?: FinanceDraft | null;
-  onSubmitFinance: (entries: Omit<FinanceEntry, 'id'>[], isDraft: boolean) => void;
-  onSaveDraftPackage?: (draft: FinanceDraft) => void;
+  draftOnly?: boolean;
+  onSubmitFinance: (entries: Omit<FinanceEntry, 'id'>[], isDraft: boolean) => void | Promise<void>;
+  onSaveDraftPackage?: (draft: FinanceDraft) => void | Promise<void>;
 }
 
 export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
@@ -72,14 +69,103 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
   collegeName = 'Partner Institution',
   spocName = 'Coordinator / SPOC',
   financerName = 'TQI Finance Team',
+  sessions = [],
+  clusterId = '',
+  defaultSessionDay,
   initialDraft = null,
+  draftOnly = false,
   onSubmitFinance,
   onSaveDraftPackage,
 }) => {
-  // Modal state
-  const [sessionDay, setSessionDay] = useState<string>(initialDraft?.sessionDay || 'Day 1');
-  const [sessionDate, setSessionDate] = useState<string>(initialDraft?.sessionDate || '2026-08-20');
+  const fallbackDefaultDay = `Day ${sessions.find((session) => !clusterId || session.clusterId === clusterId)?.dayNumber || 1}`;
+  const initialDay = defaultSessionDay || initialDraft?.sessionDay || fallbackDefaultDay;
+
+  const createEmptyRoute = (): RouteItem => ({
+    id: 'route-1',
+    from: '',
+    to: '',
+    volunteers: 0,
+    perPerson: 0,
+    remarks: '',
+    bill: null,
+  });
+
+  const createEmptyFood = (): FoodState => ({
+    breakfast: { amount: 0, remarks: '', bill: null },
+    lunch: { amount: 0, remarks: '', bill: null },
+    dinner: { amount: 0, remarks: '', bill: null },
+    refreshments: { amount: 0, remarks: '', bill: null },
+  });
+
+  const createEmptyOtherItem = (): OtherItem => ({
+    id: 'other-1',
+    description: '',
+    amount: 0,
+    remarks: '',
+    bill: null,
+  });
+
+  const createBlankFinanceForm = (draft?: FinanceDraft | null, overrideDay?: string) => ({
+    sessionDay: draft?.sessionDay || overrideDay || initialDay,
+    plannedDate: draft?.sessionDate || '',
+    travel: { routes: draft?.routes || [createEmptyRoute()] },
+    food: draft?.food || createEmptyFood(),
+    stationery: draft?.stationery || { amount: 0, remarks: '', bill: null },
+    other: { items: draft?.otherItems || [createEmptyOtherItem()] },
+  });
+
+  const [financeForm, setFinanceForm] = useState(() => createBlankFinanceForm(initialDraft, defaultSessionDay));
   const [activeTab, setActiveTab] = useState<'Travel' | 'Food' | 'Stationery' | 'Other' | 'Preview'>('Travel');
+  const [isSaving, setIsSaving] = useState(false);
+  const draftIdRef = useRef<string | null>(initialDraft?.id || null);
+
+  const sessionDay = financeForm.sessionDay;
+  const sessionDate = financeForm.plannedDate;
+  const routes = financeForm.travel.routes;
+  const food = financeForm.food;
+  const stationery = financeForm.stationery;
+  const otherItems = financeForm.other.items;
+
+  const setSessionDay = (value: string) => setFinanceForm((prev) => ({ ...prev, sessionDay: value }));
+  const setSessionDate = (value: string) => setFinanceForm((prev) => ({ ...prev, plannedDate: value }));
+  const setRoutes = (updater: React.SetStateAction<RouteItem[]>) => {
+    setFinanceForm((prev) => ({
+      ...prev,
+      travel: {
+        ...prev.travel,
+        routes: typeof updater === 'function'
+          ? (updater as (prevRoutes: RouteItem[]) => RouteItem[])(prev.travel.routes)
+          : updater,
+      },
+    }));
+  };
+  const setFood = (updater: React.SetStateAction<FoodState>) => {
+    setFinanceForm((prev) => ({
+      ...prev,
+      food: typeof updater === 'function'
+        ? (updater as (prevFood: FoodState) => FoodState)(prev.food)
+        : updater,
+    }));
+  };
+  const setStationery = (updater: React.SetStateAction<{ amount: number; remarks: string; bill: BillAttachment | null }>) => {
+    setFinanceForm((prev) => ({
+      ...prev,
+      stationery: typeof updater === 'function'
+        ? (updater as (prevStationery: { amount: number; remarks: string; bill: BillAttachment | null }) => { amount: number; remarks: string; bill: BillAttachment | null })(prev.stationery)
+        : updater,
+    }));
+  };
+  const setOtherItems = (updater: React.SetStateAction<OtherItem[]>) => {
+    setFinanceForm((prev) => ({
+      ...prev,
+      other: {
+        ...prev.other,
+        items: typeof updater === 'function'
+          ? (updater as (prevItems: OtherItem[]) => OtherItem[])(prev.other.items)
+          : updater,
+      },
+    }));
+  };
 
   // Scanner target state
   const [scannerTarget, setScannerTarget] = useState<{
@@ -90,101 +176,42 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
     expectedAmount: number;
   } | null>(null);
 
-  // 1. Travel State
-  const [routes, setRoutes] = useState<RouteItem[]>(
-    initialDraft?.routes || [
-      {
-        id: 'route-1',
-        from: '',
-        to: '',
-        volunteers: 0,
-        perPerson: 0,
-        remarks: '',
-        bill: null,
-      },
-    ]
-  );
+  const availableSessions = useMemo(() => sessions
+    .filter((session) => !clusterId || session.clusterId === clusterId)
+    .filter((session) => Number(session.dayNumber) > 0)
+    .sort((a, b) => Number(a.dayNumber) - Number(b.dayNumber)), [sessions, clusterId]);
+  const selectedDayNumber = Number(sessionDay.match(/\d+/)?.[0] || 1);
+  const plannedSession = availableSessions.find((session) => Number(session.dayNumber) === selectedDayNumber);
+  const sessionOptions = [...new Set(availableSessions.map((session) => `Day ${session.dayNumber}`))];
+  if (!sessionOptions.length) sessionOptions.push(...Array.from({ length: 8 }, (_, index) => `Day ${index + 1}`));
+  const plannedSessionName = plannedSession?.name || plannedSession?.title || initialDraft?.title || `${sessionDay} Session`;
 
-  // 2. Food State
-  const [food, setFood] = useState<FoodState>(
-    initialDraft?.food || {
-      breakfast: { amount: 0, remarks: '', bill: null },
-      lunch: { amount: 0, remarks: '', bill: null },
-      dinner: { amount: 0, remarks: '', bill: null },
-      refreshments: { amount: 0, remarks: '', bill: null },
-    }
-  );
+  const resetEmptyForm = (nextDay?: string) => {
+    setFinanceForm(createBlankFinanceForm(null, nextDay || defaultSessionDay || `Day ${availableSessions[0]?.dayNumber || 1}`));
+    setActiveTab('Travel');
+  };
 
-  // 3. Stationery State
-  const [stationery, setStationery] = useState<{
-    amount: number;
-    remarks: string;
-    bill: BillAttachment | null;
-  }>(
-    initialDraft?.stationery || {
-      amount: 0,
-      remarks: '',
-      bill: null,
-    }
-  );
-
-  // 4. Other State
-  const [otherItems, setOtherItems] = useState<OtherItem[]>(
-    initialDraft?.otherItems || [
-      {
-        id: 'other-1',
-        description: '',
-        amount: 0,
-        remarks: '',
-        bill: null,
-      },
-    ]
-  );
-
-  // Update whenever initialDraft prop changes
+  // Initialize only when the modal opens or the selected draft/day changes.
+  // `availableSessions` can get a new array when parent data refreshes; using it
+  // as a dependency here would reset all fields while the user is typing.
   useEffect(() => {
     if (initialDraft) {
-      if (initialDraft.sessionDay) setSessionDay(initialDraft.sessionDay);
-      if (initialDraft.sessionDate) setSessionDate(initialDraft.sessionDate);
-      if (initialDraft.routes) setRoutes(initialDraft.routes);
-      if (initialDraft.food) setFood(initialDraft.food);
-      if (initialDraft.stationery) setStationery(initialDraft.stationery);
-      if (initialDraft.otherItems) setOtherItems(initialDraft.otherItems);
+      draftIdRef.current = initialDraft.id;
+      setFinanceForm(createBlankFinanceForm(initialDraft, defaultSessionDay));
+      setActiveTab('Travel');
+    } else if (isOpen) {
+      if (!draftIdRef.current) draftIdRef.current = `draft-${initialDay.toLowerCase().replace(/\s+/g, '')}-${Date.now()}`;
+      resetEmptyForm(defaultSessionDay || `Day ${availableSessions[0]?.dayNumber || 1}`);
     } else {
-      setSessionDay('Day 1');
-      setRoutes([
-        {
-          id: 'route-1',
-          from: '',
-          to: '',
-          volunteers: 0,
-          perPerson: 0,
-          remarks: '',
-          bill: null,
-        },
-      ]);
-      setFood({
-        breakfast: { amount: 0, remarks: '', bill: null },
-        lunch: { amount: 0, remarks: '', bill: null },
-        dinner: { amount: 0, remarks: '', bill: null },
-        refreshments: { amount: 0, remarks: '', bill: null },
-      });
-      setStationery({
-        amount: 0,
-        remarks: '',
-        bill: null,
-      });
-      setOtherItems([
-        {
-          id: 'other-1',
-          description: '',
-          amount: 0,
-          remarks: '',
-          bill: null,
-        },
-      ]);
+      draftIdRef.current = null;
     }
-  }, [initialDraft, isOpen]);
+    // The form should not be reset when session data is refreshed in the parent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraft?.id, isOpen, defaultSessionDay]);
+
+  useEffect(() => {
+    setSessionDate(plannedSession?.date?.slice(0, 10) || (initialDraft?.sessionDay === sessionDay ? initialDraft.sessionDate : ''));
+  }, [plannedSession?.id, plannedSession?.date, initialDraft, sessionDay]);
 
   // Calculations
   const travelTotal = useMemo(() => {
@@ -226,7 +253,24 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
 
   const handleUpdateRoute = (id: string, field: keyof RouteItem, value: any) => {
     setRoutes((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r))
+      prev.map((r) => {
+        if (r.id !== id) return r;
+
+        const nextRoute = { ...r, [field]: value };
+        const volunteers = field === 'volunteers' ? Number(value) || 0 : Number(r.volunteers) || 0;
+        const perPerson = field === 'perPerson' ? Number(value) || 0 : Number(r.perPerson) || 0;
+        const billAmount = r.bill?.detectedAmount || 0;
+
+        if (volunteers > 0 && billAmount > 0 && (!perPerson || perPerson === 0)) {
+          nextRoute.perPerson = Math.round(billAmount / volunteers);
+        }
+
+        if (field === 'volunteers' && Number(value) > 0 && Number(r.perPerson) > 0 && (Number(value) || 0) !== Number(r.volunteers)) {
+          nextRoute.perPerson = Number(r.perPerson);
+        }
+
+        return nextRoute;
+      })
     );
   };
 
@@ -374,9 +418,15 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
   };
 
   // Submit Logic
-  const handleSubmit = (isDraft: boolean) => {
+  const handleSubmit = async (isDraft: boolean) => {
+    if (!sessionDate) {
+      alert('Please select a planned date before saving or submitting finance.');
+      return;
+    }
+
     const entries: Omit<FinanceEntry, 'id'>[] = [];
-    const draftId = initialDraft?.id || `draft-${sessionDay.toLowerCase().replace(/\s+/g, '')}-${Date.now()}`;
+    const draftId = initialDraft?.id || draftIdRef.current || `draft-${sessionDay.toLowerCase().replace(/\s+/g, '')}-${Date.now()}`;
+    draftIdRef.current = draftId;
 
     // 1. Travel Entries
     routes.forEach((r) => {
@@ -390,13 +440,13 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
           panchayatId: 'dharmapuri-main',
           panchayatName: clusterName,
           villageName: r.to || 'Cluster Center',
-          status: isDraft ? 'Draft' : 'Approved',
+          status: isDraft ? 'Draft' : 'Pending',
           billUrl: r.bill?.url,
           remarks: r.remarks || `${r.volunteers} Volunteers travel reimbursement`,
           count: r.volunteers,
           countAmount: `${r.volunteers}×${r.perPerson}`,
           sessionDay: sessionDay,
-          draftId: isDraft ? draftId : undefined,
+          draftId,
         });
       }
     });
@@ -411,11 +461,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         panchayatId: 'dharmapuri-main',
         panchayatName: clusterName,
         villageName: 'Cluster Center',
-        status: isDraft ? 'Draft' : 'Approved',
+        status: isDraft ? 'Draft' : 'Pending',
         billUrl: food.breakfast.bill?.url,
         remarks: food.breakfast.remarks || 'Volunteer breakfast',
         sessionDay: sessionDay,
-        draftId: isDraft ? draftId : undefined,
+        draftId,
       });
     }
     if (food.lunch.amount > 0) {
@@ -427,11 +477,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         panchayatId: 'dharmapuri-main',
         panchayatName: clusterName,
         villageName: 'Cluster Center',
-        status: isDraft ? 'Draft' : 'Approved',
+        status: isDraft ? 'Draft' : 'Pending',
         billUrl: food.lunch.bill?.url,
         remarks: food.lunch.remarks || 'Volunteer lunch meals',
         sessionDay: sessionDay,
-        draftId: isDraft ? draftId : undefined,
+        draftId,
       });
     }
     if (food.dinner.amount > 0) {
@@ -443,11 +493,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         panchayatId: 'dharmapuri-main',
         panchayatName: clusterName,
         villageName: 'Cluster Center',
-        status: isDraft ? 'Draft' : 'Approved',
+        status: isDraft ? 'Draft' : 'Pending',
         billUrl: food.dinner.bill?.url,
         remarks: food.dinner.remarks || 'Volunteer dinner',
         sessionDay: sessionDay,
-        draftId: isDraft ? draftId : undefined,
+        draftId,
       });
     }
     if (food.refreshments.amount > 0) {
@@ -459,11 +509,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         panchayatId: 'dharmapuri-main',
         panchayatName: clusterName,
         villageName: 'Cluster Center',
-        status: isDraft ? 'Draft' : 'Approved',
+        status: isDraft ? 'Draft' : 'Pending',
         billUrl: food.refreshments.bill?.url,
         remarks: food.refreshments.remarks || 'Snacks and tea',
         sessionDay: sessionDay,
-        draftId: isDraft ? draftId : undefined,
+        draftId,
       });
     }
 
@@ -477,11 +527,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         panchayatId: 'dharmapuri-main',
         panchayatName: clusterName,
         villageName: 'Cluster Center',
-        status: isDraft ? 'Draft' : 'Approved',
+          status: isDraft ? 'Draft' : 'Pending',
         billUrl: stationery.bill?.url,
         remarks: stationery.remarks || 'Classroom student stationery kits',
         sessionDay: sessionDay,
-        draftId: isDraft ? draftId : undefined,
+        draftId,
       });
     }
 
@@ -496,11 +546,11 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
           panchayatId: 'dharmapuri-main',
           panchayatName: clusterName,
           villageName: 'Cluster Center',
-          status: isDraft ? 'Draft' : 'Approved',
+          status: isDraft ? 'Draft' : 'Pending',
           billUrl: item.bill?.url,
           remarks: item.remarks || item.description,
           sessionDay: sessionDay,
-          draftId: isDraft ? draftId : undefined,
+          draftId,
         });
       }
     });
@@ -509,18 +559,36 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
       alert('Please fill at least one expense entry before saving.');
       return;
     }
+    if (entries.some((entry) => !entry.description.trim() || !Number.isFinite(Number(entry.amount)) || entry.amount <= 0)) {
+      alert('Every expense must have a description and a valid amount greater than zero.');
+      return;
+    }
+    if (!isDraft) {
+      const billCount = entries.filter((entry) => Boolean(entry.billUrl)).length;
+      const confirmed = window.confirm(
+        `Submit Finance Report for Super Admin approval?\n\nTotal Expenses: ₹${grandTotal.toLocaleString()}\nExpense Entries: ${entries.length}\nBills: ${billCount}\n\nOnce submitted, the report will be locked for editing.`,
+      );
+      if (!confirmed) return;
+    }
 
-    if (onSaveDraftPackage) {
-      const draftPackage: FinanceDraft = {
+    const financeEntries = entries.map((entry) => ({
+      ...entry,
+      sessionId: plannedSession?.id,
+      clusterId: clusterId || plannedSession?.clusterId,
+      clusterName,
+    }));
+
+    const draftPackage: FinanceDraft = {
         id: draftId,
-        title: `${sessionDay} - Travel & Expenses Sheet`,
+        title: plannedSessionName,
         sessionDay,
         sessionDate,
+        clusterId: clusterId || plannedSession?.clusterId,
         clusterName,
-        collegeName,
-        spocName,
-        financerName,
-        status: isDraft ? 'Draft' : 'Approved',
+        collegeName: collegeName || '—',
+        spocName: spocName || '—',
+        financerName: financerName || 'TQI Finance Team',
+        status: isDraft ? 'Draft' : 'Pending',
         lastSaved: 'Just now',
         totalAmount: grandTotal,
         routes,
@@ -528,11 +596,20 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
         stationery,
         otherItems,
       };
-      onSaveDraftPackage(draftPackage);
-    }
 
-    onSubmitFinance(entries, isDraft);
-    onClose();
+    if (isSaving) return;
+    setIsSaving(true);
+    try {
+      // Persist the report package first. If this fails, do not leave orphaned
+      // expense rows behind; retries keep this same draft ID.
+      await onSaveDraftPackage?.(draftPackage);
+      await onSubmitFinance(financeEntries, isDraft);
+      onClose();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Unable to save finance. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -552,7 +629,7 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
                   New Finance Entry
                 </h2>
                 <p className="text-[11px] text-gray-500 dark:text-gray-400">
-                  {clusterName} &middot; {sessionDay}
+                  {collegeName} &middot; {sessionDay}
                 </p>
               </div>
             </div>
@@ -567,36 +644,31 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
           </div>
 
           {/* Session Day & Date Selector Row */}
-          <div className="px-4 sm:px-6 py-3 bg-gray-50/70 dark:bg-white/[0.02] border-b border-gray-100 dark:border-gray-800 grid grid-cols-2 gap-3 shrink-0">
+          <div className="px-4 sm:px-6 py-3 bg-gray-50/70 dark:bg-white/[0.02] border-b border-gray-100 dark:border-gray-800 grid grid-cols-2 md:grid-cols-3 gap-3 shrink-0">
+            <div className="col-span-2 md:col-span-3 grid grid-cols-2 md:grid-cols-4 gap-2 rounded-xl border border-gray-200 bg-white/80 p-3 dark:border-gray-800 dark:bg-gray-900/60">
+              <div><span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">College</span><span className="mt-1 block truncate text-xs font-semibold text-gray-900 dark:text-white" title={collegeName}>{collegeName || 'College not configured'}</span></div>
+              <div><span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">Session Name</span><span className="mt-1 block truncate text-xs font-semibold text-gray-900 dark:text-white" title={plannedSessionName}>{plannedSessionName}</span></div>
+              <div><span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">SPOC Name</span><span className="mt-1 block truncate text-xs font-semibold text-gray-900 dark:text-white">{spocName || 'Not assigned'}</span></div>
+              <div><span className="block text-[10px] font-semibold uppercase tracking-wider text-gray-500">Finance Officer</span><span className="mt-1 block truncate text-xs font-semibold text-gray-900 dark:text-white">{financerName}</span></div>
+            </div>
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
                 Session Day *
               </label>
-              <Select value={sessionDay} onValueChange={(val) => setSessionDay(val)}>
-                <SelectTrigger className="h-10 sm:h-9 text-xs">
-                  <SelectValue placeholder="Select Day" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="Day 1">Day 1</SelectItem>
-                  <SelectItem value="Day 2">Day 2</SelectItem>
-                  <SelectItem value="Day 3">Day 3</SelectItem>
-                  <SelectItem value="Day 4">Day 4</SelectItem>
-                  <SelectItem value="Day 5">Day 5</SelectItem>
-                  <SelectItem value="Day 6">Day 6</SelectItem>
-                  <SelectItem value="Day 7">Day 7</SelectItem>
-                  <SelectItem value="Day 8">Day 8</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex w-full h-10 sm:h-9 items-center rounded-xl border border-gray-200 bg-gray-100 px-3 text-xs font-semibold text-gray-800 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                {sessionDay}
+              </div>
             </div>
 
             <div>
               <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-1">
-                Session Date *
+                Planned Date *
               </label>
               <input
                 type="date"
                 value={sessionDate}
-                onChange={(e) => setSessionDate(e.target.value)}
+                required
+                onChange={(event) => setSessionDate(event.target.value)}
                 className="w-full h-10 sm:h-9 px-3 bg-white dark:bg-gray-800 border border-gray-300 rounded-xl text-xs font-medium text-gray-800 dark:text-white dark:border-gray-700 focus:outline-none focus:border-brand-500"
               />
             </div>
@@ -1589,20 +1661,24 @@ export const NewFinanceModal: React.FC<NewFinanceModalProps> = ({
             <div className="grid grid-cols-2 sm:flex items-center gap-2 w-full sm:w-auto">
               <button
                 type="button"
-                onClick={() => handleSubmit(true)}
+                disabled={isSaving}
+                onClick={() => void handleSubmit(true)}
                 className="w-full sm:w-auto px-4 py-2.5 sm:py-2 border border-brand-500/40 text-brand-600 bg-brand-50/50 hover:bg-brand-50 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 dark:border-brand-500/30 dark:bg-brand-500/10 dark:text-brand-400 dark:hover:bg-brand-500/20 transition-colors cursor-pointer shadow-theme-xs"
               >
                 <Save className="h-3.5 w-3.5" />
-                <span>Save Draft</span>
+                <span>{isSaving ? 'Saving…' : 'Save Draft'}</span>
               </button>
-              <button
-                type="button"
-                onClick={() => handleSubmit(false)}
-                className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
-              >
-                <Send className="h-3.5 w-3.5" />
-                <span>Submit Finance</span>
-              </button>
+              {!draftOnly && (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={() => void handleSubmit(false)}
+                  className="w-full sm:w-auto px-4 py-2.5 sm:py-2 bg-brand-500 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 hover:bg-brand-600 transition shadow-theme-xs cursor-pointer"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>{isSaving ? 'Submitting…' : 'Submit for Approval'}</span>
+                </button>
+              )}
             </div>
           </div>
         </div>

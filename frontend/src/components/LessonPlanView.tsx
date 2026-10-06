@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { TabType, LessonPlan, Panchayat, Volunteer, Session, UserRole } from '../types';
+import { TabType, LessonPlan, Panchayat, Volunteer, Session, UserRole, Cluster } from '../types';
 import {
   Select,
   SelectContent,
@@ -12,6 +12,7 @@ import { exportLessonPlanExcel, exportAllLessonPlansExcel, exportLessonPlanPdf }
 
 interface LessonPlanViewProps {
   lessonPlans: LessonPlan[];
+  clusters?: Cluster[];
   sessions: Session[];
   panchayats: Panchayat[];
   volunteers: Volunteer[];
@@ -30,6 +31,7 @@ type ViewMode = 'list' | 'create' | 'edit' | 'detail';
 
 export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
   lessonPlans = [],
+  clusters = [],
   sessions = [],
   panchayats = [],
   volunteers = [],
@@ -56,6 +58,20 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all'>('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const isSuperAdminClusterOverview = currentUserRole === 'Super Admin';
+  const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId) || null;
+  const lessonPlansInScope = useMemo(() => {
+    if (!isSuperAdminClusterOverview || !selectedCluster) return lessonPlans;
+    return lessonPlans.filter((plan) =>
+      plan.clusterId === selectedCluster.id ||
+      plan.cluster === selectedCluster.name ||
+      plan.cluster === selectedCluster.id
+    );
+  }, [lessonPlans, isSuperAdminClusterOverview, selectedCluster]);
+  const clusterPlanCount = (cluster: Cluster) => lessonPlans.filter((plan) =>
+    plan.clusterId === cluster.id || plan.cluster === cluster.name || plan.cluster === cluster.id
+  ).length;
 
   // Correction Modal
   const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
@@ -66,7 +82,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
     id: '',
     program: 'TALENT QUEST FOR INDIA • STUDENT HOLISTIC DEVELOPMENT PROGRAM',
     academicYear: currentAcademicYear,
-    cluster: currentCluster,
+    cluster: selectedCluster?.name || currentCluster,
     teamCollegeName: '',
     panchayatId: '',
     panchayatName: '',
@@ -95,7 +111,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
   // Filtered Lesson Plans
   const filteredPlans = useMemo(() => {
-    return lessonPlans.filter((lp) => {
+    return lessonPlansInScope.filter((lp) => {
       const topic = (lp.topic || lp.title || '').toLowerCase();
       const cluster = (lp.cluster || lp.clusterId || '').toLowerCase();
       const college = (lp.teamCollegeName || lp.collegeName || '').toLowerCase();
@@ -115,13 +131,13 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
 
       return matchSearch && matchDay && matchStatus;
     });
-  }, [lessonPlans, searchTerm, selectedDayFilter, selectedStatus]);
+  }, [lessonPlansInScope, searchTerm, selectedDayFilter, selectedStatus]);
 
   // Counts
-  const totalCount = lessonPlans.length;
-  const approvedCount = lessonPlans.filter((lp) => lp.status === 'Approved').length;
-  const submittedCount = lessonPlans.filter((lp) => lp.status === 'Submitted' || lp.status === 'Resubmitted').length;
-  const correctionCount = lessonPlans.filter((lp) => lp.status === 'Correction Requested' || (lp.status as string) === 'Rejected').length;
+  const totalCount = lessonPlansInScope.length;
+  const approvedCount = lessonPlansInScope.filter((lp) => lp.status === 'Approved').length;
+  const submittedCount = lessonPlansInScope.filter((lp) => lp.status === 'Submitted' || lp.status === 'Resubmitted').length;
+  const correctionCount = lessonPlansInScope.filter((lp) => lp.status === 'Correction Requested' || (lp.status as string) === 'Rejected').length;
 
   const handleClearFilters = () => {
     setSearchTerm('');
@@ -135,7 +151,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
     setFormData({
       ...emptyFormState,
       dayNumber: selectedDayFilter !== 'all' ? selectedDayFilter : 1,
-      cluster: currentCluster,
+      cluster: selectedCluster?.name || currentCluster,
       academicYear: currentAcademicYear,
     });
     setViewMode('create');
@@ -1023,10 +1039,10 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {(!isSuperAdminClusterOverview || selectedCluster) && <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() => exportAllLessonPlansExcel(lessonPlans, currentCluster)}
+            onClick={() => exportAllLessonPlansExcel(lessonPlansInScope, selectedCluster?.name || currentCluster)}
             className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
             title="Export all lesson plans to Excel"
           >
@@ -1041,8 +1057,66 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
             <Plus className="h-4 w-4" />
             <span>Create Lesson Plan</span>
           </button>
-        </div>
+        </div>}
       </div>
+
+      {isSuperAdminClusterOverview && !selectedCluster && (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-bold text-gray-900 dark:text-white">Select a Cluster</h2>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Choose a cluster to view its lesson plans by day.</p>
+          </div>
+          {clusters.filter((cluster) => cluster.status !== 'Inactive').length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+              No clusters are available for this academic year.
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+              {clusters.filter((cluster) => cluster.status !== 'Inactive').map((cluster) => (
+                <button
+                  key={cluster.id}
+                  type="button"
+                  onClick={() => {
+                    setSelectedClusterId(cluster.id);
+                    setSelectedDayFilter('all');
+                    handleClearFilters();
+                  }}
+                  className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-theme-xs transition hover:border-brand-500/50 hover:shadow-theme-md dark:border-gray-800 dark:bg-white/[0.02]"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{cluster.district || 'District not set'}</p>
+                    </div>
+                    <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
+                      {clusterPlanCount(cluster)} plans
+                    </span>
+                  </div>
+                  <div className="mt-4 border-t border-gray-100 pt-3 text-xs font-semibold text-brand-600 dark:border-gray-800 dark:text-brand-400">
+                    View lesson plan days →
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {(!isSuperAdminClusterOverview || selectedCluster) && <>
+      {isSuperAdminClusterOverview && selectedCluster && (
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedClusterId(null);
+            setSelectedDayFilter('all');
+            handleClearFilters();
+          }}
+          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          All Clusters · {selectedCluster.name}
+        </button>
+      )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
@@ -1273,6 +1347,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 };

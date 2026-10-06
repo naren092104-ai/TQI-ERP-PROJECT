@@ -26,6 +26,7 @@ interface ApprovalCenterViewProps {
   currentUserClusterId: string;
   onSubmitDateChange: (sessionId: string, originalDate: string, requestedDate: string, reason: string) => Promise<void>;
   onReviewDateChange: (requestId: string, action: 'approve' | 'reject', remarks: string) => Promise<void>;
+  onReviewFinanceEditRequest: (reportId: string, action: 'approve' | 'reject', reason?: string) => Promise<void>;
 }
 
 export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
@@ -42,6 +43,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   currentUserClusterId,
   onSubmitDateChange,
   onReviewDateChange,
+  onReviewFinanceEditRequest,
 }) => {
   const [selectedModuleTab, setSelectedModuleTab] = useState<string>('all');
   const [selectedClusterFilter, setSelectedClusterFilter] = useState<string>('all');
@@ -55,6 +57,9 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   const [isRejecting, setIsRejecting] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState(false);
   const [approvalError, setApprovalError] = useState('');
+  const [financeEditReviewItem, setFinanceEditReviewItem] = useState<ApprovalItem | null>(null);
+  const [financeEditRejectionReason, setFinanceEditRejectionReason] = useState('');
+  const [isReviewingFinanceEdit, setIsReviewingFinanceEdit] = useState(false);
 
   const matchesApprovalCategory = (item: ApprovalItem, category: string) => {
     const module = item.module.toLowerCase();
@@ -74,7 +79,9 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
       case 'lessonPlan':
         return module === 'lesson plan';
       case 'finance':
-        return module === 'finance';
+        return module === 'finance' || module === 'finance edit request';
+      case 'financeEdit':
+        return module === 'finance edit request';
       case 'corrections':
         return module === 'correction request';
       default:
@@ -91,6 +98,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
       attendance: pendingOnly.filter((a) => a.module === 'Attendance').length,
       lessonPlan: pendingOnly.filter((a) => a.module === 'Lesson Plan').length,
       finance: pendingOnly.filter((a) => a.module === 'Finance').length,
+      financeEdit: pendingOnly.filter((a) => a.module === 'Finance Edit Request').length,
       sessions: pendingOnly.filter((a) => a.module === 'Sessions').length,
       corrections: pendingOnly.filter((a) => a.module === 'Correction Request').length,
       photos: pendingOnly.filter((a) => matchesApprovalCategory(a, 'photos')).length,
@@ -175,6 +183,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
         return 'bg-purple-50 text-purple-800 border-purple-200';
       case 'Finance':
         return 'bg-amber-50 text-amber-900 border-amber-200';
+      case 'Finance Edit Request':
+        return 'bg-orange-50 text-orange-900 border-orange-200';
       case 'Correction Request':
         return 'bg-orange-50 text-orange-900 border-orange-200';
       case 'Session Photos':
@@ -192,6 +202,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
         return 'menu_book';
       case 'Finance':
         return 'payments';
+      case 'Finance Edit Request':
+        return 'edit_note';
       case 'Correction Request':
         return 'edit_note';
       case 'Session Photos':
@@ -244,6 +256,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
           { id: 'attendance', label: 'Attendance', count: tabCounts.attendance },
           { id: 'lessonPlan', label: 'Lesson Plans', count: tabCounts.lessonPlan },
           { id: 'finance', label: 'Finance', count: tabCounts.finance },
+          { id: 'financeEdit', label: 'Finance Edit Requests', count: tabCounts.financeEdit },
           { id: 'corrections', label: 'Corrections', count: tabCounts.corrections },
         ].map((tab) => {
           const isActive = selectedModuleTab === tab.id;
@@ -402,7 +415,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                         <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
                           {item.module === 'Attendance' && `${item.details.presentCount || 0} Present / ${item.details.totalCount || 0} Students (${item.details.villageName || ''})`}
                           {item.module === 'Lesson Plan' && `${item.details.duration || '90 Mins'} • ${item.details.targetStandard || '6th-8th Std'}`}
-                          {item.module === 'Finance' && `Rs. ${item.details.totalAmount || 0} • SPOC: ${item.details.spocName || 'Admin'}`}
+                          {(item.module === 'Finance' || item.module === 'Finance Edit Request') && `${item.details.collegeName || 'College not set'} • ${item.details.sessionName || 'Session not set'} • ₹${item.details.totalAmount || 0} • ${item.details.itemCount || 0} expenses`}
                           {item.module === 'Correction Request' && `Reason: ${item.details.reason || ''}`}
                         </div>
                       )}
@@ -431,13 +444,15 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
-                          onClick={() => handleOpenReview(item)}
+                          onClick={() => item.module === 'Finance Edit Request'
+                            ? (setFinanceEditReviewItem(item), setFinanceEditRejectionReason(''))
+                            : handleOpenReview(item)}
                           className="bg-[#002869] hover:bg-[#001f52] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
                         >
                           <span className="material-symbols-outlined text-[14px]">visibility</span>
                           Review
                         </button>
-                        {item.status === 'Pending' && item.module !== 'Attendance' && (
+                        {item.status === 'Pending' && item.module !== 'Attendance' && item.module !== 'Finance Edit Request' && (
                           <button
                             onClick={() => onApprove(item.id, item.module, item.recordId)}
                             className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
@@ -642,6 +657,43 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {financeEditReviewItem && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-xl space-y-4 rounded-xl bg-white p-5 shadow-xl dark:bg-gray-900">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-gray-900 dark:text-white">Review Finance Edit Request</h2>
+                <p className="mt-1 text-xs text-gray-500">{financeEditReviewItem.recordTitle} · {financeEditReviewItem.clusterName}</p>
+              </div>
+              <button type="button" onClick={() => setFinanceEditReviewItem(null)} className="text-sm text-gray-500">Close</button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 rounded-lg bg-gray-50 p-3 text-xs dark:bg-gray-800">
+              <div><span className="text-gray-500">Requested by</span><div className="font-semibold">{financeEditReviewItem.submittedBy}</div></div>
+              <div><span className="text-gray-500">Requested at</span><div className="font-semibold">{new Date(financeEditReviewItem.submittedAt).toLocaleString()}</div></div>
+              <div><span className="text-gray-500">College</span><div className="font-semibold">{financeEditReviewItem.details?.collegeName || '—'}</div></div>
+              <div><span className="text-gray-500">Session</span><div className="font-semibold">{financeEditReviewItem.details?.sessionName || '—'}</div></div>
+              <div><span className="text-gray-500">Current report status</span><div className="font-semibold">Submitted / Locked</div></div>
+              <div><span className="text-gray-500">Total / entries / bills</span><div className="font-semibold">₹{Number(financeEditReviewItem.details?.totalAmount || 0).toLocaleString()} · {financeEditReviewItem.details?.itemCount || 0} · {financeEditReviewItem.details?.billCount || 0}</div></div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950"><strong>Reason for edit</strong><p className="mt-1 whitespace-pre-wrap">{financeEditReviewItem.details?.reason || 'No reason provided.'}</p></div>
+            <textarea value={financeEditRejectionReason} onChange={(event) => setFinanceEditRejectionReason(event.target.value)} rows={3} placeholder="Reason required when rejecting…" className="w-full rounded-lg border border-gray-200 p-3 text-xs dark:border-gray-700 dark:bg-gray-800 dark:text-white" />
+            <div className="flex justify-end gap-2">
+              <button type="button" disabled={isReviewingFinanceEdit || !financeEditRejectionReason.trim()} onClick={async () => {
+                setIsReviewingFinanceEdit(true);
+                try { await onReviewFinanceEditRequest(financeEditReviewItem.recordId, 'reject', financeEditRejectionReason.trim()); setFinanceEditReviewItem(null); }
+                catch (error) { alert(error instanceof Error ? error.message : 'Unable to reject edit request.'); }
+                finally { setIsReviewingFinanceEdit(false); }
+              }} className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Reject Edit Request</button>
+              <button type="button" disabled={isReviewingFinanceEdit} onClick={async () => {
+                setIsReviewingFinanceEdit(true);
+                try { await onReviewFinanceEditRequest(financeEditReviewItem.recordId, 'approve'); setFinanceEditReviewItem(null); }
+                catch (error) { alert(error instanceof Error ? error.message : 'Unable to approve edit request.'); }
+                finally { setIsReviewingFinanceEdit(false); }
+              }} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Approve Edit Request</button>
             </div>
           </div>
         </div>

@@ -2217,25 +2217,6 @@ export const SessionPhotosView: React.FC<SessionPhotosViewProps> = ({
 
             <div className="w-40">
               <Select
-                value={selectedCluster}
-                onValueChange={(val) => setSelectedCluster(val)}
-              >
-                <SelectTrigger className="h-9 text-xs">
-                  <SelectValue placeholder="All Clusters" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clusters</SelectItem>
-                  {clusters.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="w-40">
-              <Select
                 value={selectedPanchayat}
                 onValueChange={(val) => {
                   setSelectedPanchayat(val);

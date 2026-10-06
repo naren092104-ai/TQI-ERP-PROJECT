@@ -43,7 +43,12 @@ export interface User {
   status: 'Active' | 'Inactive';
   phone?: string;
   avatar?: string;
-  mustChangePassword?: boolean;
+  mustChangePassword: boolean;
+  passwordStatus?: 'SET' | 'TEMPORARY';
+  passwordCreatedAt?: string | null;
+  passwordChangedAt?: string | null;
+  passwordResetAt?: string | null;
+  passwordResetBy?: string | null;
 }
 
 export interface Cluster {
@@ -374,7 +379,7 @@ export interface FinanceEntry {
   sessionId?: string;
   date: string;
   description: string;
-  category: 'Materials' | 'Travel' | 'Food' | 'Admin' | 'Other';
+  category: 'Materials' | 'Stationery' | 'Travel' | 'Food' | 'Admin' | 'Other';
   amount: number;
   clusterId?: string;
   clusterName?: string;
@@ -383,6 +388,8 @@ export interface FinanceEntry {
   villageName: string;
   status: 'Approved' | 'Pending' | 'Correction' | 'Draft';
   billUrl?: string;
+  billReference?: string;
+  billDetectedAmount?: number;
   remarks?: string;
   count?: number;
   countAmount?: string;
@@ -439,6 +446,24 @@ export interface FinanceDraft {
   spocName: string;
   financerName: string;
   status: 'Draft' | 'Pending' | 'Approved' | 'Correction Requested';
+  reportStatus?: 'DRAFT' | 'SUBMITTED' | 'PENDING_APPROVAL' | 'APPROVED' | 'REJECTED';
+  editRequestStatus?: 'NONE' | 'PENDING' | 'APPROVED' | 'REJECTED';
+  editRequestReason?: string;
+  editRequestedBy?: string;
+  editRequestedAt?: string | null;
+  editApprovedBy?: string;
+  editApprovedAt?: string | null;
+  editRejectedBy?: string;
+  editRejectedAt?: string | null;
+  editRejectionReason?: string;
+  editPermission?: boolean;
+  lastSubmittedAt?: string | null;
+  lastSubmittedBy?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  history?: Array<{ event: string; details: string; userName: string; createdAt: string }>;
   correctionReason?: string;
   lastSaved: string;
   routes: RouteDraftItem[];
@@ -634,7 +659,7 @@ export interface CorrectionRequest {
 
 export interface ApprovalItem {
   id: string;
-  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Sessions' | 'Correction Request' | 'Session Photos';
+  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Finance Edit Request' | 'Sessions' | 'Correction Request' | 'Session Photos';
   clusterId: string;
   clusterName: string;
   recordId: string;

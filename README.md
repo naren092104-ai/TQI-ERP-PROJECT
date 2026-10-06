@@ -20,26 +20,34 @@ The platform is engineered with a decoupled, high-performance architecture:
 ```text
 ├── backend/                  # Express REST API Server
 │   ├── src/
-│   │   ├── controllers/      # Route controllers (Auth, Students, Sessions, Finance, etc.)
-│   │   ├── middleware/       # JWT auth & RBAC validation middleware
-│   │   ├── routes/           # REST API routes
-│   │   ├── utils/            # Migration runner, db pool, email service
-│   │   └── server.ts         # Application entry point
-│   ├── tsconfig.json
-│   └── .env.example
+│   │   ├── db/               # MySQL pool and schema bootstrap
+│   │   ├── scripts/          # Backend maintenance and workflow scripts
+│   │   ├── templates/        # Transactional email templates
+│   │   ├── authMailer.ts
+│   │   └── server.ts         # API routes and application entry point
+│   ├── storage/uploads/      # Runtime uploads (ignored by Git)
+│   └── tsconfig.json
 ├── frontend/                 # React 19 + TypeScript Client (TailAdmin UI)
 │   ├── src/
 │   │   ├── components/       # UI Views (Dashboard, Attendance, Finance, Approvals, etc.)
 │   │   │   └── ui/           # TailAdmin design system primitives (Card, Badge, Table, Modal)
-│   │   ├── context/          # SidebarContext & ThemeProvider
+│   │   ├── hooks/            # Shared React hooks
+│   │   ├── data/             # District and college reference data
+│   │   ├── utils/            # API, bill parsing, export, and PDF helpers
 │   │   ├── types.ts          # TypeScript domain interfaces
-│   │   └── index.css         # TailAdmin design tokens & Outfit typography
+│   │   └── index.css         # Global styles and design tokens
+│   ├── tests/e2e/            # Playwright browser tests
+│   ├── scripts/              # Frontend data maintenance scripts
 │   ├── vite.config.ts
 │   └── .env.example
 ├── database/
-│   └── migrations/           # Versioned MySQL migration scripts (001_initial_schema.sql, etc.)
-├── storage/
-│   └── uploads/              # Runtime uploads directory (photos, bills, documents)
+│   ├── migrations/           # Versioned MySQL migrations
+│   ├── migrations/archive/   # Superseded historical migrations
+│   └── schema/schema.sql     # Full schema reference
+├── docs/
+│   └── project-documents/    # Preserved finance and lesson-plan references
+├── frontend/tests/e2e/       # Full-system Playwright tests
+├── frontend/scripts/         # Frontend data maintenance scripts
 ├── package.json              # Monorepo root scripts
 └── README.md
 ```
@@ -65,7 +73,7 @@ DB_PASSWORD=your_mysql_password
 
 # Authentication & Security
 JWT_SECRET=your_secure_jwt_secret_key
-UPLOADS_DIR=storage/uploads
+UPLOADS_DIR=backend/storage/uploads
 
 # SMTP Configuration (Optional: Used for Email OTP login)
 SMTP_HOST=smtp.gmail.com
@@ -100,7 +108,7 @@ VITE_API_URL=http://localhost:5000/api
 git clone https://github.com/Mithunp123/TQI_ERP.git
 cd TQI_ERP
 
-# Install dependencies for the entire project
+# Install the root monorepo dependencies
 npm install
 ```
 
@@ -140,7 +148,7 @@ npm run dev:frontend  # Vite React App at http://localhost:5173
 
 ## 🛡️ Security & Access Control
 
-- **Role-Based Access Control (RBAC)**: Supports `Super Admin`, `State Lead`, `Cluster Admin`, `Finance Team`, `Auditor`, and `Volunteer` roles.
+- **Role-Based Access Control (RBAC)**: Supports `Super Admin` and `Cluster Admin` roles.
 - **JWT Authentication**: Secure stateless tokens with support for both Email OTP and password sign-in.
 - **Data Protection**: Sensitive environment variables are excluded from version control via `.gitignore`.
 
