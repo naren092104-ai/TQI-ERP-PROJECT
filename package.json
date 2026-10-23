@@ -9,14 +9,16 @@
     "dev:frontend": "vite --config frontend/vite.config.ts",
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "vite build --config frontend/vite.config.ts",
-    "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=backend/dist/server.cjs",
+    "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=backend/dist/server.cjs --tsconfig=backend/tsconfig.json",
     "start": "node backend/dist/server.cjs",
     "preview": "vite preview --config frontend/vite.config.ts",
     "test:e2e": "playwright test",
     "clean": "node -e \"const fs=require('fs'); for (const p of ['frontend/dist','backend/dist']) fs.rmSync(p,{recursive:true,force:true})\"",
     "lint": "npm run lint:frontend && npm run lint:backend",
     "lint:frontend": "tsc --noEmit -p frontend/tsconfig.json",
-    "lint:backend": "tsc --noEmit -p backend/tsconfig.json"
+    "lint:backend": "tsc --noEmit -p backend/tsconfig.json",
+    "db:clean": "npm --prefix backend run db:clean",
+    "db:reset": "npm --prefix backend run db:reset"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

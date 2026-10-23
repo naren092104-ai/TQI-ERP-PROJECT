@@ -10,7 +10,7 @@ export default defineConfig({
   workers: 1,
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://127.0.0.1:5173',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
@@ -18,21 +18,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
-    },
-  ],
-  webServer: [
-    {
-      command: 'npx tsx backend/src/server.ts',
-      port: 5000,
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
-    },
-    {
-      command: 'npm run dev:frontend',
-      port: 5173,
-      reuseExistingServer: !process.env.CI,
-      timeout: 30000,
+      use: {
+        ...devices['Desktop Chrome'],
+      },
     },
   ],
 });

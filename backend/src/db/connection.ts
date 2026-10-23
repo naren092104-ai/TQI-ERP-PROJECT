@@ -1,11 +1,19 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import mysql, { Pool, PoolOptions } from 'mysql2/promise';
 
-dotenv.config();
-dotenv.config({ path: path.resolve(process.cwd(), 'backend', '.env') });
-dotenv.config({ path: path.resolve(process.cwd(), '..', '.env') });
-dotenv.config({ path: path.resolve(process.cwd(), '.env') });
+// Quietly load environment variables from the nearest .env file
+const envCandidates = [
+  path.resolve(process.cwd(), '.env'),
+  path.resolve(process.cwd(), 'backend', '.env'),
+  path.resolve(process.cwd(), '..', '.env'),
+];
+for (const envPath of envCandidates) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: true, quiet: true });
+  }
+}
 
 const DB_NAME = process.env.DB_NAME || 'TQI_ERP';
 const baseConfig: PoolOptions = {
@@ -18,6 +26,8 @@ const baseConfig: PoolOptions = {
   queueLimit: 0,
   charset: 'utf8mb4',
   timezone: '+00:00',
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
 };
 
 import { initDatabaseSchema } from './init.js';
@@ -27,21 +37,19 @@ export let pool: Pool;
 /**
  * Connect to MySQL, create the database if missing, set up the pool.
  * Does NOT run schema migrations or the post-migration bootstrap — those
- * run later in startServer, after runSqlFiles has applied the v2 schema.
+ * run later in startServer, after runSqlFiles has applied the schema.
  */
 export async function initializeDatabase(): Promise<void> {
   if (pool) {
     return;
   }
 
-  console.log(`[DB] Initializing MySQL connection (${baseConfig.user}@${baseConfig.host}:${baseConfig.port})...`);
   const adminPool = mysql.createPool(baseConfig);
   try {
     await adminPool.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
-    console.log(`[DB] Database '${DB_NAME}' verified/created.`);
   } catch (err: any) {
-    console.error(`[DB ERROR] Failed to connect/create database '${DB_NAME}':`, err.message);
-    throw err;
+    const errorDetails = err?.message || err?.sqlMessage || err?.code || String(err);
+    throw new Error(`Failed to initialize database '${DB_NAME}' on MySQL (${baseConfig.user}@${baseConfig.host}:${baseConfig.port}): ${errorDetails}`);
   } finally {
     await adminPool.end();
   }
@@ -50,7 +58,6 @@ export async function initializeDatabase(): Promise<void> {
     ...baseConfig,
     database: DB_NAME,
   });
-  console.log(`[DB] Connection pool created for '${DB_NAME}'.`);
 }
 
 export { initDatabaseSchema };
@@ -71,5 +78,3 @@ export async function getDatabaseStatus(): Promise<'connected' | 'disconnected'>
     return 'disconnected';
   }
 }
-
-

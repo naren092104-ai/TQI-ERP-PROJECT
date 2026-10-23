@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
 import { pool, initializeDatabase } from '../db/connection.js';
 
 async function runCleanReset() {
@@ -11,6 +10,13 @@ async function runCleanReset() {
 
     // 1. Run migrations to ensure all latest tables exist
     console.log('[CLEAN-RESET] Ensuring all migrations are applied...');
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version VARCHAR(255) PRIMARY KEY,
+        applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
     const projectRoot = fs.existsSync(path.join(process.cwd(), 'frontend'))
       ? process.cwd()
       : path.resolve(process.cwd(), '..');
@@ -28,14 +34,12 @@ async function runCleanReset() {
             // ignore benign duplicate errors
           }
         }
+        await pool.query('INSERT IGNORE INTO schema_migrations (version) VALUES (?)', [file]);
       }
       console.log(`[CLEAN-RESET] Applied ${files.length} migrations.`);
     }
 
-    // 2. Truncate ALL v2 tables.
-    //    Order: child-first to avoid any FK violation edge cases.
-    //    (FKs in v2 use sensible cascades, but TRUNCATE doesn't fire them —
-    //    so we drop children first to be safe.)
+    // 2. Truncate operational tables child-first
     console.log('[CLEAN-RESET] Disabling foreign keys and truncating all operational tables...');
     await pool.query('SET FOREIGN_KEY_CHECKS = 0');
 
@@ -80,20 +84,74 @@ async function runCleanReset() {
 
     await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 
-    // 3. Seed ONLY the default Super Admin (random password).
-    const rawPassword = randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+    // 3. Seed default Super Admin (password: admin123, must_change_password: FALSE)
+    const rawPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'admin123';
     const passwordHash = await bcrypt.hash(rawPassword, 10);
-    console.log('[CLEAN-RESET] Seeding ONLY Super Admin...');
+    console.log('[CLEAN-RESET] Seeding Super Admin...');
     await pool.query(
       `INSERT INTO users (id, name, email, password_hash, role, cluster_id, phone, must_change_password, status)
-       VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', TRUE, 'Active')`,
+       VALUES ('usr-super-admin', 'Super Admin', 'admin@tqi.org', ?, 'Super Admin', NULL, '+91 90000 00000', FALSE, 'Active')
+       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), must_change_password = FALSE, status = 'Active'`,
       [passwordHash],
     );
+
+    // 4. Seed Active Academic Year
+    console.log('[CLEAN-RESET] Seeding active academic year...');
+    await pool.query(
+      `INSERT INTO academic_years (id, name, start_date, end_date, is_active, status)
+       VALUES ('ay-2025-2026', '2025-2026', '2025-06-01', '2026-05-31', 1, 'ACTIVE')
+       ON DUPLICATE KEY UPDATE is_active = 1, status = 'ACTIVE'`,
+    );
+
+    // 5. Seed 8 Academic Setup Days
+    console.log('[CLEAN-RESET] Seeding 8 academic setup days...');
+    const academicDays: [number, string][] = [
+      [1, 'Parents Meet'],
+      [2, 'Know Your Locality'],
+      [3, 'Books to Bytes'],
+      [4, 'Sports'],
+      [5, 'Science'],
+      [6, 'Art Education'],
+      [7, 'Constitution'],
+      [8, 'Tinkering Session'],
+    ];
+    for (const [dayNum, sessionName] of academicDays) {
+      await pool.query(
+        `INSERT INTO academic_setup (academic_year_id, day_number, academic_year, session_name)
+         VALUES ('ay-2025-2026', ?, '2025-2026', ?)
+         ON DUPLICATE KEY UPDATE session_name = VALUES(session_name)`,
+        [dayNum, sessionName],
+      );
+    }
+
+    // 6. Seed Foundation Modules
+    console.log('[CLEAN-RESET] Seeding foundation modules...');
+    await pool.query(
+      `INSERT INTO modules (id, name, code, description, is_active, academic_year, day_number)
+       VALUES
+         ('module-english', 'Spoken English', 'ENG-01', 'English communication & vocabulary', TRUE, '2025-2026', 1),
+         ('module-maths', 'Mathematics Basics', 'MATH-02', 'Foundational arithmetic & problem solving', TRUE, '2025-2026', 2),
+         ('module-life-skills', 'Life Skills & Confidence', 'LIFE-03', 'Critical thinking, ethics & leadership', TRUE, '2025-2026', 3)
+       ON DUPLICATE KEY UPDATE name = VALUES(name), is_active = TRUE`,
+    );
+
+    // 7. Seed System Settings & Maintenance
+    await pool.query(
+      `INSERT INTO maintenance_settings (id, enabled, title, message)
+       VALUES ('website_maintenance', 0, 'Website Under Maintenance', 'Maintenance')
+       ON DUPLICATE KEY UPDATE enabled = 0`,
+    ).catch(() => undefined);
+
+    await pool.query(
+      `INSERT INTO tqi_settings (setting_key, setting_value)
+       VALUES ('finance_officer_name', 'TQI Finance Team')
+       ON DUPLICATE KEY UPDATE setting_value = 'TQI Finance Team'`,
+    ).catch(() => undefined);
 
     console.log('\n======================================================');
     console.log('✅ CLEAN DATABASE RESET COMPLETED');
     console.log('------------------------------------------------------');
-    console.log('All tables wiped. Only Super Admin preserved.');
+    console.log('All tables wiped and baseline entities seeded.');
     console.log(`Email    : admin@tqi.org`);
     console.log(`Password : ${rawPassword}`);
     console.log('======================================================\n');

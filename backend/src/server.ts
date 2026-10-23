@@ -41,7 +41,7 @@ const loadDotenvFiles = () => {
   const uniqueCandidates = [...new Set(candidates.filter((candidate) => fs.existsSync(candidate)))];
 
   for (const candidate of uniqueCandidates) {
-    dotenv.config({ path: candidate, override: true });
+    dotenv.config({ path: candidate, override: true, quiet: true });
   }
 };
 
@@ -91,7 +91,7 @@ const resolveStoredUploadPath = (storedPath: unknown): string => {
 };
 
 const app = express();
-const PORT = Number(process.env.PORT || 5000);
+const PORT = Number(process.env.PORT || 3002);
 const JWT_SECRET = process.env.JWT_SECRET || 'replace-with-a-secret';
 const DEFAULT_ACADEMIC_SESSION_NAMES = [
   'Parents Meet',
@@ -370,9 +370,9 @@ const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextF
   }
 };
 
-const runSqlFiles = async () => {
+const runSqlFiles = async (): Promise<number> => {
   const migrationDir = path.join(PROJECT_ROOT, 'database', 'migrations');
-  if (!fs.existsSync(migrationDir)) return;
+  if (!fs.existsSync(migrationDir)) return 0;
 
   // Create schema_migrations table if not exists
   await pool.query(`
@@ -389,11 +389,10 @@ const runSqlFiles = async () => {
   const pendingFiles = files.filter((file) => !appliedSet.has(file));
 
   if (pendingFiles.length === 0) {
-    console.log(`[DB] Database schema is up to date (${files.length} migration(s) applied).`);
-    return;
+    return files.length;
   }
 
-  console.log(`[DB] Applying ${pendingFiles.length} pending SQL migration(s)...`);
+  console.log(`      Applying ${pendingFiles.length} pending SQL migration(s)...`);
   for (const file of pendingFiles) {
     const filePath = path.join(migrationDir, file);
     const sql = fs.readFileSync(filePath, 'utf8');
@@ -408,7 +407,7 @@ const runSqlFiles = async () => {
       try {
         await pool.query(statement);
       } catch (error: any) {
-        if (!['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME', 'ER_CANT_DROP_FIELD_OR_KEY', 'ER_KEY_COLUMN_DOES_NOT_EXITS', 'ER_DUP_ENTRY'].includes(error?.code)) {
+        if (!['ER_DUP_FIELDNAME', 'ER_TABLE_EXISTS_ERROR', 'ER_DUP_KEYNAME', 'ER_FK_DUP_NAME', 'ER_CANT_DROP_FIELD_OR_KEY', 'ER_KEY_COLUMN_DOES_NOT_EXITS', 'ER_DUP_ENTRY'].includes(error?.code)) {
           console.warn(`[DB MIGRATION WARNING] in ${file}:`, error.message);
           hadFatalError = true;
         }
@@ -421,9 +420,9 @@ const runSqlFiles = async () => {
       continue;
     }
     await pool.query('INSERT IGNORE INTO schema_migrations (version) VALUES (?)', [file]);
-    console.log(`[DB] Applied migration: ${file}`);
+    console.log(`      ✓ Applied migration: ${file}`);
   }
-  console.log('[DB] All database migrations are up to date.');
+  return files.length;
 };
 
 
@@ -777,7 +776,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
 
     if (!rows.length) {
-      res.status(401).json({ success: false, error: 'Invalid credentials.' });
+      res.status(401).json({ success: false, error: 'Invalid email or password.' });
       return;
     }
 
@@ -791,7 +790,7 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const isSuperAdmin = normalizeRole(user.role) === 'Super Admin';
     if (!isSuperAdmin && (userStatus === 'inactive' || userStatus === 'blocked' || userStatus === 'disabled')) {
       console.warn(`[AUTH LOGIN] Blocked inactive user: ${email}`);
-      res.status(403).json({ success: false, error: 'This user account is inactive.' });
+      res.status(403).json({ success: false, error: 'This user account is inactive. Please contact your Super Admin.' });
       return;
     }
 
@@ -799,7 +798,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       const match = await bcrypt.compare(password, user.password_hash || '');
       console.log(`[AUTH LOGIN] Password comparison for ${email}: ${match ? 'SUCCESS' : 'FAILED'}`);
       if (!match) {
-        res.status(401).json({ success: false, error: 'Invalid credentials.' });
+        console.warn(`[AUTH] Invalid password attempt for: ${email}`);
+        res.status(401).json({ success: false, error: 'Invalid email or password.' });
         return;
       }
       const { token, user: serializedUser } = createAuthToken(user);
@@ -8131,36 +8131,65 @@ app.use('/assets', express.static(path.join(PROJECT_ROOT, 'frontend', 'public', 
 app.use('/storage/uploads', express.static(UPLOADS_DIR));
 
 const startServer = async () => {
-  try {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    await initializeDatabase();
-    await runSqlFiles();
-    // Post-migration verifier + Super Admin bootstrap.
-    // MUST run after runSqlFiles so schema_migrations and users exist.
-    await initDatabaseSchema();
+  console.log('\n==================================================');
+  console.log('            TQI ERP - BACKEND SERVICE             ');
+  console.log('==================================================');
 
-    const dbStatus = await getDatabaseStatus();
-    if (dbStatus === 'disconnected') {
-      console.warn('[DB WARNING] MySQL connection test reported disconnected. Please check database service.');
+  try {
+    // Stage 1: Environment & Directories
+    console.log('[1/5] [CONFIG] Initializing environment and storage...');
+    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    console.log(`      ✓ Uploads directory ready (${UPLOADS_DIR})`);
+    console.log(`      ✓ Backups directory ready (${BACKUPS_DIR})`);
+
+    // Stage 2: Database Connection & Pool
+    console.log('[2/5] [DB] Connecting to MySQL database...');
+    await initializeDatabase();
+    console.log(`      ✓ Connected to database '${process.env.DB_NAME || 'TQI_ERP'}' (${process.env.DB_USER || 'root'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 3306})`);
+
+    // Stage 3: Schema Migrations & Integrity
+    console.log('[3/5] [DB] Verifying schema and migrations...');
+    const migrationCount = await runSqlFiles();
+    await ensureAcademicSetupTable().catch(() => undefined);
+    console.log(`      ✓ Database schema verified (${migrationCount} migration(s) applied - up to date)`);
+
+    // Stage 4: Authentication & Bootstrap
+    console.log('[4/5] [AUTH] Verifying user accounts...');
+    const authStatus = await initDatabaseSchema();
+    if (authStatus?.bootstrapped) {
+      console.log(`      ✓ Super Admin bootstrapped successfully (${authStatus.adminEmail})`);
     } else {
-      console.log('[DB] MySQL connection active.');
+      console.log(`      ✓ User accounts verified (${authStatus?.userCount ?? 1} user(s) ready)`);
     }
 
-    app.listen(PORT, '0.0.0.0', async () => {
-      // Self-heal the academic_setup table at boot so a previous failed migration
-      // (or stale schema_migrations row) never breaks the /api/academic-setup endpoints.
-      await ensureAcademicSetupTable().catch(() => undefined);
-      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    // Stage 5: HTTP Listener
+    console.log('[5/5] [HTTP] Starting API listener...');
+    app.listen(PORT, '0.0.0.0', () => {
       void runAutomaticBackupIfDue();
       const backupTimer = setInterval(() => void runAutomaticBackupIfDue(), 60 * 60 * 1000);
       backupTimer.unref?.();
-      console.log(`\n==================================================`);
-      console.log(`🚀 TQI Backend API running on http://localhost:${PORT}`);
-      console.log(`   Health Check: http://localhost:${PORT}/api/health`);
-      console.log(`==================================================\n`);
+
+      console.log('\n==================================================');
+      console.log(`🚀 TQI Backend API active and listening on port ${PORT}`);
+      console.log(`👉 Local API    : http://localhost:${PORT}`);
+      console.log(`👉 Health Check : http://localhost:${PORT}/api/health`);
+      console.log('==================================================\n');
     });
-  } catch (error) {
-    console.error('Failed to initialize server:', error);
+  } catch (error: any) {
+    console.error('\n==================================================');
+    console.error('❌ [STARTUP ERROR] Backend service failed to start');
+    console.error('==================================================');
+    console.error(`Error: ${error?.message || error}`);
+    if (error?.code === 'ECONNREFUSED' || error?.message?.includes('ECONNREFUSED')) {
+      console.error('\nSuggested Resolution:');
+      console.error('  1. Ensure MySQL service is running locally on port 3306.');
+      console.error('  2. Verify DB_USER, DB_PASSWORD, DB_PORT in your .env file.');
+    } else if (error?.code === 'ER_ACCESS_DENIED_ERROR' || error?.message?.includes('ER_ACCESS_DENIED_ERROR')) {
+      console.error('\nSuggested Resolution:');
+      console.error('  1. Check MySQL username and password in .env.');
+    }
+    console.error('==================================================\n');
     process.exit(1);
   }
 };

@@ -25,20 +25,19 @@ export default defineConfig(() => {
     optimizeDeps: {
       include: ['buffer', '@react-pdf/renderer'],
     },
-    server: {
-      port: 5173,
+    server: {      host: '127.0.0.1',      port: 5173,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modifyâ€”file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      watch: { ignored: ['**/tests/**', '**/test-results/**', '**/.git/**'] },
       proxy: {
         '/api': {
-          target: 'http://localhost:5000',
+          target: 'http://127.0.0.1:3002',
           changeOrigin: true,
         },
         '/storage': {
-          target: 'http://localhost:5000',
+          target: 'http://127.0.0.1:3002',
           changeOrigin: true,
         },
       },

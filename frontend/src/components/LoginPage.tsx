@@ -153,7 +153,12 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        data = null;
+      }
       if (!response.ok || !data?.success) {
         setErrorMessage(data?.error || 'Invalid email or password. Please try again.');
         setIsLoading(false);

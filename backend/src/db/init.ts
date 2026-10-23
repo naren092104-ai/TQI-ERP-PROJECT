@@ -1,37 +1,36 @@
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'crypto';
 import { pool } from './connection.js';
 
+export interface InitDatabaseResult {
+  userCount: number;
+  bootstrapped: boolean;
+  adminEmail?: string;
+}
+
 /**
- * Thin post-migration verifier and Super Admin bootstrap.
+ * Post-migration verifier and Super Admin bootstrap.
  *
  * The migration runner at backend/src/server.ts (runSqlFiles) is the single
  * source of truth for schema. After it has applied every .sql file under
  * database/migrations/, this function is called to:
  *   1. Verify schema_migrations is populated.
- *   2. If users is empty, insert ONE Super Admin with a random bcrypt-hashed
+ *   2. If users is empty, insert ONE Super Admin with a bcrypt-hashed
  *      password and print the credentials to the console.
- *
- * No inline DDL, no COLUMN_PATCHES, no demo data, no alias row.
  */
-export async function initDatabaseSchema(): Promise<void> {
-  console.log('[DB] Verifying database schema...');
-
+export async function initDatabaseSchema(): Promise<InitDatabaseResult> {
   // 1. Confirm schema_migrations has rows.
   const [migrationRows] = await pool.query<any[]>('SELECT COUNT(*) AS n FROM schema_migrations');
   const appliedCount = Number(migrationRows[0]?.n ?? 0);
   if (appliedCount === 0) {
     throw new Error('No migrations recorded in schema_migrations. The migration runner should have run before this.');
   }
-  console.log(`[DB] ${appliedCount} migration(s) recorded.`);
 
   // 2. Seed a Super Admin if the users table is empty.
   const [userRows] = await pool.query<any[]>('SELECT COUNT(*) AS n FROM users');
   const userCount = Number(userRows[0]?.n ?? 0);
 
   if (userCount > 0) {
-    console.log(`[DB] ${userCount} user(s) present. Skipping Super Admin bootstrap.`);
-    return;
+    return { userCount, bootstrapped: false };
   }
 
   const rawPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'admin123';
@@ -43,13 +42,13 @@ export async function initDatabaseSchema(): Promise<void> {
     [passwordHash],
   );
 
-  console.log('');
-  console.log('======================================================');
-  console.log('[BOOTSTRAP] Super Admin created.');
+  console.log('\n======================================================');
+  console.log('[BOOTSTRAP] Super Admin account created.');
   console.log('------------------------------------------------------');
   console.log('   Email    : admin@tqi.org');
   console.log(`   Password : ${rawPassword}`);
   console.log('   Role     : Super Admin');
-  console.log('======================================================');
-  console.log('');
+  console.log('======================================================\n');
+
+  return { userCount: 1, bootstrapped: true, adminEmail: 'admin@tqi.org' };
 }

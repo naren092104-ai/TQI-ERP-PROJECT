@@ -4,7 +4,7 @@ import path from 'path';
 import { pool, initializeDatabase } from '../db/connection.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'your_secure_jwt_secret_key';
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:3002/api';
 
 const superAdminToken = jwt.sign(
   { id: 'usr-super-admin', email: 'admin@tqi.org', role: 'SUPER_ADMIN', cluster_id: null },

@@ -1,8 +1,10 @@
 export const API_BASE_URL: string = (
   import.meta.env.VITE_API_URL ||
-  (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
-    ? 'https://tqi.autorevives.com/api'
-    : 'http://localhost:5000/api')
+  (typeof window !== 'undefined'
+    ? (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1'
+        ? 'https://tqi.autorevives.com/api'
+        : '/api')
+    : 'http://localhost:3002/api')
 ).replace(/\/$/, '');
 
 export function apiUrl(path: string): string {
@@ -29,5 +31,3 @@ export function apiUrl(path: string): string {
   }
   return `${API_BASE_URL}${cleanPath}`;
 }
-
-

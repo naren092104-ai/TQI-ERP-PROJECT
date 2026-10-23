@@ -40,7 +40,6 @@ WHERE LOWER(TRIM(legacy.name)) = 'vedakattamaduvu'
   AND NOT EXISTS (SELECT 1 FROM lesson_plans r WHERE r.panchayat_id = legacy.id)
   AND NOT EXISTS (SELECT 1 FROM schools r WHERE r.panchayat_id = legacy.id)
   AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.panchayat_id = legacy.id)
-  AND NOT EXISTS (SELECT 1 FROM sessions r WHERE r.panchayatId = legacy.id)
   AND NOT EXISTS (SELECT 1 FROM students r WHERE r.panchayat_id = legacy.id)
   AND NOT EXISTS (SELECT 1 FROM villages r WHERE r.panchayat_id = legacy.id)
   AND NOT EXISTS (SELECT 1 FROM volunteers r WHERE r.panchayat_id = legacy.id);

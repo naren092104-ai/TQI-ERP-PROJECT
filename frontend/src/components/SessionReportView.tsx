@@ -419,8 +419,17 @@ export const SessionReportView: React.FC<SessionReportViewProps> = ({
           </div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {clusterReportCards.map((cluster) => (
+        {clusterReportCards.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-12 text-center dark:border-slate-800 dark:bg-slate-900">
+            <FileText className="mx-auto h-12 w-12 text-slate-300 dark:text-slate-600" />
+            <h3 className="mt-3 text-base font-semibold text-slate-900 dark:text-white">No cluster reports found</h3>
+            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+              No cluster reports are available for this academic year yet.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {clusterReportCards.map((cluster) => (
             <button
               key={cluster.id}
               type="button"
@@ -461,8 +470,9 @@ export const SessionReportView: React.FC<SessionReportViewProps> = ({
                 <span className="font-semibold text-[#1717B8]">Open cluster <ChevronRight className="ml-1 inline h-3 w-3" /></span>
               </div>
             </button>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   }

@@ -147,7 +147,6 @@ export const DistrictCombobox: React.FC<DistrictComboboxProps> = ({
           required
           className="sr-only"
           tabIndex={-1}
-          aria-hidden="true"
         />
       )}
 

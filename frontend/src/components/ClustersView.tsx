@@ -428,7 +428,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
                 <label className={labelClass}>Cluster Name / District *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value, district: event.target.value })} placeholder="Enter district name" className={inputClass} /></label>
                 <div><span className={labelClass}>College *</span><CollegeCombobox value={draft.collegeName} authToken={authToken} onChange={handleCollegeSelection} required /></div>
-                <DistrictCombobox id="college-location" label="College Location *" placeholder="Select college location" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
+                <DistrictCombobox id="college-location" label="College Location" placeholder="Select college location" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
               </section>
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">SPOC details</h3>
                 <label className={labelClass}>SPOC Name *<input required value={draft.spocName} onChange={(event) => setDraft({ ...draft, spocName: event.target.value })} placeholder="Full name" className={inputClass} /></label>

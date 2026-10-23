@@ -579,10 +579,18 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
     }
   };
 
-  // 1. Super Admin Cluster Schedule Board Overview
-  if (showClusterCards) {
-    return (
-      <div className="space-y-6">
+  return (
+    <div className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-card px-4 py-3 text-xs font-semibold text-emerald-500 shadow-xl animate-in fade-in slide-in-from-bottom-3">
+          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
+      {showClusterCards ? (
+        <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Cluster Sessions Schedule Overview</h1>
@@ -618,7 +626,16 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         </div>
 
         {/* Cluster Schedule Cards Grid */}
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {clusterScheduleSummaries.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+            <Calendar className="mx-auto h-12 w-12 text-muted-foreground/40" />
+            <h3 className="mt-3 text-base font-semibold text-foreground">No cluster schedules found</h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              No clusters are available to schedule sessions for this academic year. Onboard a cluster or add sessions to get started.
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {clusterScheduleSummaries.map((cluster) => (
             <div
               key={cluster.id}
@@ -690,21 +707,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        )}
       </div>
-    );
-  }
-
-  // 2. Main Sessions & Reschedule Review Workspace
-  return (
-    <div className="space-y-6">
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 rounded-xl border border-emerald-500/30 bg-card px-4 py-3 text-xs font-semibold text-emerald-500 shadow-xl animate-in fade-in slide-in-from-bottom-3">
-          <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
+      ) : (
+        <>
 
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -1031,6 +1038,8 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </div>
               </div>
           )}
+        </>
+      )}
         </>
       )}
 
