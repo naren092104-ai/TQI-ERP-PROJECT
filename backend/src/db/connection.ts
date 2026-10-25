@@ -16,6 +16,9 @@ for (const envPath of envCandidates) {
 }
 
 const DB_NAME = process.env.DB_NAME || 'TQI_ERP';
+const DB_SSL = process.env.DB_SSL === 'true';
+const DB_SSL_CA = process.env.DB_SSL_CA?.replace(/\\n/g, '\n');
+const DB_CREATE_IF_MISSING = process.env.DB_CREATE_IF_MISSING !== 'false';
 const baseConfig: PoolOptions = {
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),
@@ -28,6 +31,9 @@ const baseConfig: PoolOptions = {
   timezone: '+00:00',
   enableKeepAlive: true,
   keepAliveInitialDelay: 10000,
+  ...(DB_SSL
+    ? { ssl: { rejectUnauthorized: true, ...(DB_SSL_CA ? { ca: DB_SSL_CA } : {}) } }
+    : {}),
 };
 
 import { initDatabaseSchema } from './init.js';
@@ -44,14 +50,16 @@ export async function initializeDatabase(): Promise<void> {
     return;
   }
 
-  const adminPool = mysql.createPool(baseConfig);
-  try {
-    await adminPool.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
-  } catch (err: any) {
-    const errorDetails = err?.message || err?.sqlMessage || err?.code || String(err);
-    throw new Error(`Failed to initialize database '${DB_NAME}' on MySQL (${baseConfig.user}@${baseConfig.host}:${baseConfig.port}): ${errorDetails}`);
-  } finally {
-    await adminPool.end();
+  if (DB_CREATE_IF_MISSING) {
+    const adminPool = mysql.createPool(baseConfig);
+    try {
+      await adminPool.query(`CREATE DATABASE IF NOT EXISTS \`${DB_NAME}\``);
+    } catch (err: any) {
+      const errorDetails = err?.message || err?.sqlMessage || err?.code || String(err);
+      throw new Error(`Failed to initialize database '${DB_NAME}' on MySQL (${baseConfig.user}@${baseConfig.host}:${baseConfig.port}): ${errorDetails}`);
+    } finally {
+      await adminPool.end();
+    }
   }
 
   pool = mysql.createPool({
