@@ -8,7 +8,10 @@ test('does not call auth/me when there is no stored token', async ({ page }) => 
 
   await page.goto('http://127.0.0.1:5173');
   await expect(page.locator('#login-email')).toBeVisible();
-  await page.waitForTimeout(100);
+  for (let reload = 0; reload < 2; reload += 1) {
+    await page.reload();
+    await expect(page.locator('#login-email')).toBeVisible();
+  }
   expect(authMeRequests).toHaveLength(0);
 });
 
@@ -141,6 +144,60 @@ test('login stores the JWT, validates once, refresh revalidates, and logout does
   await page.waitForTimeout(100);
   expect(authMeRequests).toHaveLength(2);
   expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
+});
+
+test('removing the stored token before refresh does not call auth/me', async ({ page }) => {
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+  const token = `header.${payload}.signature`;
+  await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
+  await page.route('**/api/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(pathname.endsWith('/system/maintenance')
+        ? { success: true, maintenance: null }
+        : { success: true, data: [] }),
+    });
+  });
+  await page.route('**/api/auth/login', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({
+      success: true,
+      token,
+      user: {
+        id: 'valid-user',
+        name: 'Test User',
+        email: 'test@example.org',
+        role: 'Super Admin',
+        clusterId: 'all',
+        clusterName: 'All Clusters',
+      },
+    }),
+  }));
+
+  const authMeRequests: string[] = [];
+  await page.route('**/api/auth/me', async (route) => {
+    authMeRequests.push(route.request().headers().authorization || '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, user: { id: 'valid-user', mustChangePassword: false } }),
+    });
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await page.fill('#login-email', 'test@example.org');
+  await page.fill('input[type="password"]', 'AnyTestPassword!');
+  await page.getByRole('button', { name: /sign in/i }).click();
+  await expect(page.getByText('Sign Out', { exact: true })).toBeVisible();
+  expect(authMeRequests).toHaveLength(1);
+
+  await page.evaluate(() => localStorage.removeItem('tqi_auth_session'));
+  await page.reload();
+  await expect(page.locator('#login-email')).toBeVisible();
+  expect(authMeRequests).toHaveLength(1);
 });
 
 test('dashboard loads academic setup using an authenticated request', async ({ page }) => {

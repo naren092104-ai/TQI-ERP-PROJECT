@@ -122,9 +122,7 @@ export default function App() {
       role: normalizeUserRole(savedSession.role),
     } as AuthSession;
   });
-  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>(
-    currentUser?.token ? 'checking' : 'unauthenticated',
-  );
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>('checking');
 
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(currentUser?.role || 'Super Admin');
   const [currentUserClusterId, setCurrentUserClusterId] = useState<string>(currentUser?.clusterId || 'all');
@@ -279,11 +277,9 @@ export default function App() {
     // Defer the first request so React StrictMode's development-only effect
     // replay can cancel its first setup before any network request is sent.
     const initialCheck = window.setTimeout(() => void verifyPasswordState(), 0);
-    const timer = window.setInterval(() => void verifyPasswordState(), 30_000);
     return () => {
       active = false;
       window.clearTimeout(initialCheck);
-      window.clearInterval(timer);
       controller.abort();
     };
   }, [currentUser?.token]);
