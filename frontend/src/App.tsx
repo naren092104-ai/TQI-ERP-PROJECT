@@ -87,39 +87,44 @@ const isJwtExpired = (token?: string): boolean => {
   }
 };
 
-const readStoredAuthToken = (): string | null => {
+const readStoredAuthSession = (): Partial<AuthSession> | null => {
   try {
     const saved = localStorage.getItem('tqi_auth_session');
     if (!saved) return null;
     const session = JSON.parse(saved) as Partial<AuthSession> | null;
-    return typeof session?.token === 'string' && session.token.trim() ? session.token : null;
+    return session && typeof session === 'object' ? session : null;
   } catch {
     return null;
   }
 };
 
+const readStoredAuthToken = (): string | null => {
+  const token = readStoredAuthSession()?.token;
+  return typeof token === 'string' && token.trim() ? token : null;
+};
+
 export default function App() {
   // Session & Authentication State
   const [currentUser, setCurrentUser] = useState<AuthSession | null>(() => {
-    try {
-      const saved = localStorage.getItem('tqi_auth_session');
-      if (saved) {
-        const parsed = JSON.parse(saved) as Partial<AuthSession> | null;
-        if (!parsed) return null;
-        if (isJwtExpired(parsed.token)) {
+    const savedSession = readStoredAuthSession();
+    if (!savedSession?.token || isJwtExpired(savedSession.token)) {
+      try {
+        if (localStorage.getItem('tqi_auth_session')) {
           localStorage.removeItem('tqi_auth_session');
-          return null;
         }
-        return {
-          ...parsed,
-          role: normalizeUserRole(parsed.role),
-        } as AuthSession;
+      } catch {
+        // Continue unauthenticated if browser storage is unavailable.
       }
-    } catch {
-      // ignore invalid session data
+      return null;
     }
-    return null;
+    return {
+      ...savedSession,
+      role: normalizeUserRole(savedSession.role),
+    } as AuthSession;
   });
+  const [authStatus, setAuthStatus] = useState<'checking' | 'authenticated' | 'unauthenticated'>(
+    currentUser?.token ? 'checking' : 'unauthenticated',
+  );
 
   const [currentUserRole, setCurrentUserRole] = useState<UserRole>(currentUser?.role || 'Super Admin');
   const [currentUserClusterId, setCurrentUserClusterId] = useState<string>(currentUser?.clusterId || 'all');
@@ -201,9 +206,11 @@ export default function App() {
     const sessionToken = currentUser?.token;
     if (!sessionToken) {
       setAuthValidatedToken(null);
+      setAuthStatus('unauthenticated');
       return;
     }
     setAuthValidatedToken(null);
+    setAuthStatus('checking');
 
     let active = true;
     let rejected = false;
@@ -219,6 +226,7 @@ export default function App() {
       }
       if (!active) return;
       setAuthValidatedToken((token) => token === sessionToken ? null : token);
+      setAuthStatus('unauthenticated');
       setCurrentUser((user) => user?.token === sessionToken ? null : user);
     };
 
@@ -257,7 +265,10 @@ export default function App() {
           clearInvalidSession();
           return;
         }
-        if (response.ok && data?.user) setAuthValidatedToken(storedToken);
+        if (response.ok && data?.user) {
+          setAuthValidatedToken(storedToken);
+          setAuthStatus('authenticated');
+        }
       } catch {
         // Brief network failures should not sign the user out.
       } finally {
@@ -323,7 +334,7 @@ export default function App() {
 
   // Sync with API Backend
   const fetchBackendData = useCallback(async (signal?: AbortSignal) => {
-    if (!currentUser?.token) return;
+    if (authStatus !== 'authenticated' || !currentUser?.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
 
@@ -350,6 +361,7 @@ export default function App() {
         .then((response) => {
           if (response.status === 401) {
             localStorage.removeItem('tqi_auth_session');
+            setAuthStatus('unauthenticated');
             setCurrentUser(null);
             return null;
           }
@@ -357,6 +369,7 @@ export default function App() {
             return response.json().then((data) => {
               if (data?.code === 'PASSWORD_CHANGE_REQUIRED') {
                 localStorage.removeItem('tqi_auth_session');
+                setAuthStatus('unauthenticated');
                 setCurrentUser(null);
               }
               return null;
@@ -478,25 +491,26 @@ export default function App() {
       setAreAcademicYearsLoading(false);
       // Network error or abort — keep existing in-memory state.
     }
-  }, [currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId, maintenanceCheckedToken, maintenanceState?.enabled]);
+  }, [authStatus, currentUser?.token, currentUserRole, currentUserClusterId, selectedAcademicYearId, maintenanceCheckedToken, maintenanceState?.enabled]);
 
   useEffect(() => {
-    if (!currentUser?.token) return;
+    if (authStatus !== 'authenticated' || !currentUser?.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
     const controller = new AbortController();
     fetchBackendData(controller.signal);
     return () => controller.abort();
-  }, [fetchBackendData, currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
+  }, [authStatus, fetchBackendData, currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
 
   useEffect(() => {
-    if (!currentUser?.token) {
+    if (authStatus !== 'authenticated' || !currentUser?.token) {
       setMaintenanceState(null);
       setMaintenanceCheckedToken(null);
       return;
     }
     if (isJwtExpired(currentUser.token)) {
       localStorage.removeItem('tqi_auth_session');
+      setAuthStatus('unauthenticated');
       setCurrentUser(null);
       return;
     }
@@ -520,6 +534,7 @@ export default function App() {
           localStorage.removeItem('tqi_auth_session');
           setMaintenanceLoading(false);
           setAuthValidatedToken(null);
+          setAuthStatus('unauthenticated');
           setCurrentUser(null);
           return;
         }
@@ -539,10 +554,10 @@ export default function App() {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [currentUser?.token, maintenanceCheckedToken, authValidatedToken]);
+  }, [authStatus, currentUser?.token, maintenanceCheckedToken, authValidatedToken]);
 
   useEffect(() => {
-    if (!currentUser?.token) return;
+    if (authStatus !== 'authenticated' || !currentUser?.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceCheckedToken !== currentUser.token) return;
     if (currentUserRole !== 'Super Admin' && maintenanceState?.enabled) return;
     let active = true;
@@ -567,7 +582,7 @@ export default function App() {
       active = false;
       window.clearInterval(timer);
     };
-  }, [currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
+  }, [authStatus, currentUser?.token, currentUserRole, maintenanceCheckedToken, maintenanceState?.enabled]);
 
   useEffect(() => {
     if (!areNotificationsLoaded) return;
@@ -641,6 +656,7 @@ export default function App() {
       // ignore
     }
     setCurrentUser(normalizedSession);
+    setAuthStatus('checking');
     setCurrentUserRole(normalizedSession.role);
     setCurrentUserClusterId(normalizedSession.clusterId);
     setCurrentTab('dashboard');
@@ -661,6 +677,7 @@ export default function App() {
     } catch {
       // ignore
     }
+    setAuthStatus('unauthenticated');
     setCurrentUser(null);
     setCurrentTab('dashboard');
   };
@@ -2166,8 +2183,16 @@ export default function App() {
       : module));
   };
 
+  if (authStatus === 'checking') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-background text-foreground">
+        <p role="status" aria-live="polite">Checking your session…</p>
+      </main>
+    );
+  }
+
   // If user is logged out, render the Login Page
-  if (!currentUser) {
+  if (authStatus === 'unauthenticated' || !currentUser?.token) {
     return <LoginPage onLoginSuccess={handleLoginSuccess} />;
   }
 
