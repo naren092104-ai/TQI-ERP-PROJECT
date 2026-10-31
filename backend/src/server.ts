@@ -155,7 +155,9 @@ const serializeUser = (row: any) => ({
   email: row.email,
   role: normalizeRole(row.role),
   clusterId: row.cluster_id || 'all',
-  clusterName: row.cluster_id ? `${row.cluster_id} Cluster` : 'All Clusters',
+  clusterName: row.cluster_id
+    ? row.resolved_cluster_name || row.cluster_name || `${row.cluster_id} Cluster`
+    : 'All Clusters',
   phone: row.phone || '',
   status: row.status,
   mustChangePassword: Boolean(row.must_change_password),
@@ -5817,7 +5819,10 @@ app.get('/api/users', requireAuth, async (req: AuthenticatedRequest, res: Respon
   }
   try {
     const params: any[] = [];
-    let sql = "SELECT * FROM users WHERE status = 'Active'";
+    // User accounts can reference clusters from previous academic years, so
+    // resolve their names across all years instead of using the current-year
+    // cluster list (which can otherwise expose the raw generated cluster ID).
+    let sql = "SELECT users.*, clusters.name AS resolved_cluster_name FROM users LEFT JOIN clusters ON clusters.id = users.cluster_id WHERE users.status = 'Active'";
     sql += ' ORDER BY name ASC';
     const [rows] = await pool.query<any[]>(sql, params);
     res.json({ success: true, users: rows.map(serializeUser) });

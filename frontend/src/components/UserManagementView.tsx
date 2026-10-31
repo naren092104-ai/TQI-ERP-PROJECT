@@ -116,12 +116,28 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
     URL.revokeObjectURL(blobUrl);
   };
 
+  const getUserClusterName = (user: User) => {
+    if (user.role === 'Super Admin') return 'State Central Authority (All)';
+    const assignedCluster = clusters.find((cluster) => cluster.id === user.clusterId);
+    if (assignedCluster?.name) return assignedCluster.name;
+
+    const serializedName = user.clusterName?.trim();
+    if (serializedName && serializedName !== `${user.clusterId} Cluster`) return serializedName;
+
+    const readableId = String(user.clusterId || '')
+      .replace(/-[a-f\d]{8}-[a-f\d]{8}$/i, '')
+      .replace(/[-_]+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    return readableId || 'Cluster not assigned';
+  };
+
   const filteredUsers = users.filter(
     (u) =>
       u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.role.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (u.clusterName && u.clusterName.toLowerCase().includes(searchTerm.toLowerCase()))
+      getUserClusterName(u).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
@@ -269,11 +285,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   </span>
                 </TableCell>
                 <TableCell className="font-medium text-gray-700 dark:text-gray-300 text-xs">
-                  {u.role === "Super Admin" ? (
-                    <span className="text-purple-700 dark:text-purple-400 font-semibold">State Central Authority (All)</span>
-                  ) : (
-                    u.clusterName || "Assigned College Cluster"
-                  )}
+                  {getUserClusterName(u)}
                 </TableCell>
                 <TableCell className="text-gray-500 dark:text-gray-400 font-mono text-xs">
                   {u.phone || "+91 90000 00000"}
