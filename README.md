@@ -182,9 +182,14 @@ Connect the repository to Cloudflare Pages. `wrangler.toml` selects
 `frontend/dist`, and `frontend/public/_redirects` supplies the SPA fallback.
 The Pages Function at `functions/api/[[path]].js` proxies `/api/*` calls to the
 separate Express backend so login requests do not hit the static asset host.
+It is mirrored under `frontend/functions/` for Cloudflare projects whose Root
+directory is set to `frontend`. `frontend/public/_routes.json` limits Function
+invocations to `/api/*`.
 
-- Build command: `npm run build:frontend`
-- Output directory: `frontend/dist`
+- Repository-root layout: Root directory `/`, build command
+  `npm run build:frontend`, output directory `frontend/dist`.
+- Frontend-root layout: Root directory `frontend`, build command `npm run build`,
+  output directory `dist`.
 - The Pages Function uses same-origin `/api/*` requests and proxies them to the
 	backend. `wrangler.toml` defaults `BACKEND_API_ORIGIN` to
 	`https://tqi.autorevives.com`; set the same variable in Cloudflare Pages
@@ -192,7 +197,7 @@ separate Express backend so login requests do not hit the static asset host.
 
 Cloudflare Pages deploys only the frontend; do not put backend secrets in Pages
 variables. Set `BACKEND_API_ORIGIN` as a non-secret Pages variable for
-Production (and Preview if used). The backend must still allow the Pages and
+Production (and Preview if used) to override the checked-in default. The backend must still allow the Pages and
 custom frontend origins in its `CORS_ORIGINS` configuration.
 
 ### Separate backend and MySQL

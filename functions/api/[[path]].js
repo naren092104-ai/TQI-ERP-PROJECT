@@ -1,16 +1,9 @@
 const allowedMethods = new Set(['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']);
 
 export async function onRequest({ request, env }) {
-  if (!env.BACKEND_API_ORIGIN) {
-    return Response.json(
-      { success: false, error: 'Backend API is not configured. Set BACKEND_API_ORIGIN in Cloudflare Pages.' },
-      { status: 503 },
-    );
-  }
-
   let backend;
   try {
-    backend = new URL(env.BACKEND_API_ORIGIN);
+    backend = new URL(env.BACKEND_API_ORIGIN || 'https://tqi.autorevives.com');
   } catch {
     return Response.json({ success: false, error: 'Backend API configuration is invalid.' }, { status: 503 });
   }
