@@ -87,6 +87,17 @@ const isJwtExpired = (token?: string): boolean => {
   }
 };
 
+const readStoredAuthToken = (): string | null => {
+  try {
+    const saved = localStorage.getItem('tqi_auth_session');
+    if (!saved) return null;
+    const session = JSON.parse(saved) as Partial<AuthSession> | null;
+    return typeof session?.token === 'string' && session.token.trim() ? session.token : null;
+  } catch {
+    return null;
+  }
+};
+
 export default function App() {
   // Session & Authentication State
   const [currentUser, setCurrentUser] = useState<AuthSession | null>(() => {
@@ -187,40 +198,83 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser?.token) {
+    const sessionToken = currentUser?.token;
+    if (!sessionToken) {
       setAuthValidatedToken(null);
       return;
     }
     setAuthValidatedToken(null);
-    if (isJwtExpired(currentUser.token)) {
-      localStorage.removeItem('tqi_auth_session');
-      setCurrentUser(null);
-      return;
-    }
-    const verifyPasswordState = async () => {
-      try {
-        const response = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${currentUser.token}` }, cache: 'no-store' });
-        if (response.status === 401) {
+
+    let active = true;
+    let rejected = false;
+    let requestInFlight = false;
+    const controller = new AbortController();
+    const clearInvalidSession = () => {
+      if (readStoredAuthToken() === sessionToken) {
+        try {
           localStorage.removeItem('tqi_auth_session');
-          setAuthValidatedToken(null);
-          setCurrentUser(null);
+        } catch {
+          // Keep the in-memory logout even if browser storage is unavailable.
+        }
+      }
+      if (!active) return;
+      setAuthValidatedToken((token) => token === sessionToken ? null : token);
+      setCurrentUser((user) => user?.token === sessionToken ? null : user);
+    };
+
+    const verifyPasswordState = async () => {
+      if (!active || rejected || requestInFlight) return;
+
+      const storedToken = readStoredAuthToken();
+      if (!storedToken || storedToken !== sessionToken) {
+        rejected = true;
+        clearInvalidSession();
+        return;
+      }
+      if (isJwtExpired(storedToken)) {
+        rejected = true;
+        clearInvalidSession();
+        return;
+      }
+
+      requestInFlight = true;
+      try {
+        const response = await fetch(apiUrl('/api/auth/me'), {
+          headers: { Authorization: `Bearer ${storedToken}` },
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        if (!active) return;
+        if (response.status === 401) {
+          rejected = true;
+          clearInvalidSession();
           return;
         }
         const data = await response.json().catch(() => null);
+        if (!active) return;
         if (data?.user?.mustChangePassword) {
-          localStorage.removeItem('tqi_auth_session');
-          setAuthValidatedToken(null);
-          setCurrentUser(null);
+          rejected = true;
+          clearInvalidSession();
           return;
         }
-        if (response.ok && data?.user) setAuthValidatedToken(currentUser.token);
+        if (response.ok && data?.user) setAuthValidatedToken(storedToken);
       } catch {
         // Brief network failures should not sign the user out.
+      } finally {
+        requestInFlight = false;
       }
     };
-    void verifyPasswordState();
+
+    // Defer the first request so React StrictMode's development-only effect
+    // replay can cancel its first setup before any network request is sent.
+    const initialCheck = window.setTimeout(() => void verifyPasswordState(), 0);
     const timer = window.setInterval(() => void verifyPasswordState(), 30_000);
-    return () => window.clearInterval(timer);
+    return () => {
+      active = false;
+      window.clearTimeout(initialCheck);
+      window.clearInterval(timer);
+      controller.abort();
+    };
   }, [currentUser?.token]);
 
   // Core Data Collections (clean initial state from DB)

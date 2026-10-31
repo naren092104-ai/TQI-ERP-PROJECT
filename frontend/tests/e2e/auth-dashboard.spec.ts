@@ -1,5 +1,17 @@
 import { test, expect } from '@playwright/test';
 
+test('does not call auth/me when there is no stored token', async ({ page }) => {
+  const authMeRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/auth/me')) authMeRequests.push(request.url());
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await expect(page.locator('#login-email')).toBeVisible();
+  await page.waitForTimeout(100);
+  expect(authMeRequests).toHaveLength(0);
+});
+
 test('expired saved token is cleared before calling auth/me', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('tqi_auth_session', JSON.stringify({
@@ -28,7 +40,11 @@ test('maintenance polling waits until a saved token is validated', async ({ page
       role: 'Super Admin',
     }));
   });
-  await page.route('**/api/auth/me', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{"success":false}' }));
+  const authMeRequests: string[] = [];
+  await page.route('**/api/auth/me', async (route) => {
+    authMeRequests.push(route.request().headers().authorization || '');
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"success":false}' });
+  });
 
   const maintenanceRequests: string[] = [];
   page.on('request', (request) => {
@@ -38,7 +54,58 @@ test('maintenance polling waits until a saved token is validated', async ({ page
   await page.goto('http://127.0.0.1:5173');
   await expect(page.locator('#login-email')).toBeVisible();
   await expect.poll(() => page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
+  expect(authMeRequests).toHaveLength(1);
+  expect(authMeRequests[0]).toMatch(/^Bearer header\./);
+  await page.waitForTimeout(100);
+  expect(authMeRequests).toHaveLength(1);
   expect(maintenanceRequests).toHaveLength(0);
+});
+
+test('valid stored token is checked once with Bearer auth and logout does not recheck', async ({ page }) => {
+  await page.addInitScript(() => {
+    const payload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 }));
+    localStorage.setItem('tqi_auth_session', JSON.stringify({
+      token: `header.${payload}.signature`,
+      id: 'valid-user',
+      name: 'Test User',
+      email: 'test@example.org',
+      role: 'Super Admin',
+      clusterId: 'all',
+      clusterName: 'All Clusters',
+      designation: 'Statewide Super Admin',
+      avatarText: 'TU',
+    }));
+  });
+
+  await page.route('**/api/**', async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(pathname.endsWith('/system/maintenance')
+        ? { success: true, maintenance: null }
+        : { success: true, data: [] }),
+    });
+  });
+
+  const authMeRequests: string[] = [];
+  await page.route('**/api/auth/me', async (route) => {
+    authMeRequests.push(route.request().headers().authorization || '');
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, user: { id: 'valid-user', mustChangePassword: false } }),
+    });
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await expect.poll(() => authMeRequests.length).toBe(1);
+  expect(authMeRequests[0]).toMatch(/^Bearer header\./);
+  await page.getByText('Sign Out', { exact: true }).click();
+  await expect(page.locator('#login-email')).toBeVisible();
+  await page.waitForTimeout(100);
+  expect(authMeRequests).toHaveLength(1);
+  expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
 });
 
 test('dashboard loads academic setup using an authenticated request', async ({ page }) => {
