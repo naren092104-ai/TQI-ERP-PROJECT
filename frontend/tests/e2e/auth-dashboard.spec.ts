@@ -30,7 +30,7 @@ test('a legacy session object without a token is treated as logged out', async (
   expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
 });
 
-test('expired saved token is cleared before calling auth/me', async ({ page }) => {
+test('expired saved token is checked once and cleared on 401', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('tqi_auth_session', JSON.stringify({
       token: 'header.eyJleHAiOjF9.signature',
@@ -40,13 +40,17 @@ test('expired saved token is cleared before calling auth/me', async ({ page }) =
   });
 
   const authMeRequests: string[] = [];
-  page.on('request', (request) => {
-    if (request.url().includes('/api/auth/me')) authMeRequests.push(request.url());
+  await page.route('**/api/auth/me', async (route) => {
+    authMeRequests.push(route.request().headers().authorization || '');
+    await route.fulfill({ status: 401, contentType: 'application/json', body: '{"success":false}' });
   });
 
   await page.goto('http://127.0.0.1:5173');
   await expect(page.locator('#login-email')).toBeVisible();
-  expect(authMeRequests).toHaveLength(0);
+  expect(authMeRequests).toHaveLength(1);
+  expect(authMeRequests[0]).toMatch(/^Bearer header\./);
+  await page.waitForTimeout(100);
+  expect(authMeRequests).toHaveLength(1);
   expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
 });
 
@@ -120,7 +124,18 @@ test('login stores the JWT, validates once, refresh revalidates, and logout does
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ success: true, user: { id: 'valid-user', mustChangePassword: false } }),
+      body: JSON.stringify({
+        success: true,
+        user: {
+          id: 'valid-user',
+          name: 'Validated User',
+          email: 'test@example.org',
+          role: 'Super Admin',
+          clusterId: 'all',
+          clusterName: 'All Clusters',
+          mustChangePassword: false,
+        },
+      }),
     });
   });
 
@@ -135,6 +150,7 @@ test('login stores the JWT, validates once, refresh revalidates, and logout does
   expect(authMeRequests[0]).toBe(`Bearer ${token}`);
   await expect(page.getByText('Sign Out', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tqi_auth_session') || '{}').token)).toBe(token);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tqi_auth_session') || '{}').name)).toBe('Validated User');
 
   await page.reload();
   await expect.poll(() => authMeRequests.length).toBe(2);

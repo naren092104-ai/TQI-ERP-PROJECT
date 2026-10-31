@@ -107,7 +107,7 @@ export default function App() {
   // Session & Authentication State
   const [currentUser, setCurrentUser] = useState<AuthSession | null>(() => {
     const savedSession = readStoredAuthSession();
-    if (!savedSession?.token || isJwtExpired(savedSession.token)) {
+    if (typeof savedSession?.token !== 'string' || !savedSession.token.trim()) {
       try {
         if (localStorage.getItem('tqi_auth_session')) {
           localStorage.removeItem('tqi_auth_session');
@@ -237,12 +237,6 @@ export default function App() {
         clearInvalidSession();
         return;
       }
-      if (isJwtExpired(storedToken)) {
-        rejected = true;
-        clearInvalidSession();
-        return;
-      }
-
       requestInFlight = true;
       try {
         const response = await fetch(apiUrl('/api/auth/me'), {
@@ -264,6 +258,24 @@ export default function App() {
           return;
         }
         if (response.ok && data?.user) {
+          const verifiedUser = data.user;
+          const verifiedRole = normalizeUserRole(verifiedUser.role);
+          setCurrentUser((user) => user?.token === storedToken
+            ? {
+                ...user,
+                id: String(verifiedUser.id ?? user.id),
+                name: String(verifiedUser.name ?? user.name),
+                email: String(verifiedUser.email ?? user.email),
+                phone: verifiedUser.phone ?? user.phone,
+                role: verifiedRole,
+                clusterId: verifiedUser.clusterId || user.clusterId || 'all',
+                clusterName: verifiedUser.clusterName || user.clusterName,
+                designation: verifiedRole === 'Super Admin' ? 'Statewide Super Admin' : 'Cluster Admin (College SPOC)',
+                mustChangePassword: Boolean(verifiedUser.mustChangePassword),
+              }
+            : user);
+          setCurrentUserRole(verifiedRole);
+          setCurrentUserClusterId(verifiedUser.clusterId || 'all');
           setAuthValidatedToken(storedToken);
           setAuthStatus('authenticated');
         }
