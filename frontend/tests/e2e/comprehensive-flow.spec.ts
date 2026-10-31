@@ -4,6 +4,10 @@ import { execSync } from 'child_process';
 test.describe('TQI ERP Comprehensive End-to-End System Flow Test', () => {
 
   test.beforeAll(async () => {
+    if (process.env.TQI_E2E_ALLOW_DB_RESET !== 'true') {
+      test.skip(true, 'This comprehensive flow resets the configured database. Set TQI_E2E_ALLOW_DB_RESET=true only for a disposable test database.');
+      return;
+    }
     console.log('[E2E SETUP] Running clean database reset to baseline state...');
     execSync('npx tsx backend/src/scripts/cleanReset.ts', { stdio: 'inherit' });
   });

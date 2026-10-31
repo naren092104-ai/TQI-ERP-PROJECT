@@ -526,6 +526,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Spreadsheet must be 10 MB or smaller.');
+      e.target.value = '';
+      return;
+    }
     setImportFileName(file.name);
     setIsParsingFile(true);
     setImportRows([]);
@@ -533,10 +538,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     reader.onload = (evt) => {
       try {
         const bstr = evt.target?.result;
-        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wb = XLSX.read(bstr, { type: 'binary', sheetRows: 10001 });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
         const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        if (rawJson.length > 10000) {
+          throw new Error('Spreadsheet can contain at most 10,000 student rows.');
+        }
 
         if (!rawJson || rawJson.length === 0) {
           alert('Uploaded spreadsheet contains no data rows.');

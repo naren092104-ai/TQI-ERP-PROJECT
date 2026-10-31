@@ -33,6 +33,9 @@ yarn-error.log*
 !.env.example
 !backend/.env.example
 !frontend/.env.example
+.dev.vars*
+.vercel/
+.wrangler/
 
 # Local Database & Storage
 .mysql_data/

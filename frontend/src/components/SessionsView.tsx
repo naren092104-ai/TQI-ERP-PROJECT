@@ -53,6 +53,15 @@ interface SessionsViewProps {
   canManageSchedule?: boolean;
 }
 
+const getSessionDisplayStatus = (session: Session): Session['status'] => {
+  if (session.status !== 'Scheduled' && session.status !== 'In Progress') return session.status;
+  if (!session.date) return session.status;
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  return session.date.slice(0, 10) < today ? 'Completed' : session.status;
+};
+
 export const SessionsView: React.FC<SessionsViewProps> = ({
   sessions = [],
   clusters = [],
@@ -180,8 +189,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
   // KPI Calculations
   const stats = useMemo(() => {
     const total = sessions.length;
-    const completed = sessions.filter((s) => s.status === 'Completed').length;
-    const upcoming = sessions.filter((s) => s.status === 'Scheduled' || s.status === 'In Progress').length;
+    const completed = sessions.filter((s) => getSessionDisplayStatus(s) === 'Completed').length;
+    const upcoming = sessions.filter((s) => {
+      const status = getSessionDisplayStatus(s);
+      return status === 'Scheduled' || status === 'In Progress';
+    }).length;
     const pendingRequests = dateChangeRequests.filter((r) => r.status === 'PENDING').length;
     return { total, completed, upcoming, pendingRequests };
   }, [sessions, dateChangeRequests]);
@@ -212,7 +224,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
         const dayNum = parseInt(selectedDay, 10);
         if (s.dayNumber !== dayNum && s.day !== `Day ${dayNum}`) return false;
       }
-      if (selectedStatus !== 'all' && s.status !== selectedStatus) return false;
+      if (selectedStatus !== 'all' && getSessionDisplayStatus(s) !== selectedStatus) return false;
       if (selectedPanchayatId !== 'all' && s.panchayatId !== selectedPanchayatId) return false;
       if (filterDate && s.date !== filterDate) return false;
 
@@ -237,8 +249,11 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
 
       const fromDate = sortedDates[0] || 'Not scheduled';
       const toDate = sortedDates[sortedDates.length - 1] || 'Not scheduled';
-      const completed = clusterSessions.filter((session) => session.status === 'Completed').length;
-      const upcoming = clusterSessions.filter((session) => session.status === 'Scheduled' || session.status === 'In Progress').length;
+      const completed = clusterSessions.filter((session) => getSessionDisplayStatus(session) === 'Completed').length;
+      const upcoming = clusterSessions.filter((session) => {
+        const status = getSessionDisplayStatus(session);
+        return status === 'Scheduled' || status === 'In Progress';
+      }).length;
       const volunteersCount = volunteers.filter((volunteer) =>
         (!volunteer.clusterId || volunteer.clusterId === cluster.id) &&
         String(volunteer.status || 'Active').toLowerCase() === 'active'
@@ -969,7 +984,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
             {paginatedSessions.map((session, idx) => {
               const sNo = (currentPage - 1) * pageSize + idx + 1;
               const dayNum = session.dayNumber || parseInt(session.day?.replace(/\D/g, '') || '1', 10);
-              const displayStatus = session.dateFixed ? 'Scheduled' : session.status;
+              const displayStatus = getSessionDisplayStatus(session);
               const sessionVolunteersCount = volunteers.filter((volunteer) =>
                 (!volunteer.clusterId || volunteer.clusterId === session.clusterId) &&
                 String(volunteer.status || 'Active').toLowerCase() === 'active'
@@ -1390,7 +1405,7 @@ export const SessionsView: React.FC<SessionsViewProps> = ({
                 </div>
                 <div>
                   <span className="text-muted-foreground block">Status:</span>
-                  <Badge variant="default" size="sm">{viewingSession.status}</Badge>
+                  <Badge variant="default" size="sm">{getSessionDisplayStatus(viewingSession)}</Badge>
                 </div>
               </div>
 

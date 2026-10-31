@@ -1,40 +1,8 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import {
-  FileText,
-  Users,
-  ClipboardList,
-  AlertTriangle,
-  MessageSquare,
-  Save,
-  Send,
-  Eye,
-  Search,
-  Filter,
-  Calendar,
-  X,
-  Plus,
-  Edit3 as Edit,
-  Trash2,
-  CheckCircle2,
-  Clock,
-  GridFour,
-  Table,
-  ChevronRight,
-  School,
-  Lock,
-  Upload,
-} from './ui/icons';
-import type { AcademicYear, SessionReport, SessionReportActivity, SessionReportPhoto, Session, UserRole } from '../types';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Calendar, CheckCircle2, Clock, Download, Edit3 as Edit, Eye, FileText, Plus, Search, Send, Trash2, Upload, X } from './ui/icons';
+import type { AcademicYear, LessonPlan, Panchayat, SessionReport, SessionReportActivity, SessionReportPhoto, Session, UserRole, Volunteer } from '../types';
 import { apiUrl } from '../utils/api';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
-import { Badge } from './ui/badge';
-import { EmptyState } from './ui/EmptyState';
+import { exportSessionReportPdf } from '../utils/pdf/SessionReportPdf';
 
 interface SessionReportContext {
   session: { id: string; name: string; dayNumber: number | null; date: string | null; status: string };
@@ -46,13 +14,25 @@ interface SessionReportContext {
   villages: Array<{ id: string; name: string }>;
   summitNumbers: string[];
   grades: string[];
-  volunteers: Array<{ id: string; name: string }>;
+  volunteers: Array<{ id: string; name: string; phone: string; year: string }>;
+  reportDefaults?: {
+    villageIds: string[];
+    grade: string;
+    summitNumbers: string[];
+    volunteerNames: string[];
+    overview: string;
+    activities: SessionReportActivity[];
+    outcome: string;
+  };
   activities: SessionReportActivity[];
   attendance: { available: boolean; presentCount: number; totalCount: number };
 }
 
 interface SessionReportViewProps {
   sessionReports: SessionReport[];
+  lessonPlans: LessonPlan[];
+  panchayats: Panchayat[];
+  volunteers: Volunteer[];
   sessions: Session[];
   clusters: { id: string; name: string; district?: string }[];
   currentUserRole: UserRole;
@@ -63,1040 +43,593 @@ interface SessionReportViewProps {
   onSaveReport: (report: Partial<SessionReport>) => Promise<SessionReport>;
   onReportPhotosUpdate: (reportId: string, photos: SessionReportPhoto[]) => void;
   onDeleteReport: (reportId: string) => Promise<void>;
+  onWorkflowUpdate: (reportId: string, status: string, fields?: Partial<SessionReport>) => void;
 }
 
+type WorkflowAction = 'approve' | 'send_correction' | 'request_edit' | 'request_delete' | 'allow_edit' | 'deny_edit' | 'approve_delete' | 'deny_delete';
+type WorkflowDialog = { action: WorkflowAction; report: SessionReport } | null;
+
+const statusText: Record<string, string> = {
+  DRAFT: 'Draft', SUBMITTED: 'Submitted', APPROVED: 'Approved', CORRECTIONS_REQUIRED: 'Corrections Required',
+  EDIT_REQUEST_PENDING: 'Edit Request Pending', DELETE_REQUEST_PENDING: 'Delete Request Pending',
+};
+const statusColors: Record<string, string> = {
+  DRAFT: 'bg-amber-50 text-amber-800 border-amber-200',
+  SUBMITTED: 'bg-blue-50 text-blue-800 border-blue-200',
+  APPROVED: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  CORRECTIONS_REQUIRED: 'bg-rose-50 text-rose-800 border-rose-200',
+  EDIT_REQUEST_PENDING: 'bg-orange-50 text-orange-800 border-orange-200',
+  DELETE_REQUEST_PENDING: 'bg-orange-50 text-orange-800 border-orange-200',
+};
 const parseActivities = (value?: string): SessionReportActivity[] => {
   if (!value?.trim()) return [];
   try {
     const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      return parsed.map((item: any) => ({
-        topic: String(item?.topic || ''),
-        details: String(item?.details || item?.summary || ''),
-        lessonPlanId: item?.lessonPlanId ? String(item.lessonPlanId) : undefined,
-        moduleId: item?.moduleId ? String(item.moduleId) : undefined,
-      }));
-    }
-  } catch {
-    // Older reports stored a plain-text activity summary.
-  }
-  return [{ topic: '', details: value }];
+    if (Array.isArray(parsed)) return parsed.map((item: any) => ({ topic: String(item?.topic || ''), details: String(item?.details || '') }));
+  } catch { /* legacy plain text */ }
+  return [{ topic: 'Session activities', details: value }];
 };
 
-const ProtectedReportPhoto: React.FC<{ photo: SessionReportPhoto; authToken: string }> = ({ photo, authToken }) => {
+const ProtectedReportPhoto: React.FC<{ photo: SessionReportPhoto; authToken: string; className?: string }> = ({ photo, authToken, className }) => {
   const [src, setSrc] = useState('');
   useEffect(() => {
     const controller = new AbortController();
     let objectUrl = '';
-    void fetch(apiUrl(photo.fileUrl), {
-      signal: controller.signal,
-      headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-    }).then(async (response) => {
-      if (!response.ok) return;
-      objectUrl = URL.createObjectURL(await response.blob());
-      if (!controller.signal.aborted) setSrc(objectUrl);
-    }).catch(() => undefined);
-    return () => {
-      controller.abort();
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
+    void fetch(apiUrl(photo.fileUrl), { signal: controller.signal, headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} })
+      .then(async (response) => { if (!response.ok) return; objectUrl = URL.createObjectURL(await response.blob()); if (!controller.signal.aborted) setSrc(objectUrl); })
+      .catch(() => undefined);
+    return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [photo.fileUrl, authToken]);
-  return src ? <img src={src} alt={photo.originalFilename} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs text-slate-400">Loading photo…</div>;
+  return src ? <img src={src} alt={photo.originalFilename} className={className || 'h-full w-full object-cover'} /> : <div className="flex h-full items-center justify-center text-xs text-slate-400">Loading photo…</div>;
+};
+
+const Field: React.FC<{ label: string; children: React.ReactNode; className?: string }> = ({ label, children, className = '' }) => (
+  <label className={`block ${className}`}><span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>{children}</label>
+);
+const inputClass = 'w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100';
+const MultiSelectField: React.FC<{
+  label: string;
+  placeholder: string;
+  options: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (selected: string[]) => void;
+}> = ({ label, placeholder, options, selected, onChange }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const fieldRef = React.useRef<HTMLDivElement>(null);
+  const selectedLabels = options.filter((option) => selected.includes(option.value)).map((option) => option.label);
+  const sortedOptions = [...options].sort((first, second) => Number(selected.includes(second.value)) - Number(selected.includes(first.value)));
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !fieldRef.current?.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [isOpen]);
+
+  return <div ref={fieldRef} className="relative min-w-0">
+    <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
+    <div className="flex min-h-11 w-full items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-left text-sm shadow-sm transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100">
+      <button type="button" aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)} className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-left">
+        {selectedLabels.length ? selectedLabels.map((selectedLabel, index) => <span key={`${selectedLabel}-${index}`} className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-900"><span className="truncate">{selectedLabel}</span><span className="text-blue-500">✓</span></span>) : <span className="text-slate-500">{placeholder}</span>}
+      </button>
+      <button type="button" aria-label={`Toggle ${label} options`} aria-expanded={isOpen} onClick={() => setIsOpen((open) => !open)} className="shrink-0 px-1 text-slate-400">{isOpen ? '⌃' : '⌄'}</button>
+    </div>
+    {isOpen && <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+      {selected.length > 0 && <div className="mb-1 border-b border-slate-100 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Selected · {selected.length}</div>}
+      {sortedOptions.length ? sortedOptions.map((option) => <label key={option.value} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm hover:bg-blue-50 ${selected.includes(option.value) ? 'font-semibold text-blue-900' : 'text-slate-700'}`}>
+        <input type="checkbox" checked={selected.includes(option.value)} onChange={(event) => onChange(event.target.checked ? [...selected, option.value] : selected.filter((value) => value !== option.value))} className="h-4 w-4 rounded border-slate-300 accent-blue-700" />
+        <span>{option.label}</span>
+      </label>) : <p className="px-3 py-2 text-xs text-slate-500">No options available.</p>}
+    </div>}
+  </div>;
 };
 
 export const SessionReportView: React.FC<SessionReportViewProps> = ({
-  sessionReports,
-  sessions,
-  clusters,
-  currentUserRole,
-  currentUserClusterId,
-  authToken,
-  academicYears,
-  selectedAcademicYearId,
-  onSaveReport,
-  onReportPhotosUpdate,
-  onDeleteReport,
+  sessionReports, lessonPlans = [], panchayats = [], volunteers = [], sessions, clusters, currentUserRole, currentUserClusterId, authToken,
+  academicYears, selectedAcademicYearId, onSaveReport, onReportPhotosUpdate, onDeleteReport, onWorkflowUpdate,
 }) => {
   const isSuperAdmin = currentUserRole === 'Super Admin';
-  const [activeTab, setActiveTab] = useState<'All' | 'DRAFT' | 'SUBMITTED' | 'APPROVED'>('All');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedClusterFilter, setSelectedClusterFilter] = useState<string>('all');
-  const [showClusterCards, setShowClusterCards] = useState(isSuperAdmin);
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [showFormModal, setShowFormModal] = useState(false);
-  const [showViewModal, setShowViewModal] = useState(false);
-  const [selectedReport, setSelectedReport] = useState<SessionReport | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [reportError, setReportError] = useState('');
-  const [isContextLoading, setIsContextLoading] = useState(false);
-  const [sessionContext, setSessionContext] = useState<SessionReportContext | null>(null);
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [clusterFilter, setClusterFilter] = useState('ALL');
+  const [villageFilter, setVillageFilter] = useState('ALL');
+  const [gradeFilter, setGradeFilter] = useState('ALL');
+  const [dayFilter, setDayFilter] = useState('ALL');
+  const [formOpen, setFormOpen] = useState(false);
+  const [viewReport, setViewReport] = useState<SessionReport | null>(null);
+  const [formReport, setFormReport] = useState<Partial<SessionReport>>({});
+  const [formContext, setFormContext] = useState<SessionReportContext | null>(null);
   const [viewContext, setViewContext] = useState<SessionReportContext | null>(null);
-  const [viewContextLoading, setViewContextLoading] = useState(false);
-  const [reportActivities, setReportActivities] = useState<SessionReportActivity[]>([]);
+  const [activities, setActivities] = useState<SessionReportActivity[]>([{ topic: '', details: '' }]);
   const [photoFiles, setPhotoFiles] = useState<File[]>([]);
-  const [localPhotoUrls, setLocalPhotoUrls] = useState<string[]>([]);
-
-  // Form State
-  const [formData, setFormData] = useState<Partial<SessionReport>>({
-    sessionId: '',
-    sessionSummary: '',
-    studentCount: null,
-    attendanceSummary: '',
-    activities: '',
-    outcome: '',
-    issues: '',
-    remarks: '',
-  });
-
-  const clusterSessions = useMemo(() => {
-    return sessions.filter((session) =>
-      Boolean(session.hasSavedSchedule) &&
-      (currentUserClusterId === 'all' || session.clusterId === currentUserClusterId) &&
-      (!selectedAcademicYearId || !session.academicYearId || session.academicYearId === selectedAcademicYearId)
-    );
-  }, [sessions, currentUserClusterId, selectedAcademicYearId]);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [selectedVolunteers, setSelectedVolunteers] = useState<string[]>([]);
+  const [selectedVillages, setSelectedVillages] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [workflowDialog, setWorkflowDialog] = useState<WorkflowDialog>(null);
+  const [workflowReason, setWorkflowReason] = useState('');
+  const [workflowError, setWorkflowError] = useState('');
+  const [pdfBusyId, setPdfBusyId] = useState('');
 
   useEffect(() => {
     const urls = photoFiles.map((file) => URL.createObjectURL(file));
-    setLocalPhotoUrls(urls);
+    setPhotoUrls(urls);
     return () => urls.forEach((url) => URL.revokeObjectURL(url));
   }, [photoFiles]);
 
-  useEffect(() => {
-    if (!showFormModal || !formData.sessionId || !selectedAcademicYearId) {
-      setSessionContext(null);
-      setIsContextLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    const loadContext = async () => {
-      setIsContextLoading(true);
-      setReportError('');
-      try {
-        const response = await fetch(apiUrl(`/api/session-reports/context?sessionId=${encodeURIComponent(formData.sessionId || '')}`), {
-          signal: controller.signal,
-          cache: 'no-store',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-        });
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data?.success || !data?.context) {
-          throw new Error(data?.error || 'Unable to load this saved session context.');
-        }
-        if (data.context.academicYear?.id !== selectedAcademicYearId) {
-          throw new Error('The saved session belongs to a different academic year. Refresh the page and try again.');
-        }
-        setSessionContext(data.context as SessionReportContext);
-        if (!formData.id) {
-          setReportActivities(data.context.activities?.length ? data.context.activities : [{ topic: '', details: '' }]);
-        }
-      } catch (error: any) {
-        if (error?.name !== 'AbortError') {
-          setSessionContext(null);
-          setReportError(error?.message || 'Unable to load session context.');
-        }
-      } finally {
-        if (!controller.signal.aborted) setIsContextLoading(false);
-      }
-    };
-    void loadContext();
-    return () => controller.abort();
-  }, [authToken, formData.id, formData.sessionId, selectedAcademicYearId, showFormModal]);
-
-  useEffect(() => {
-    if (!showViewModal || !selectedReport?.sessionId || !selectedAcademicYearId) {
-      setViewContext(null);
-      setViewContextLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    const loadViewContext = async () => {
-      setViewContextLoading(true);
-      try {
-        const response = await fetch(apiUrl(`/api/session-reports/context?sessionId=${encodeURIComponent(selectedReport.sessionId)}`), {
-          signal: controller.signal,
-          cache: 'no-store',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-        });
-        const data = await response.json().catch(() => null);
-        if (response.ok && data?.success && data.context) setViewContext(data.context as SessionReportContext);
-      } catch {
-        // The report content can still be inspected if its session context was removed.
-      } finally {
-        if (!controller.signal.aborted) setViewContextLoading(false);
-      }
-    };
-    void loadViewContext();
-    return () => controller.abort();
-  }, [authToken, selectedAcademicYearId, selectedReport?.sessionId, showViewModal]);
-
-  // Scoped list
-  const visibleReports = useMemo(() => {
-    let filtered = sessionReports;
-    if (!isSuperAdmin) {
-      filtered = filtered.filter((r) => r.clusterId === currentUserClusterId);
-    } else if (selectedClusterFilter !== 'all') {
-      filtered = filtered.filter((r) => r.clusterName === selectedClusterFilter);
-    }
-
-    if (activeTab !== 'All') {
-      filtered = filtered.filter((r) => r.status === activeTab);
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter((r) => {
-        const session = sessions.find((s) => s.id === r.sessionId);
-        return (
-          session?.name.toLowerCase().includes(q) ||
-          r.clusterName?.toLowerCase().includes(q) ||
-          r.sessionSummary?.toLowerCase().includes(q) ||
-          r.activities?.toLowerCase().includes(q) ||
-          r.issues?.toLowerCase().includes(q)
-        );
-      });
-    }
-    return filtered;
-  }, [sessionReports, currentUserClusterId, isSuperAdmin, selectedClusterFilter, activeTab, searchQuery, sessions]);
-
-  // KPI Metrics
-  const metrics = useMemo(() => {
-    const base = isSuperAdmin ? sessionReports : sessionReports.filter((r) => r.clusterId === currentUserClusterId);
-    const total = base.length;
-    const submitted = base.filter((r) => r.status === 'SUBMITTED').length;
-    const approved = base.filter((r) => r.status === 'APPROVED').length;
-    const draft = base.filter((r) => r.status === 'DRAFT').length;
-    return { total, submitted, approved, draft };
-  }, [sessionReports, isSuperAdmin, currentUserClusterId]);
-
-  const clusterReportCards = useMemo(() => {
-    return clusters.map((cluster) => {
-      const clusterReports = sessionReports.filter((report) => report.clusterName === cluster.name || report.clusterId === cluster.id);
-      return {
-        ...cluster,
-        total: clusterReports.length,
-        submitted: clusterReports.filter((report) => report.status === 'SUBMITTED').length,
-        approved: clusterReports.filter((report) => report.status === 'APPROVED').length,
-        draft: clusterReports.filter((report) => report.status === 'DRAFT').length,
-      };
+  const availableSessions = useMemo(() => sessions.filter((session) => Boolean(session.hasSavedSchedule)
+    && (currentUserClusterId === 'all' || session.clusterId === currentUserClusterId)
+    && (!selectedAcademicYearId || !session.academicYearId || session.academicYearId === selectedAcademicYearId)),
+  [sessions, currentUserClusterId, selectedAcademicYearId]);
+  const scheduledSessionsByDay = useMemo(() => {
+    const grouped = new Map<number, Session[]>();
+    availableSessions.forEach((session) => {
+      const dayNumber = Number(session.dayNumber);
+      if (!Number.isInteger(dayNumber) || dayNumber < 1) return;
+      grouped.set(dayNumber, [...(grouped.get(dayNumber) || []), session]);
     });
-  }, [clusters, sessionReports]);
+    return grouped;
+  }, [availableSessions]);
+  const reportDayNumbers = useMemo(() => Array.from(
+    { length: Math.max(8, ...scheduledSessionsByDay.keys()) },
+    (_, index) => index + 1,
+  ), [scheduledSessionsByDay]);
 
-  const handleOpenForm = (report?: SessionReport) => {
-    setReportError('');
-    setSessionContext(null);
-    setPhotoFiles([]);
-    if (report) {
-      setFormData(report);
-      setReportActivities(parseActivities(report.activities));
-    } else {
-      const initialSessionId = clusterSessions.length === 1 ? clusterSessions[0].id : '';
-      setFormData({
-        sessionId: initialSessionId,
-        sessionSummary: '',
-        studentCount: null,
-        attendanceSummary: '',
-        activities: '',
-        outcome: '',
-        issues: '',
-        remarks: '',
-      });
-      setReportActivities([{ topic: '', details: '' }]);
-    }
-    setShowFormModal(true);
+  useEffect(() => {
+    let active = true;
+    if (!viewReport) { setViewContext(null); return; }
+    void loadContext(viewReport.sessionId).then((context) => { if (active) setViewContext(context); }).catch(() => { if (active) setViewContext(null); });
+    return () => { active = false; };
+  }, [viewReport?.sessionId, authToken, selectedAcademicYearId]);
+
+  const loadContext = async (sessionId: string) => {
+    const response = await fetch(apiUrl(`/api/session-reports/context?sessionId=${encodeURIComponent(sessionId)}`), {
+      cache: 'no-store', headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success || !payload.context) throw new Error(payload?.error || 'Unable to load session configuration.');
+    if (payload.context.academicYear.id !== selectedAcademicYearId) throw new Error('This session does not match the selected academic year.');
+    return payload.context as SessionReportContext;
   };
 
-  const handleSave = async (status: 'DRAFT' | 'SUBMITTED') => {
-    if (!formData.sessionId || !sessionContext) {
-      setReportError('Select a saved session and wait for its ERP context to load.');
-      return;
-    }
-    setIsSubmitting(true);
-    setReportError('');
-    try {
-      const savedReportResult = await onSaveReport({
-        ...formData,
-        sessionId: sessionContext.session.id,
-        academicYearId: sessionContext.academicYear.id,
-        clusterId: sessionContext.cluster.id,
-        dayNumber: sessionContext.session.dayNumber || undefined,
-        studentCount: sessionContext.attendance.available ? sessionContext.attendance.presentCount : null,
-        attendanceSummary: sessionContext.attendance.available
-          ? `Present ${sessionContext.attendance.presentCount} of ${sessionContext.attendance.totalCount}`
-          : '',
-        activities: JSON.stringify(reportActivities),
-        status,
-      });
-      const savedReport = { ...savedReportResult, photos: savedReportResult.photos?.length ? savedReportResult.photos : (formData.photos || []) };
-      setFormData(savedReport);
-      if (photoFiles.length) {
-        const uploadData = new FormData();
-        photoFiles.forEach((file) => uploadData.append('photos', file));
-        const response = await fetch(apiUrl(`/api/session-reports/${encodeURIComponent(savedReport.id)}/photos`), {
-          method: 'POST',
-          headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-          body: uploadData,
+  const openForm = async (report?: SessionReport, sessionId?: string) => {
+    if (isSuperAdmin) return;
+    setError(''); setFormContext(null); setPhotoFiles([]); setSelectedVillages(report?.villageIds || []);
+    setSelectedVolunteers(report?.volunteerNames || []);
+    setActivities(report ? parseActivities(report.activities) : [{ topic: '', details: '' }]);
+    const nextForm: Partial<SessionReport> = report ? { ...report } : {
+      sessionId: sessionId || (availableSessions.length === 1 ? availableSessions[0].id : ''), sessionSummary: '', outcome: '', issues: '', remarks: '',
+      summitNumber: '', grade: '', villageIds: [], volunteerNames: [],
+    };
+    setFormReport(nextForm); setFormOpen(true);
+    if (nextForm.sessionId) {
+      try {
+        const context = await loadContext(nextForm.sessionId);
+        const sameDayPlans = lessonPlans.filter((plan) => Number(plan.dayNumber) === Number(context.session.dayNumber)
+          && (!plan.clusterId || plan.clusterId === context.cluster.id));
+        const matchingPlan = sameDayPlans.find((plan) => plan.sessionId === context.session.id && plan.status === 'Approved')
+          || sameDayPlans.find((plan) => plan.sessionId === context.session.id)
+          || sameDayPlans.find((plan) => plan.status === 'Approved')
+          || sameDayPlans.find((plan) => plan.academicYear?.replace(/[–—]/g, '-').replace(/\s/g, '') === context.academicYear.name.replace(/[–—]/g, '-').replace(/\s/g, ''))
+          || sameDayPlans[0];
+        const planVillageNames = matchingPlan?.villagesList?.length
+          ? matchingPlan.villagesList
+          : String(matchingPlan?.villageName || '').split(',').map((name) => name.trim()).filter(Boolean);
+        const plannedVillageIds = matchingPlan?.villageIds?.length
+          ? matchingPlan.villageIds
+          : planVillageNames.map((name) => context.villages.find((village) => village.name.trim().toLowerCase() === name.toLowerCase())?.id).filter((id): id is string => Boolean(id));
+        const defaultVillageIds = plannedVillageIds.length ? plannedVillageIds : context.reportDefaults?.villageIds || [];
+        const plannedGradeValues = (matchingPlan?.gradesList?.length
+          ? matchingPlan.gradesList
+          : String(context.reportDefaults?.grade || matchingPlan?.grades || matchingPlan?.targetStandard || '').split(','))
+          .map((grade) => String(grade).trim())
+          .filter((grade) => ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].includes(grade));
+        const plannedGrade = plannedGradeValues.join(', ');
+        const planVolunteerNames = [...new Set([
+          ...(matchingPlan?.volunteerRoster?.map((volunteer) => volunteer.name).filter(Boolean) || []),
+          ...(matchingPlan?.assignedVolunteers?.filter(Boolean) || []),
+          ...(matchingPlan?.volunteerIds || [])
+            .map((volunteerId) => volunteers.find((volunteer) => volunteer.id === volunteerId)?.name)
+            .filter((name): name is string => Boolean(name)),
+        ])];
+        const plannedVolunteerNames = [...new Set([
+          ...planVolunteerNames,
+          ...(context.reportDefaults?.volunteerNames || []),
+        ])];
+        const plannedSummitValues = (matchingPlan?.summitNumbersList?.length
+          ? matchingPlan.summitNumbersList
+          : String(context.reportDefaults?.summitNumbers?.join(', ') || matchingPlan?.summitNumbers || '').split(','))
+          .map((summit) => String(summit).trim().replace(/^Summit\s+/i, ''))
+          .filter((summit) => ['I', 'II', 'III', 'IV'].includes(summit));
+        const plannedSummitNumber = plannedSummitValues.join(', ');
+        const additionalVillages = defaultVillageIds.map((id, index) => ({
+          id,
+          name: context.villages.find((village) => village.id === id)?.name || planVillageNames[index] || 'Village',
+        }));
+        const clusterVillages = panchayats
+          .filter((panchayat) => !panchayat.clusterId || panchayat.clusterId === context.cluster.id)
+          .flatMap((panchayat) => panchayat.villages.map((village) => ({ id: village.id, name: village.name })));
+        const allVillageOptions = [...new Map([...context.villages, ...clusterVillages, ...additionalVillages].map((village) => [village.id, village])).values()];
+        const planDefaultVillageIds = defaultVillageIds.length ? defaultVillageIds : planVillageNames
+          .map((name) => allVillageOptions.find((village) => village.name.trim().toLowerCase() === name.toLowerCase())?.id)
+          .filter((id): id is string => Boolean(id));
+        const additionalVolunteers = plannedVolunteerNames.map((name, index) => ({
+          id: matchingPlan?.volunteerIds?.[index] || `lesson-plan-volunteer-${index}`,
+          name,
+          phone: matchingPlan?.volunteerRoster?.find((volunteer) => volunteer.name === name)?.phone || '',
+          year: matchingPlan?.volunteerRoster?.find((volunteer) => volunteer.name === name)?.year || '',
+        }));
+        const directoryVolunteers = volunteers
+          .filter((volunteer) => volunteer.status !== 'Inactive' && (!volunteer.clusterId || volunteer.clusterId === context.cluster.id))
+          .map((volunteer) => ({ id: volunteer.id, name: volunteer.name, phone: volunteer.phone || '', year: volunteer.year || '' }));
+        setFormContext({
+          ...context,
+          villages: allVillageOptions,
+          volunteers: [...new Map([...context.volunteers, ...directoryVolunteers, ...additionalVolunteers].map((volunteer) => [volunteer.name.trim().toLowerCase(), volunteer])).values()],
         });
-        const data = await response.json().catch(() => null);
-        if (!response.ok || !data?.success || !Array.isArray(data.photos)) {
-          throw new Error(data?.error || 'Report saved, but the selected photos could not be uploaded. Reopen the draft and retry.');
+        if (!report) {
+          setSelectedVillages(planDefaultVillageIds);
+          setSelectedVolunteers(plannedVolunteerNames);
+          setFormReport((current) => ({
+            ...current,
+            summitNumber: current.summitNumber || plannedSummitNumber,
+            grade: current.grade || plannedGrade,
+            sessionSummary: current.sessionSummary || context.reportDefaults?.overview || matchingPlan?.overview || matchingPlan?.objective || '',
+            outcome: current.outcome || context.reportDefaults?.outcome || matchingPlan?.expectedOutcomes?.join('\n') || matchingPlan?.expectedOutcome || '',
+          }));
+          const defaultActivities = context.reportDefaults?.activities?.length
+            ? context.reportDefaults.activities
+            : matchingPlan?.activitiesDetailed?.map((activity, index) => ({
+              topic: activity.title || `Activity ${index + 1}`,
+              details: activity.description || '',
+            })) || [];
+          if (defaultActivities.length) setActivities(defaultActivities);
         }
-        const photos = [...(savedReport.photos || []), ...data.photos] as SessionReportPhoto[];
-        setFormData((current) => ({ ...current, photos }));
-        onReportPhotosUpdate(savedReport.id, photos);
+      }
+      catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load session.'); }
+    }
+  };
+
+  const saveReport = async (status: 'DRAFT' | 'SUBMITTED'): Promise<string | null> => {
+    if (!formReport.sessionId || !formContext) {
+      const message = 'Select a scheduled session and wait for its configuration to load.';
+      setError(message);
+      return message;
+    }
+    if (status === 'SUBMITTED' && !formReport.sessionSummary?.trim()) {
+      const message = 'Please complete the overview before submitting.';
+      setError(message);
+      return message;
+    }
+    setSaving(true); setError('');
+    try {
+      const reportPayload = { ...formReport, sessionId: formContext.session.id, academicYearId: formContext.academicYear.id,
+        clusterId: formContext.cluster.id, dayNumber: formContext.session.dayNumber || undefined,
+        villageIds: selectedVillages, volunteerNames: selectedVolunteers,
+        activities: JSON.stringify(activities) };
+      const correcting = formReport.status === 'CORRECTIONS_REQUIRED' && Boolean(formReport.id);
+      let saved = correcting
+        ? formReport as SessionReport
+        : await onSaveReport({ ...reportPayload, status: 'DRAFT' });
+      let photos = saved.photos || formReport.photos || [];
+      if (photoFiles.length) {
+        const body = new FormData();
+        photoFiles.forEach((file) => body.append('photos', file));
+        const response = await fetch(apiUrl(`/api/session-reports/${encodeURIComponent(saved.id)}/photos`), {
+          method: 'POST', headers: authToken ? { Authorization: `Bearer ${authToken}` } : {}, body,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!response.ok || !payload?.success) throw new Error(payload?.error || 'The report saved, but its photos could not be uploaded.');
+        photos = [...photos, ...(payload.photos || [])];
+        onReportPhotosUpdate(saved.id, photos);
+        setFormReport((previous) => ({ ...previous, photos }));
         setPhotoFiles([]);
       }
-      setShowFormModal(false);
-    } catch (error) {
-      console.error('Failed to save session report:', error);
-      setReportError(error instanceof Error ? error.message : 'Unable to save the report. Please try again.');
-    } finally {
-      setIsSubmitting(false);
+      if (status === 'SUBMITTED') saved = await onSaveReport({ ...reportPayload, id: saved.id, status: 'SUBMITTED' });
+      setFormOpen(false);
+      return null;
+    } catch (reason) {
+      const message = reason instanceof Error ? reason.message : 'Unable to save Session Report.';
+      setError(message);
+      return message;
     }
+    finally { setSaving(false); }
   };
 
-  const removeExistingPhoto = async (photo: SessionReportPhoto) => {
-    if (!formData.id) return;
-    setReportError('');
+  const doWorkflow = async (action: WorkflowAction, report: SessionReport, reason = '') => {
+    const response = await fetch(apiUrl(`/api/session-reports/${encodeURIComponent(report.id)}/workflow`), {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${authToken}` }, body: JSON.stringify({ action, reason }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.success) throw new Error(payload?.error || 'Unable to update Session Report.');
+    if (payload.deleted) onWorkflowUpdate(report.id, 'DELETED');
+    else onWorkflowUpdate(report.id, payload.status, action === 'send_correction'
+      ? { correctionReason: reason }
+      : action === 'request_edit' ? { editRequestReason: reason }
+        : action === 'request_delete' ? { deleteRequestReason: reason }
+          : action === 'allow_edit' ? { correctionReason: `Edit access approved: ${report.editRequestReason || ''}` } : {});
+    setWorkflowDialog(null); setWorkflowReason(''); setWorkflowError('');
+  };
+
+  const deleteDraft = async (report: SessionReport) => {
+    if (!window.confirm('Delete this draft Session Report? This action cannot be undone.')) return;
+    try { await onDeleteReport(report.id); } catch (reason) { window.alert(reason instanceof Error ? reason.message : 'Unable to delete draft.'); }
+  };
+
+  const submitDraft = async (report: SessionReport) => {
+    await openForm(report);
+    setWorkflowDialog({ action: 'approve', report });
+    setWorkflowReason('');
+    setWorkflowError('');
+  };
+
+  const exportPdf = async (report: SessionReport) => {
+    setPdfBusyId(report.id);
     try {
-      const response = await fetch(apiUrl(`/api/session-report-photos/${encodeURIComponent(photo.id)}`), {
-        method: 'DELETE',
-        headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to remove photo.');
-      const photos = (formData.photos || []).filter((item) => item.id !== photo.id);
-      setFormData((current) => ({ ...current, photos }));
-      onReportPhotosUpdate(formData.id, photos);
-    } catch (error) {
-      setReportError(error instanceof Error ? error.message : 'Unable to remove photo.');
-    }
+      const context = await loadContext(report.sessionId);
+      await exportSessionReportPdf({
+        academicYear: context.academicYear.name, cluster: context.cluster.name, team: context.collegeName,
+        villages: (report.villageNames?.length ? report.villageNames : context.villages.filter((item) => report.villageIds?.includes(item.id)).map((item) => item.name)),
+        summitNumber: report.summitNumber || '', day: `Day ${report.dayNumber || context.session.dayNumber || ''}`,
+        grade: report.grade || '', date: context.session.date || '', overview: report.sessionSummary || '',
+        detailedSummary: parseActivities(report.activities),
+        challenges: report.issues || '', observations: report.observations || '', remarks: report.remarks || '',
+        outcome: report.outcome || '', volunteers: (report.volunteerNames || []).map((name) => {
+          const volunteer = context.volunteers.find((item) => item.name === name);
+          return { name, phone: volunteer?.phone || '', year: volunteer?.year || '' };
+        }),
+        photos: (report.photos || []).map((photo) => ({ name: photo.originalFilename, dataUrl: apiUrl(photo.fileUrl) })),
+      }, authToken);
+    } catch (reason) { window.alert(reason instanceof Error ? reason.message : 'Unable to export report PDF.'); }
+    finally { setPdfBusyId(''); }
   };
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'DRAFT':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700">
-            <Clock className="w-3.5 h-3.5 text-slate-500" />
-            Draft
-          </span>
-        );
-      case 'SUBMITTED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-50 text-[#1717B8] dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800/60">
-            <span className="w-1.5 h-1.5 rounded-full bg-[#1717B8] animate-pulse" />
-            Submitted
-          </span>
-        );
-      case 'APPROVED':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60">
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-            Approved
-          </span>
-        );
-      default:
-        return <Badge variant="neutral">{status}</Badge>;
-    }
+  const baseReports = useMemo(() => {
+    let list = isSuperAdmin ? sessionReports.filter((report) => report.status !== 'DRAFT') : sessionReports.filter((report) => report.clusterId === currentUserClusterId);
+    if (isSuperAdmin && clusterFilter !== 'ALL') list = list.filter((report) => report.clusterId === clusterFilter);
+    if (statusFilter !== 'ALL') list = list.filter((report) => report.status === statusFilter);
+    if (villageFilter !== 'ALL') list = list.filter((report) => (report.villageNames || []).includes(villageFilter));
+    if (gradeFilter !== 'ALL') list = list.filter((report) => report.grade === gradeFilter);
+    if (dayFilter !== 'ALL') list = list.filter((report) => String(report.dayNumber || '') === dayFilter);
+    const query = search.trim().toLowerCase();
+    if (query) list = list.filter((report) => [report.sessionSummary, report.clusterName, report.grade, report.villageNames?.join(' '), report.summitNumber, report.submittedByName]
+      .some((value) => String(value || '').toLowerCase().includes(query)));
+    return list;
+  }, [sessionReports, isSuperAdmin, currentUserClusterId, clusterFilter, statusFilter, villageFilter, gradeFilter, dayFilter, search]);
+
+  const visibleReports = useMemo(() => [...baseReports].sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime()), [baseReports]);
+  const ownReports = isSuperAdmin ? sessionReports.filter((report) => report.status !== 'DRAFT') : sessionReports.filter((report) => report.clusterId === currentUserClusterId);
+  const metrics = {
+    total: ownReports.length,
+    draft: ownReports.filter((report) => report.status === 'DRAFT').length,
+    submitted: ownReports.filter((report) => report.status === 'SUBMITTED').length,
+    approved: ownReports.filter((report) => report.status === 'APPROVED').length,
+    corrections: ownReports.filter((report) => report.status === 'CORRECTIONS_REQUIRED').length,
   };
+  const villages = Array.from(new Set(sessionReports.flatMap((report) => report.villageNames || []))).sort();
+  const grades = Array.from(new Set(sessionReports.map((report) => report.grade).filter((value): value is string => Boolean(value)))).sort();
 
-  if (isSuperAdmin && showClusterCards) {
-    return (
-      <div className="space-y-6 animate-in fade-in duration-200">
-        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
-          <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-[#1717B8]/10 dark:bg-[#1717B8]/20 flex items-center justify-center text-[#1717B8] dark:text-indigo-400 shrink-0">
-              <FileText className="h-5 w-5" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-                Session Reports
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-                Cluster-wise report overview across all academic sessions
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {clusterReportCards.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-12 text-center dark:border-slate-800 dark:bg-slate-900">
-            <FileText className="mx-auto h-12 w-12 text-slate-300 dark:text-slate-600" />
-            <h3 className="mt-3 text-base font-semibold text-slate-900 dark:text-white">No cluster reports found</h3>
-            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              No cluster reports are available for this academic year yet.
-            </p>
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {clusterReportCards.map((cluster) => (
-            <button
-              key={cluster.id}
-              type="button"
-              onClick={() => {
-                setSelectedClusterFilter(cluster.name);
-                setShowClusterCards(false);
-                setActiveTab('All');
-              }}
-              className="group rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-[#1717B8]/50 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">{cluster.name}</h2>
-                  <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">{cluster.district || 'Cluster overview'}</p>
-                </div>
-                <span className="rounded-full bg-[#1717B8]/10 px-2 py-1 text-[10px] font-bold text-[#1717B8] dark:bg-indigo-950/40 dark:text-indigo-300">
-                  {cluster.total} reports
-                </span>
-              </div>
-
-              <div className="mt-4 grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded-xl bg-slate-100 p-2 dark:bg-slate-800">
-                  <div className="text-base font-bold text-slate-900 dark:text-white">{cluster.total}</div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Total</div>
-                </div>
-                <div className="rounded-xl bg-blue-50 p-2 dark:bg-blue-950/30">
-                  <div className="text-base font-bold text-[#1717B8]">{cluster.submitted}</div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Submitted</div>
-                </div>
-                <div className="rounded-xl bg-emerald-50 p-2 dark:bg-emerald-950/30">
-                  <div className="text-base font-bold text-emerald-600">{cluster.approved}</div>
-                  <div className="text-[10px] text-slate-500 dark:text-slate-400">Approved</div>
-                </div>
-              </div>
-
-              <div className="mt-4 flex items-center justify-between border-t border-slate-100 pt-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                <span>{cluster.draft} drafts</span>
-                <span className="font-semibold text-[#1717B8]">Open cluster <ChevronRight className="ml-1 inline h-3 w-3" /></span>
-              </div>
-            </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
+  const statusBadge = (status: string) => <span className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusColors[status] || 'border-slate-200 bg-slate-50 text-slate-700'}`}>{statusText[status] || status}</span>;
+  const reportSession = (report: SessionReport) => sessions.find((session) => session.id === report.sessionId);
+  const viewButton = (report: SessionReport) => <button onClick={() => setViewReport(report)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Eye size={14} className="mr-1 inline" />View</button>;
+  const pdfButton = (report: SessionReport) => <button onClick={() => void exportPdf(report)} disabled={pdfBusyId === report.id} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Download size={14} className="mr-1 inline" />{pdfBusyId === report.id ? 'Preparing…' : 'Export PDF'}</button>;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200/80 dark:border-slate-800 shadow-sm">
+    <div className="space-y-6 pb-6">
+      <header className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center">
         <div className="flex items-center gap-3">
-          <div className="w-11 h-11 rounded-xl bg-[#1717B8]/10 dark:bg-[#1717B8]/20 flex items-center justify-center text-[#1717B8] dark:text-indigo-400 shrink-0">
-            <FileText className="h-5 w-5" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-                Session Reports
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-[#1717B8]/10 text-[#1717B8] dark:bg-indigo-950/40 dark:text-indigo-300">
-                {visibleReports.length}
-              </span>
-            </div>
-            <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-0.5">
-              Qualitative session outcomes, activities, student counts, and pedagogical challenges
-            </p>
-          </div>
+          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-800"><FileText size={21} /></span>
+          <div><h1 className="text-xl font-bold text-slate-900">Session Reports</h1><p className="mt-1 text-sm text-slate-500">{isSuperAdmin ? 'Review submitted reports and respond to requests.' : 'Capture session outcomes, observations and evidence.'}</p></div>
         </div>
+      </header>
 
-        {isSuperAdmin && selectedClusterFilter !== 'all' && (
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedClusterFilter('all');
-              setShowClusterCards(true);
-            }}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-          >
-            <ChevronRight className="h-3.5 w-3.5 rotate-180" />
-            <span>Back to Clusters</span>
-          </button>
-        )}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        {[
+          ['Total Reports', metrics.total, 'bg-blue-50 text-blue-800'], ['Draft', metrics.draft, 'bg-amber-50 text-amber-800'],
+          ['Submitted', metrics.submitted, 'bg-sky-50 text-sky-800'], ['Approved', metrics.approved, 'bg-emerald-50 text-emerald-800'],
+          ['Corrections Required', metrics.corrections, 'bg-rose-50 text-rose-800'],
+        ].map(([label, count, color]) => <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-medium text-slate-500">{label}</p><p className={`mt-2 inline-flex min-w-9 justify-center rounded-lg px-2 py-1 text-xl font-bold ${color}`}>{count}</p></div>)}
       </div>
 
-      {/* KPI Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-[#1717B8] dark:text-blue-400 flex items-center justify-center shrink-0">
-            <FileText className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-slate-900 dark:text-white">{metrics.total}</div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Total Reports</div>
-          </div>
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <label className="relative"><Search className="absolute left-3 top-3 text-slate-400" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search reports" className={`${inputClass} pl-9`} /></label>
+          {isSuperAdmin && <select value={clusterFilter} onChange={(event) => setClusterFilter(event.target.value)} className={inputClass}><option value="ALL">All clusters</option>{clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}</select>}
+          <select value={villageFilter} onChange={(event) => setVillageFilter(event.target.value)} className={inputClass}><option value="ALL">All villages</option>{villages.map((village) => <option key={village} value={village}>{village}</option>)}</select>
+          <select value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)} className={inputClass}><option value="ALL">All grades</option>{grades.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select>
+          <select value={dayFilter} onChange={(event) => setDayFilter(event.target.value)} className={inputClass}><option value="ALL">All days</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={String(index + 1)}>Day {index + 1}</option>)}</select>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={inputClass}>
+            <option value="ALL">All statuses</option>{['DRAFT', 'SUBMITTED', 'CORRECTIONS_REQUIRED', 'APPROVED', 'EDIT_REQUEST_PENDING', 'DELETE_REQUEST_PENDING'].map((status) => <option key={status} value={status}>{statusText[status]}</option>)}
+          </select>
         </div>
+      </section>
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-indigo-950/40 text-[#1717B8] dark:text-indigo-400 flex items-center justify-center shrink-0">
-            <Send className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-[#1717B8] dark:text-indigo-400">{metrics.submitted}</div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Submitted for Review</div>
-          </div>
+      {!isSuperAdmin && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="mb-4"><h2 className="text-sm font-bold text-slate-900">Create a report by day</h2><p className="mt-1 text-xs text-slate-500">Choose a scheduled day to start its Session Report.</p></div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {reportDayNumbers.map((dayNumber) => {
+            const daySessions = scheduledSessionsByDay.get(dayNumber) || [];
+            const dayReports = sessionReports.filter((report) => daySessions.some((session) => session.id === report.sessionId));
+            const dayStatus = daySessions.length > 1 ? `${daySessions.length} Sessions` : dayReports[0] ? statusText[dayReports[0].status] || dayReports[0].status : daySessions.length ? 'Not Created' : 'Not Scheduled';
+            const badgeClass = dayReports[0] ? statusColors[dayReports[0].status] || 'border-slate-200 bg-slate-50 text-slate-700' : daySessions.length ? 'border-blue-100 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-500';
+            return <article key={dayNumber} className="flex min-h-[210px] flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2.5"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-800"><Calendar size={16} /></span><div><h3 className="text-sm font-bold text-slate-900">Day {dayNumber}</h3><p className="mt-0.5 text-[11px] text-slate-500">{daySessions[0]?.date?.slice(0, 10) || 'Date not set'}</p></div></div>
+                <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-semibold ${badgeClass}`}>{dayStatus}</span>
+              </div>
+              {daySessions.length ? <div className="mt-4 flex-1 space-y-3">{daySessions.map((session) => {
+                const report = sessionReports.find((item) => item.sessionId === session.id);
+                const canEdit = report && ['DRAFT', 'CORRECTIONS_REQUIRED'].includes(report.status);
+                return <div key={session.id} className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-slate-800">{session.name}</p>
+                  <p className="mt-1 text-xs text-slate-500">{report ? (report.sessionSummary || 'A report has been started for this day.') : 'No Session Report for this day yet.'}</p>
+                  <button type="button" onClick={() => report ? (canEdit ? void openForm(report) : setViewReport(report)) : void openForm(undefined, session.id)} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-blue-800 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-900">
+                    {report ? <><Eye size={14} />{canEdit ? 'Continue Report' : 'View Report'}</> : <><Plus size={14} />Create Session Report</>}
+                  </button>
+                </div>;
+              })}</div> : <div className="mt-5 flex-1"><p className="text-sm font-semibold text-slate-700">No scheduled session for this day yet</p><p className="mt-1 text-xs text-slate-500">Schedule the session first to create its report.</p></div>}
+            </article>;
+          })}
         </div>
+      </section>}
 
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{metrics.approved}</div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Approved Reports</div>
-          </div>
-        </div>
-
-        <div className="p-5 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 flex items-center justify-center shrink-0">
-            <Clock className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="text-2xl font-bold text-slate-700 dark:text-slate-300">{metrics.draft}</div>
-            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Drafts in Progress</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Main Container */}
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200/80 dark:border-slate-800 overflow-hidden">
-        {/* Controls Bar */}
-        <div className="p-4 sm:p-5 border-b border-slate-200/80 dark:border-slate-800 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-          {/* Status Tabs */}
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800/70 p-1 rounded-xl overflow-x-auto">
-            {(['All', 'SUBMITTED', 'APPROVED', 'DRAFT'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setActiveTab(tab)}
-                className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg whitespace-nowrap transition-all cursor-pointer ${
-                  activeTab === tab
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                {tab === 'All'
-                  ? `All (${metrics.total})`
-                  : tab === 'SUBMITTED'
-                  ? `Submitted (${metrics.submitted})`
-                  : tab === 'APPROVED'
-                  ? `Approved (${metrics.approved})`
-                  : `Drafts (${metrics.draft})`}
-              </button>
-            ))}
-          </div>
-
-          {/* Search and Layout Toggle */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 sm:w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search session, cluster, activity..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#1717B8] focus:border-transparent transition-all"
-              />
-            </div>
-
-            {/* View Mode Toggle */}
-            <div className="flex items-center bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200 dark:border-slate-700">
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'grid'
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-                title="Grid View"
-              >
-                <GridFour className="h-3.5 w-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('table')}
-                className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                  viewMode === 'table'
-                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-                }`}
-                title="Table View"
-              >
-                <Table className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Content Body: Grid or Table */}
-        {visibleReports.length === 0 ? (
-          <div className="p-8">
-            <EmptyState
-              icon={FileText}
-              title="No session reports found"
-              description={
-                searchQuery
-                  ? 'No reports match your search query. Try broadening your keywords.'
-                  : 'There are currently no session reports recorded in this filter view.'
-              }
-            />
-          </div>
-        ) : viewMode === 'grid' ? (
-          /* Grid View */
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5 p-5 sm:p-6 bg-slate-50/50 dark:bg-slate-950/20">
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        {visibleReports.length === 0 ? <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center"><FileText className="mx-auto text-slate-300" size={32} /><h2 className="mt-3 text-sm font-semibold text-slate-700">No reports found</h2><p className="mt-1 text-xs text-slate-500">{isSuperAdmin ? 'Submitted reports will appear here as soon as Cluster Admins submit them.' : 'Create a report for a scheduled session to get started.'}</p></div> : (
+          <div className="grid gap-4 md:grid-cols-2 2xl:grid-cols-3">
             {visibleReports.map((report) => {
-              const session = sessions.find((s) => s.id === report.sessionId);
-              const hasIssues = Boolean(report.issues && report.issues.trim().length > 0);
-
-              return (
-                <div
-                  key={report.id}
-                  className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-5 hover:border-slate-300 dark:hover:border-slate-700 hover:shadow-md transition-all flex flex-col justify-between group"
-                >
-                  <div>
-                    {/* Header */}
-                    <div className="flex items-start justify-between gap-3 mb-3">
-                      <div>
-                        <h3
-                          className="text-sm font-semibold text-slate-900 dark:text-white line-clamp-1 group-hover:text-[#1717B8] dark:group-hover:text-indigo-400 transition-colors"
-                          title={session?.name || 'Session'}
-                        >
-                          {session?.name || 'Session'}
-                        </h3>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#1717B8]/10 text-[#1717B8] dark:bg-indigo-950/40 dark:text-indigo-300">
-                            Day {report.dayNumber || session?.dayNumber || 1}
-                          </span>
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {report.clusterName || 'Cluster not available'}
-                          </span>
-                        </div>
-                      </div>
-                      {getStatusBadge(report.status)}
-                    </div>
-
-                    {/* Summary */}
-                    <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-3 mb-4 leading-relaxed">
-                      {report.sessionSummary || <span className="text-slate-400 italic">No summary provided</span>}
-                    </p>
-
-                    {/* Issues Alert Box if present */}
-                    {hasIssues && (
-                      <div className="mb-4 flex items-start gap-2 p-2.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200/70 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 text-[11px] leading-tight">
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-                        <span className="line-clamp-2">{report.issues}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Footer Stats & Actions */}
-                  <div className="pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
-                      <div className="w-6 h-6 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-[#1717B8] flex items-center justify-center">
-                        <Users className="h-3 w-3" />
-                      </div>
-                      <span>{report.studentCount == null ? 'Attendance not recorded' : `${report.studentCount} Students`}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSelectedReport(report);
-                          setShowViewModal(true);
-                        }}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-300 text-xs font-medium transition-all active:scale-95 cursor-pointer"
-                        title="View Report Details"
-                      >
-                        <Eye className="h-3 w-3 text-slate-400" />
-                        <span>View</span>
-                      </button>
-                      {!isSuperAdmin && report.status === 'DRAFT' && (
-                        <button
-                          type="button"
-                          onClick={() => handleOpenForm(report)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1717B8] hover:bg-[#1313A0] text-white text-xs font-semibold transition-all active:scale-95 cursor-pointer"
-                        >
-                          <Edit className="h-3 w-3" />
-                          <span>Edit</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
+              const session = reportSession(report); const isDraft = report.status === 'DRAFT';
+              return <article key={report.id} className="flex min-h-[250px] flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-3"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-800"><FileText size={18} /></span><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-900">{session?.name || `Session Day ${report.dayNumber || ''}`}</p><p className="mt-0.5 text-xs text-slate-500">{report.clusterName || 'Cluster'} · Day {report.dayNumber || session?.dayNumber || '—'}</p></div></div>
+                  {statusBadge(report.status)}
                 </div>
-              );
+                <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 border-y border-slate-100 py-3 text-xs">
+                  <div><span className="text-slate-400">Planned date</span><p className="mt-0.5 font-medium text-slate-700">{session?.date || '—'}</p></div>
+                  <div><span className="text-slate-400">Village</span><p className="mt-0.5 truncate font-medium text-slate-700">{report.villageNames?.join(', ') || session?.villageName || '—'}</p></div>
+                  <div><span className="text-slate-400">Summit · Grade</span><p className="mt-0.5 font-medium text-slate-700">{report.summitNumber || '—'} · {report.grade || '—'}</p></div>
+                  <div><span className="text-slate-400">Submitted by</span><p className="mt-0.5 truncate font-medium text-slate-700">{report.submittedByName || report.createdByName || '—'}</p></div>
+                  <div><span className="text-slate-400">Submitted date</span><p className="mt-0.5 font-medium text-slate-700">{report.submittedAt ? new Date(report.submittedAt).toLocaleDateString() : '—'}</p></div>
+                  <div className="col-span-2"><span className="text-slate-400">Last updated</span><p className="mt-0.5 font-medium text-slate-700">{report.updatedAt ? new Date(report.updatedAt).toLocaleString() : '—'}</p></div>
+                </div>
+                <p className="mt-3 line-clamp-3 flex-1 text-xs leading-relaxed text-slate-600">{report.sessionSummary || 'No overview has been added yet.'}</p>
+                {report.status === 'CORRECTIONS_REQUIRED' && report.correctionReason && <p className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-2.5 text-xs text-rose-800"><b>Correction requested:</b> {report.correctionReason}</p>}
+                {report.status === 'EDIT_REQUEST_PENDING' && report.editRequestReason && <p className="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-2.5 text-xs text-orange-800"><b>Edit request:</b> {report.editRequestReason}</p>}
+                {report.status === 'DELETE_REQUEST_PENDING' && report.deleteRequestReason && <p className="mt-3 rounded-lg border border-orange-200 bg-orange-50 p-2.5 text-xs text-orange-800"><b>Delete request:</b> {report.deleteRequestReason}</p>}
+                <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                  {viewButton(report)}
+                  {pdfButton(report)}
+                  {!isSuperAdmin && isDraft && <>
+                    <button onClick={() => void openForm(report)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800"><Edit size={14} className="mr-1 inline" />Edit</button>
+                    <button onClick={() => void deleteDraft(report)} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700"><Trash2 size={14} className="mr-1 inline" />Delete</button>
+                    <button onClick={() => void submitDraft(report)} className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white"><Send size={14} className="mr-1 inline" />Submit</button>
+                  </>}
+                  {!isSuperAdmin && report.status === 'CORRECTIONS_REQUIRED' && <>
+                    <button onClick={() => void openForm(report)} className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-800"><Edit size={14} className="mr-1 inline" />Edit</button>
+                    <button onClick={() => { setWorkflowDialog({ action: 'send_correction', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white"><Send size={14} className="mr-1 inline" />Resubmit</button>
+                  </>}
+                  {!isSuperAdmin && ['SUBMITTED', 'APPROVED'].includes(report.status) && <>
+                    <button onClick={() => { setWorkflowDialog({ action: 'request_edit', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">Request Edit</button>
+                    <button onClick={() => { setWorkflowDialog({ action: 'request_delete', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700">Request Delete</button>
+                  </>}
+                  {isSuperAdmin && report.status === 'SUBMITTED' && <>
+                    <button onClick={() => { setWorkflowDialog({ action: 'approve', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white"><CheckCircle2 size={14} className="mr-1 inline" />Approve</button>
+                    <button onClick={() => { setWorkflowDialog({ action: 'send_correction', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700">Send for Correction</button>
+                  </>}
+                  {isSuperAdmin && report.status === 'EDIT_REQUEST_PENDING' && <>
+                    <button onClick={() => void doWorkflow('allow_edit', report).catch((reason) => window.alert(reason instanceof Error ? reason.message : 'Unable to allow edit.'))} className="rounded-lg bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white">Allow Edit</button>
+                    <button onClick={() => void doWorkflow('deny_edit', report).catch((reason) => window.alert(reason instanceof Error ? reason.message : 'Unable to decline request.'))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">Decline</button>
+                  </>}
+                  {isSuperAdmin && report.status === 'DELETE_REQUEST_PENDING' && <>
+                    <button onClick={() => { setWorkflowDialog({ action: 'approve_delete', report }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg bg-rose-700 px-3 py-1.5 text-xs font-semibold text-white">Approve Delete</button>
+                    <button onClick={() => void doWorkflow('deny_delete', report).catch((reason) => window.alert(reason instanceof Error ? reason.message : 'Unable to decline request.'))} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700">Decline</button>
+                  </>}
+                </div>
+              </article>;
             })}
           </div>
-        ) : (
-          /* Table View */
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/80 dark:bg-slate-800/40 border-b border-slate-200/80 dark:border-slate-800 text-xs font-semibold text-slate-600 dark:text-slate-400 uppercase tracking-wider">
-                  <th className="py-3.5 px-4 font-semibold">Session & Cluster</th>
-                  <th className="py-3.5 px-4 font-semibold">Cycle Day</th>
-                  <th className="py-3.5 px-4 font-semibold">Students</th>
-                  <th className="py-3.5 px-4 font-semibold">Summary Overview</th>
-                  <th className="py-3.5 px-4 font-semibold">Status</th>
-                  <th className="py-3.5 px-4 font-semibold text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {visibleReports.map((report) => {
-                  const session = sessions.find((s) => s.id === report.sessionId);
-
-                  return (
-                    <tr
-                      key={report.id}
-                      className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
-                    >
-                      <td className="py-3.5 px-4">
-                        <div className="text-xs font-semibold text-slate-900 dark:text-white">
-                          {session?.name || 'Session'}
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          {report.clusterName || 'Cluster not available'}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-[#1717B8]/10 text-[#1717B8] dark:bg-indigo-950/40 dark:text-indigo-300">
-                          Day {report.dayNumber || session?.dayNumber || 1}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        {report.studentCount ?? '—'}
-                      </td>
-                      <td className="py-3.5 px-4 text-xs text-slate-600 dark:text-slate-300 max-w-sm">
-                        <p className="line-clamp-1">{report.sessionSummary || '-'}</p>
-                      </td>
-                      <td className="py-3.5 px-4 whitespace-nowrap">
-                        {getStatusBadge(report.status)}
-                      </td>
-                      <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                        <div className="inline-flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedReport(report);
-                              setShowViewModal(true);
-                            }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:bg-slate-50 text-slate-700 dark:text-slate-300 text-xs font-medium transition-all cursor-pointer"
-                          >
-                            <Eye className="h-3 w-3 text-slate-400" />
-                            <span>Details</span>
-                          </button>
-                          {!isSuperAdmin && report.status === 'DRAFT' && (
-                            <button
-                              type="button"
-                              onClick={() => handleOpenForm(report)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#1717B8] hover:bg-[#1313A0] text-white text-xs font-semibold transition-all cursor-pointer"
-                            >
-                              <Edit className="h-3 w-3" />
-                              <span>Edit</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
         )}
-      </div>
+      </section>
 
-      {/* Form Modal (Create / Edit) */}
-      {showFormModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-2xl my-8 overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30 shrink-0">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#1717B8]/10 text-[#1717B8] flex items-center justify-center">
-                  <FileText className="h-4 w-4" />
-                </div>
-                <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-                  {formData.id ? 'Edit Session Report' : 'New Session Report'}
-                </h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowFormModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-6">
-              <section className="space-y-3 rounded-2xl border border-blue-200 bg-blue-50/60 p-4 dark:border-blue-900 dark:bg-blue-950/20">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Auto-fetched session information</h4>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Master data is read-only and loaded from the selected academic year.</p>
-                </div>
-                {!formData.id && (
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">Saved Session Plan entry *</label>
-                    <Select
-                      value={formData.sessionId || ''}
-                      onValueChange={(value) => {
-                        setReportError('');
-                        setSessionContext(null);
-                        setReportActivities([{ topic: '', details: '' }]);
-                        setFormData((current) => ({ ...current, sessionId: value }));
-                      }}
-                    >
-                      <SelectTrigger className="h-10 w-full rounded-xl border-slate-200 text-xs dark:border-slate-700">
-                        <SelectValue placeholder="Select a saved session" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clusterSessions.map((session) => (
-                          <SelectItem key={session.id} value={session.id}>
-                            {session.clusterName ? `${session.clusterName} · ` : ''}Day {session.dayNumber || '—'} · {session.name || 'Session'}{session.date ? ` · ${session.date}` : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {clusterSessions.length === 0 && <p className="mt-2 text-xs text-amber-800">No saved session schedules are available in this academic year and cluster. Schedule the session first.</p>}
-                  </div>
-                )}
-                {isContextLoading ? (
-                  <div className="rounded-xl bg-white/80 p-4 text-xs text-slate-600 dark:bg-slate-900/70">Loading linked academic, location, lesson-plan and attendance data…</div>
-                ) : sessionContext ? (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {[
-                      ['Academic Year', `${sessionContext.academicYear.name}${sessionContext.academicYear.status ? ` (${sessionContext.academicYear.status})` : ''}`],
-                      ['Cluster', sessionContext.cluster.name],
-                      ['Team / College', sessionContext.collegeName || 'Not configured for this cluster'],
-                      ['Panchayat', sessionContext.panchayat?.name || 'Not assigned to this session'],
-                      ['Villages mapped to Panchayat', sessionContext.villages.length ? sessionContext.villages.map((village) => village.name).join(', ') : 'No villages mapped'],
-                      ['Summit Number', sessionContext.summitNumbers.length ? sessionContext.summitNumbers.join(', ') : 'Not configured in ERP'],
-                      ['Session / Day', sessionContext.session.dayNumber ? `Day ${sessionContext.session.dayNumber} · ${sessionContext.session.name}` : 'Not linked to a session-plan day'],
-                      ['Session Date', sessionContext.session.date || 'No scheduled date'],
-                      ['Grade', sessionContext.grades.length ? sessionContext.grades.join(', ') : 'No grade configured for this session'],
-                      ['Volunteers', sessionContext.volunteers.length ? sessionContext.volunteers.map((volunteer) => volunteer.name).join(', ') : 'No volunteer assignment found'],
-                      ['Attending Students', sessionContext.attendance.available ? `${sessionContext.attendance.presentCount} present of ${sessionContext.attendance.totalCount}` : 'Attendance not recorded'],
-                    ].map(([label, value]) => (
-                      <div key={label} className="rounded-xl border border-blue-100 bg-white/80 p-3 dark:border-slate-700 dark:bg-slate-900/70">
-                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-slate-500"><Lock className="h-3 w-3" />{label}</span>
-                        <span className="mt-1 block break-words text-xs font-semibold text-slate-900 dark:text-white">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : <div className="rounded-xl bg-white/80 p-3 text-xs text-slate-500 dark:bg-slate-900/70">Choose a saved session to load its ERP context.</div>}
-              </section>
-
-              <section className="space-y-4">
-                <div>
-                  <h4 className="text-sm font-bold text-slate-900 dark:text-white">Report content</h4>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Write observations from the session. Do not re-enter the linked master data above.</p>
-                </div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  AN OVERVIEW *
-                  <textarea value={formData.sessionSummary || ''} onChange={(event) => setFormData((current) => ({ ...current, sessionSummary: event.target.value }))} rows={4} required className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm text-slate-900 outline-none focus:ring-2 focus:ring-[#1717B8] dark:border-slate-700 dark:bg-slate-800 dark:text-white" placeholder="Write an overview of the session, student engagement and major learning activities…" />
-                </label>
-
-                <div className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-                  <div className="flex items-center justify-between gap-2">
-                    <div><h5 className="text-xs font-bold text-slate-800 dark:text-white">DETAILED SUMMARY</h5><p className="mt-1 text-[11px] text-slate-500">Existing lesson-plan topics are shown when available.</p></div>
-                    <button type="button" onClick={() => setReportActivities((items) => [...items, { topic: '', details: '' }])} className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-[#1717B8] dark:border-slate-700"><Plus className="h-3.5 w-3.5" />Add Activity</button>
-                  </div>
-                  {reportActivities.map((activity, index) => (
-                    <div key={`${activity.lessonPlanId || 'activity'}-${index}`} className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Activity {index + 1} · Topic
-                        <input value={activity.topic} readOnly={Boolean(activity.lessonPlanId)} onChange={(event) => setReportActivities((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, topic: event.target.value } : item))} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs read-only:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:read-only:bg-slate-800" placeholder="Enter activity/topic" />
-                      </label>
-                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">Detailed Summary
-                        <textarea value={activity.details} onChange={(event) => setReportActivities((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, details: event.target.value } : item))} rows={3} className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs dark:border-slate-700 dark:bg-slate-900" placeholder="Describe what was actually conducted…" />
-                      </label>
-                      {reportActivities.length > 1 && <button type="button" onClick={() => setReportActivities((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="text-[11px] font-semibold text-rose-600">Remove activity</button>}
-                    </div>
-                  ))}
-                </div>
-
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">OUTCOME
-                  <textarea value={formData.outcome || ''} onChange={(event) => setFormData((current) => ({ ...current, outcome: event.target.value }))} rows={3} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-800" placeholder="Enter the learning outcomes actually observed…" />
-                </label>
-                <label className="block text-xs font-semibold text-amber-700 dark:text-amber-400"><span className="inline-flex items-center gap-1.5"><AlertTriangle className="h-3.5 w-3.5" />ISSUES / CHALLENGES</span>
-                  <textarea value={formData.issues || ''} onChange={(event) => setFormData((current) => ({ ...current, issues: event.target.value }))} rows={2} className="mt-1.5 w-full rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-2.5 text-xs dark:border-amber-900/60 dark:bg-amber-950/20" placeholder="Optional: record issues not already captured in ERP…" />
-                </label>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">GENERAL REMARKS (OPTIONAL)
-                  <textarea value={formData.remarks || ''} onChange={(event) => setFormData((current) => ({ ...current, remarks: event.target.value }))} rows={2} className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-800" placeholder="Additional remarks, if required…" />
-                </label>
-
-                <div className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-700">
-                  <div className="flex items-center justify-between gap-2"><div><h5 className="text-xs font-bold text-slate-800 dark:text-white">SESSION PHOTOS</h5><p className="mt-1 text-[11px] text-slate-500">Photos are stored against this report.</p></div><label className="inline-flex cursor-pointer items-center gap-1 rounded-lg bg-[#1717B8] px-3 py-2 text-xs font-semibold text-white"><Upload className="h-3.5 w-3.5" />Upload Photos<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { setPhotoFiles((items) => [...items, ...Array.from(event.target.files || [])]); event.target.value = ''; }} /></label></div>
-                  {(formData.photos?.length || photoFiles.length) ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    {(formData.photos || []).map((photo) => <div key={photo.id} className="relative overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><div className="aspect-square"><ProtectedReportPhoto photo={photo} authToken={authToken} /></div><button type="button" onClick={() => void removeExistingPhoto(photo)} className="absolute right-1 top-1 rounded-full bg-white/90 p-1 text-rose-600 shadow" title="Remove photo"><X className="h-3.5 w-3.5" /></button><p className="truncate px-2 py-1 text-[10px] text-slate-500">{photo.originalFilename}</p></div>)}
-                    {photoFiles.map((file, index) => <div key={`${file.name}-${index}`} className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><div className="aspect-square"><img src={localPhotoUrls[index]} alt={file.name} className="h-full w-full object-cover" /></div><div className="flex items-center justify-between gap-1 px-2 py-1"><span className="truncate text-[10px] text-slate-500">{file.name}</span><button type="button" onClick={() => setPhotoFiles((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="text-rose-600" title="Remove selected photo"><X className="h-3 w-3" /></button></div></div>)}
-                  </div> : <p className="text-xs text-slate-500">No photos selected.</p>}
-                </div>
-              </section>
-              {reportError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{reportError}</p>}
-            </div>
-
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowFormModal(false)}
-                className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
-                disabled={isSubmitting}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSave('DRAFT')}
-                disabled={isSubmitting || isContextLoading || !formData.sessionId || !sessionContext}
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-200 hover:bg-slate-300 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-semibold transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <Save className="h-3.5 w-3.5" />
-                <span>Save Draft</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleSave('SUBMITTED')}
-                disabled={isSubmitting || isContextLoading || !formData.sessionId || !sessionContext || !formData.sessionSummary?.trim()}
-                className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-[#1717B8] hover:bg-[#1313A0] text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50 cursor-pointer"
-              >
-                <Send className="h-3.5 w-3.5" />
-                <span>Submit Report</span>
-              </button>
-            </div>
+      {formOpen && !isSuperAdmin && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-2 sm:p-5">
+        <div className="mx-auto my-2 max-w-5xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl sm:my-5">
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4 sm:px-7">
+            <div><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Student Holistic Development Program</p><h2 className="mt-1 text-lg font-bold text-slate-900">{formReport.id ? 'Session Report' : 'Create Session Report'}</h2></div>
+            <button onClick={() => setFormOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={19} /></button>
           </div>
-        </div>
-      )}
-
-      {/* View Modal (Inspection) */}
-      {showViewModal && selectedReport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150 overflow-y-auto">
-          <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-xl w-full max-w-2xl my-8 overflow-hidden border border-slate-200 dark:border-slate-800 flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-200 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-800/30 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-lg bg-[#1717B8]/10 text-[#1717B8] flex items-center justify-center">
-                  <FileText className="h-4 w-4" />
-                </div>
-                <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">
-                    Session Report Details
-                  </h3>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {getStatusBadge(selectedReport.status)}
-                  </div>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowViewModal(false)}
-                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="p-6 overflow-y-auto space-y-5">
-              <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs dark:border-slate-800 dark:bg-slate-800/50 sm:grid-cols-3">
+          <div className="space-y-7 p-5 sm:p-7">
+            {formReport.status === 'CORRECTIONS_REQUIRED' && formReport.correctionReason && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"><b>Correction requested by Super Admin:</b><p className="mt-1 whitespace-pre-wrap">{formReport.correctionReason}</p></div>}
+            <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-4 sm:p-5">
+              <div className="mb-4"><h3 className="text-sm font-bold text-slate-900">1. BASIC INFORMATION</h3><p className="mt-1 text-xs text-slate-500">Schedule and academic details are loaded from the system. Select only the report-specific fields.</p></div>
+              {formReport.id && <p className="mb-4 rounded-lg bg-white px-3 py-2 text-sm font-semibold text-slate-800">{formContext?.session.name || reportSession(formReport as SessionReport)?.name || `Day ${formReport.dayNumber}`}</p>}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {[
-                  ['Academic Year', viewContext?.academicYear.name || academicYears.find((year) => year.id === selectedAcademicYearId)?.name || 'Not available'],
-                  ['Cluster', viewContext?.cluster.name || selectedReport.clusterName || 'Not available'],
-                  ['Team / College', viewContext?.collegeName || 'Not configured in ERP'],
-                  ['Panchayat', viewContext?.panchayat?.name || 'Not assigned'],
-                  ['Villages', viewContext?.villages.map((village) => village.name).join(', ') || 'No villages mapped'],
-                  ['Summit Number', viewContext?.summitNumbers.join(', ') || 'Not configured in ERP'],
-                  ['Session / Day', viewContext?.session.dayNumber ? `Day ${viewContext.session.dayNumber} · ${viewContext.session.name}` : 'Not linked to a session-plan day'],
-                  ['Date', viewContext?.session.date || 'No scheduled date'],
-                  ['Grade', viewContext?.grades.join(', ') || 'Not configured for this session'],
-                  ['Volunteers', viewContext?.volunteers.map((volunteer) => volunteer.name).join(', ') || 'No assignment found'],
-                  ['Attending Students', selectedReport.studentCount == null ? 'Attendance not recorded' : `${selectedReport.studentCount} present`],
-                ].map(([label, value]) => <div key={label}><span className="block text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span><span className="mt-0.5 block break-words font-semibold text-slate-900 dark:text-white">{viewContextLoading ? 'Loading…' : value}</span></div>)}
+                  ['Cluster', formContext?.cluster.name || '—'], ['Team', formContext?.collegeName || '—'], ['Academic Year', formContext?.academicYear.name || '—'],
+                  ['Session / Day', formContext ? `Day ${formContext.session.dayNumber} · ${formContext.session.name}` : '—'], ['Date', formContext?.session.date || '—'],
+                ].map(([label, value]) => <div key={label} className="rounded-lg border border-blue-100 bg-white p-3"><span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</span><p className="mt-1 text-sm font-semibold text-slate-800">{value}</p></div>)}
+                <MultiSelectField label="Village(s) — select all that apply" placeholder="Select village(s)" options={(formContext?.villages || []).map((village) => ({ value: village.id, label: village.name }))} selected={selectedVillages} onChange={setSelectedVillages} />
+                <MultiSelectField label="No. of Summit" placeholder="Select summit(s)" options={['I', 'II', 'III', 'IV'].map((value) => ({ value, label: `Summit ${value}` }))} selected={(formReport.summitNumber || '').split(',').map((value) => value.trim()).filter((value) => ['I', 'II', 'III', 'IV'].includes(value))} onChange={(selected) => setFormReport((current) => ({ ...current, summitNumber: selected.join(', ') }))} />
+                <MultiSelectField label="Grade" placeholder="Select grade(s)" options={['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].map((value) => ({ value, label: value }))} selected={(formReport.grade || '').split(',').map((value) => value.trim()).filter((value) => ['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].includes(value))} onChange={(selected) => setFormReport((current) => ({ ...current, grade: selected.join(', ') }))} />
               </div>
+              {formContext?.villages.length === 0 && <p className="mt-3 text-xs text-amber-800">No villages are mapped to this session. Please configure the session location before creating its report.</p>}
+            </section>
 
-              {/* Summary */}
-              <div>
-                <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
-                  <FileText className="h-3.5 w-3.5 text-[#1717B8]" />
-                  <span>Session Summary</span>
-                </h4>
-                <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
-                  {selectedReport.sessionSummary || 'No summary recorded.'}
-                </div>
+            <section className="space-y-5">
+              <Field label="2. AN OVERVIEW"><textarea rows={5} value={formReport.sessionSummary || ''} onChange={(event) => setFormReport((current) => ({ ...current, sessionSummary: event.target.value }))} className={`${inputClass} resize-y`} placeholder="Describe what happened, where the session was conducted, its main focus, student participation and major observations…" /></Field>
+              <div className="rounded-xl border border-slate-200 p-4 sm:p-5">
+                <div className="mb-4 flex items-center justify-between"><div><h3 className="text-sm font-bold text-slate-900">3. DETAILED SUMMARY</h3><p className="mt-1 text-xs text-slate-500">Add grade-wise activities, participation, discussions, challenges and observations.</p></div><button onClick={() => setActivities((items) => [...items, { topic: '', details: '' }])} className="inline-flex items-center gap-1 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-800"><Plus size={14} />Add section</button></div>
+                <div className="space-y-3">{activities.map((activity, index) => <div key={index} className="grid gap-3 rounded-lg bg-slate-50 p-3 sm:grid-cols-[1fr_2fr_auto]">
+                  <Field label={`Heading ${index + 1}`}><input value={activity.topic} onChange={(event) => setActivities((items) => items.map((item, i) => i === index ? { ...item, topic: event.target.value } : item))} className={inputClass} placeholder="Grade / activity / discussion" /></Field>
+                  <Field label="Activity description and observations"><textarea rows={3} value={activity.details} onChange={(event) => setActivities((items) => items.map((item, i) => i === index ? { ...item, details: event.target.value } : item))} className={inputClass} placeholder="Use headings and bullet points as needed…" /></Field>
+                  <button disabled={activities.length === 1} onClick={() => setActivities((items) => items.filter((_, i) => i !== index))} className="self-end rounded-lg px-2 py-2 text-xs font-semibold text-rose-700 disabled:opacity-30">Remove</button>
+                </div>)}</div>
               </div>
-
-              {/* Attendance Notes */}
-              {selectedReport.attendanceSummary && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
-                    <ClipboardList className="h-3.5 w-3.5 text-blue-600" />
-                    <span>Attendance Observations</span>
-                  </h4>
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 leading-relaxed">
-                    {selectedReport.attendanceSummary}
-                  </div>
+              <Field label="Challenges"><textarea rows={3} value={formReport.issues || ''} onChange={(event) => setFormReport((current) => ({ ...current, issues: event.target.value }))} className={inputClass} placeholder="Describe challenges faced during the session…" /></Field>
+              <Field label="Observations"><textarea rows={3} value={formReport.observations || ''} onChange={(event) => setFormReport((current) => ({ ...current, observations: event.target.value }))} className={inputClass} placeholder="Record student participation, behavior, learning, and other observations…" /></Field>
+              <Field label="Additional remarks (optional)"><textarea rows={2} value={formReport.remarks || ''} onChange={(event) => setFormReport((current) => ({ ...current, remarks: event.target.value }))} className={inputClass} placeholder="Additional remarks…" /></Field>
+              <Field label="4. OUTCOME"><textarea rows={4} value={formReport.outcome || ''} onChange={(event) => setFormReport((current) => ({ ...current, outcome: event.target.value }))} className={inputClass} placeholder="Record observed outcomes, learning, creativity, teamwork, communication or other results…" /></Field>
+              <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
+                <div className="mb-3"><h3 className="text-sm font-bold text-slate-900">5. VOLUNTEERS WHO TOOK THE SESSION</h3><p className="mt-1 text-xs text-slate-500">Selected Lesson Plan volunteers with their contact details.</p></div>
+                {formContext?.volunteers.length ? <div className="mb-3"><MultiSelectField label="Select volunteers" placeholder="Select volunteers who took this session" options={formContext.volunteers.map((volunteer) => ({ value: volunteer.name, label: volunteer.name }))} selected={selectedVolunteers} onChange={(selected) => { setSelectedVolunteers(selected); setFormReport((current) => ({ ...current, volunteerNames: selected })); }} /></div> : <p className="mb-3 rounded-lg border border-dashed border-slate-300 bg-slate-50 p-3 text-xs text-slate-500">No active volunteers are available for this cluster.</p>}
+                <div className="overflow-x-auto rounded-lg border border-slate-200">
+                  <div className="grid min-w-[560px] grid-cols-[55px_1.4fr_1fr_100px] bg-blue-50 px-3 py-2 text-[11px] font-bold uppercase text-slate-600"><span>S.No</span><span>Volunteer Name</span><span>Contact Number</span><span>Year</span></div>
+                  {(selectedVolunteers.length ? selectedVolunteers : formReport.volunteerNames || []).map((name, index) => {
+                    const volunteer = formContext?.volunteers.find((item) => item.name === name);
+                    return <div key={`${name}-${index}`} className="grid min-w-[560px] grid-cols-[55px_1.4fr_1fr_100px] border-t border-slate-100 px-3 py-2 text-sm text-slate-700"><span>{index + 1}</span><span>{name}</span><span>{volunteer?.phone || '—'}</span><span>{volunteer?.year || '—'}</span></div>;
+                  })}
+                  {!selectedVolunteers.length && <p className="p-3 text-xs text-slate-500">Select assigned volunteers in Basic Information to show them here.</p>}
                 </div>
-              )}
-
-              {/* Activities */}
-              {selectedReport.activities && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
-                    <FileText className="h-3.5 w-3.5 text-emerald-600" />
-                    <span>Activities Carried Out</span>
-                  </h4>
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
-                    {parseActivities(selectedReport.activities).map((activity, index) => (
-                      <div key={`${activity.lessonPlanId || 'activity'}-${index}`} className="mb-3 last:mb-0">
-                        {activity.topic && <strong className="mb-1 block">{activity.topic}</strong>}
-                        <span>{activity.details || 'No detailed activity notes.'}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {selectedReport.outcome && <div><h4 className="mb-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">Outcome</h4><div className="whitespace-pre-wrap rounded-xl border border-slate-200/70 bg-slate-50 p-3.5 text-xs leading-relaxed text-slate-800 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-200">{selectedReport.outcome}</div></div>}
-
-              {/* Issues */}
-              {selectedReport.issues && (
-                <div>
-                  <h4 className="text-xs font-semibold text-amber-700 dark:text-amber-400 mb-1.5 flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />
-                    <span>Issues & Challenges</span>
-                  </h4>
-                  <div className="p-3.5 bg-amber-50/60 dark:bg-amber-950/20 rounded-xl border border-amber-200/70 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-300 leading-relaxed whitespace-pre-wrap">
-                    {selectedReport.issues}
-                  </div>
-                </div>
-              )}
-
-              {/* Remarks */}
-              {selectedReport.remarks && (
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5">
-                    <MessageSquare className="h-3.5 w-3.5 text-slate-500" />
-                    <span>General Remarks</span>
-                  </h4>
-                  <div className="p-3.5 bg-slate-50 dark:bg-slate-800/40 rounded-xl border border-slate-200/70 dark:border-slate-800 text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
-                    {selectedReport.remarks}
-                  </div>
-                </div>
-              )}
-
-              {Boolean(selectedReport.photos?.length) && <div><h4 className="mb-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Session Photos</h4><div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{selectedReport.photos?.map((photo) => <div key={photo.id} className="overflow-hidden rounded-lg border border-slate-200 dark:border-slate-700"><div className="aspect-square"><ProtectedReportPhoto photo={photo} authToken={authToken} /></div><p className="truncate px-2 py-1 text-[10px] text-slate-500">{photo.originalFilename}</p></div>)}</div></div>}
-            </div>
-
-            <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30 flex justify-end shrink-0">
-              <button
-                type="button"
-                onClick={() => setShowViewModal(false)}
-                className="px-5 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 rounded-xl transition-colors cursor-pointer"
-              >
-                Close
-              </button>
-            </div>
+              </section>
+              <section className="rounded-xl border border-slate-200 p-4 sm:p-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="text-sm font-bold text-slate-900">6. SESSION PHOTOS</h3><p className="mt-1 text-xs text-slate-500">Upload up to 6 JPG, JPEG, or PNG photos. These will be included in the exported PDF.</p></div><label className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-2.5 text-xs font-semibold text-white ${photoFiles.length + (formReport.photos?.length || 0) >= 6 ? 'cursor-not-allowed bg-slate-400' : 'cursor-pointer bg-blue-700 hover:bg-blue-800'}`}><Upload size={15} />Add Photos<input type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple disabled={photoFiles.length + (formReport.photos?.length || 0) >= 6} className="hidden" onChange={(event) => { const accepted = Array.from(event.target.files || []).filter((file) => ['image/jpeg', 'image/png'].includes(file.type)); const slots = Math.max(0, 6 - (formReport.photos?.length || 0) - photoFiles.length); setPhotoFiles((items) => [...items, ...accepted.slice(0, slots)]); if (accepted.length > slots) setError('Only 6 session photos can be attached to a report.'); event.target.value = ''; }} /></label></div>
+                {(formReport.photos?.length || photoFiles.length) ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{(formReport.photos || []).map((photo) => <div key={photo.id} className="overflow-hidden rounded-lg border border-slate-200"><div className="aspect-square"><ProtectedReportPhoto photo={photo} authToken={authToken} /></div><p className="truncate px-2 py-1 text-[10px] text-slate-500">{photo.originalFilename}</p></div>)}{photoFiles.map((file, index) => <div key={`${file.name}-${index}`} className="overflow-hidden rounded-lg border border-slate-200"><div className="aspect-square"><img src={photoUrls[index]} alt={file.name} className="h-full w-full object-cover" /></div><div className="flex items-center justify-between gap-2 px-2 py-1"><span className="truncate text-[10px] text-slate-500">{file.name}</span><button type="button" onClick={() => setPhotoFiles((items) => items.filter((_, fileIndex) => fileIndex !== index))} className="text-rose-700">Remove</button></div></div>)}</div> : <p className="rounded-lg bg-slate-50 p-4 text-center text-xs text-slate-500">No photos attached yet.</p>}
+              </section>
+              {error && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</p>}
+            </section>
+          </div>
+          <div className="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white p-4 sm:px-7">
+            <button onClick={() => setFormOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700">Cancel</button>
+            <button disabled={saving || !formContext || formReport.status === 'CORRECTIONS_REQUIRED'} onClick={() => void saveReport('DRAFT')} className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">Save Draft</button>
+            <button disabled={saving || !formContext} onClick={() => { setWorkflowDialog({ action: 'approve', report: formReport as SessionReport }); setWorkflowReason(''); setWorkflowError(''); }} className="rounded-lg bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{formReport.status === 'CORRECTIONS_REQUIRED' ? 'Resubmit Session Report' : 'Submit Session Report'}</button>
           </div>
         </div>
-      )}
+      </div>}
+
+      {viewReport && <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/50 p-2 sm:p-5"><article className="mx-auto my-2 max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-2xl sm:my-5">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-5 py-4"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Talent Quest for India · Student Holistic Development Program</p><h2 className="mt-1 text-lg font-bold text-slate-900">Session Report · Day {viewReport.dayNumber || '—'}</h2></div><button onClick={() => setViewReport(null)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={19} /></button></header>
+        <div className="space-y-6 p-5 sm:p-7">
+          <div className="flex flex-wrap items-center justify-between gap-3"><div>{statusBadge(viewReport.status)}<p className="mt-2 text-xs text-slate-500">Last updated {viewReport.updatedAt ? new Date(viewReport.updatedAt).toLocaleString() : '—'} · Submitted by {viewReport.submittedByName || viewReport.createdByName || '—'}</p></div>{pdfButton(viewReport)}</div>
+          {viewReport.correctionReason && viewReport.status === 'CORRECTIONS_REQUIRED' && <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900"><b>Correction requested by Super Admin</b><p className="mt-1 whitespace-pre-wrap">{viewReport.correctionReason}</p></div>}
+          <section><h3 className="mb-3 text-sm font-bold text-blue-900">1. BASIC INFORMATION</h3><div className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">{[
+            ['Cluster', viewContext?.cluster.name || viewReport.clusterName], ['Team', viewContext?.collegeName || '—'], ['Academic Year', viewContext?.academicYear.name || academicYears.find((year) => year.id === viewReport.academicYearId)?.name || '—'],
+            ['Village(s)', viewReport.villageNames?.join(', ') || viewContext?.villages.filter((village) => viewReport.villageIds?.includes(village.id)).map((village) => village.name).join(', ') || '—'], ['No. of Summit', viewReport.summitNumber || '—'], ['Session / Day', `Day ${viewReport.dayNumber || '—'}`], ['Grade', viewReport.grade || '—'], ['Date', viewContext?.session.date || reportSession(viewReport)?.date || '—'],
+          ].map(([label, value]) => <div key={label}><p className="text-[10px] font-semibold uppercase text-slate-400">{label}</p><p className="mt-1 text-sm font-medium text-slate-800">{value}</p></div>)}</div></section>
+          <section><h3 className="mb-2 text-sm font-bold text-blue-900">2. AN OVERVIEW</h3><p className="whitespace-pre-wrap rounded-xl border border-slate-200 p-4 text-sm leading-6 text-slate-700">{viewReport.sessionSummary || 'No overview provided.'}</p></section>
+          <section><h3 className="mb-2 text-sm font-bold text-blue-900">3. DETAILED SUMMARY</h3><div className="space-y-3">{parseActivities(viewReport.activities).map((activity, index) => <div key={index} className="rounded-xl border border-slate-200 p-4"><h4 className="text-sm font-semibold text-slate-800">{activity.topic || `Activity ${index + 1}`}</h4><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-600">{activity.details}</p></div>)}</div></section>
+          <section><h3 className="mb-2 text-sm font-bold text-blue-900">4. OUTCOME</h3><p className="whitespace-pre-wrap rounded-xl border border-slate-200 p-4 text-sm leading-6 text-slate-700">{viewReport.outcome || 'No outcomes provided.'}</p></section>
+          {viewReport.issues && <section><h3 className="mb-2 text-sm font-bold text-blue-900">Challenges</h3><p className="whitespace-pre-wrap rounded-xl border border-slate-200 p-4 text-sm leading-6 text-slate-700">{viewReport.issues}</p></section>}
+          {viewReport.observations && <section><h3 className="mb-2 text-sm font-bold text-blue-900">Observations</h3><p className="whitespace-pre-wrap rounded-xl border border-slate-200 p-4 text-sm leading-6 text-slate-700">{viewReport.observations}</p></section>}
+          {viewReport.remarks && <section><h3 className="mb-2 text-sm font-bold text-blue-900">Additional remarks</h3><p className="whitespace-pre-wrap rounded-xl border border-slate-200 p-4 text-sm leading-6 text-slate-700">{viewReport.remarks}</p></section>}
+          <section><h3 className="mb-2 text-sm font-bold text-blue-900">5. VOLUNTEERS WHO TOOK THE SESSION</h3><div className="overflow-x-auto rounded-xl border border-slate-200"><div className="grid min-w-[560px] grid-cols-[55px_1.4fr_1fr_100px] bg-blue-50 px-4 py-2 text-xs font-bold text-slate-600"><span>S.No</span><span>Volunteer Name</span><span>Contact Number</span><span>Year</span></div>{(viewReport.volunteerNames || []).map((name, index) => { const volunteer = viewContext?.volunteers.find((item) => item.name === name); return <div key={`${name}-${index}`} className="grid min-w-[560px] grid-cols-[55px_1.4fr_1fr_100px] border-t border-slate-100 px-4 py-2 text-sm"><span>{index + 1}</span><span>{name}</span><span>{volunteer?.phone || '—'}</span><span>{volunteer?.year || '—'}</span></div>; })}</div></section>
+          <section><h3 className="mb-3 text-sm font-bold text-blue-900">6. SESSION PHOTOS</h3><div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{(viewReport.photos || []).map((photo) => <div key={photo.id} className="overflow-hidden rounded-lg border border-slate-200"><div className="aspect-square"><ProtectedReportPhoto photo={photo} authToken={authToken} /></div><p className="truncate px-2 py-1 text-xs text-slate-500">{photo.originalFilename}</p></div>)}</div>{!viewReport.photos?.length && <p className="text-sm text-slate-500">No photos attached.</p>}</section>
+        </div>
+      </article></div>}
+
+      {workflowDialog && <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/50 p-4"><div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+        <h2 className="text-lg font-bold text-slate-900">{workflowDialog.action === 'approve' ? (workflowDialog.report.id ? 'Confirm submission' : 'Submit Session Report') : workflowDialog.action === 'send_correction' ? (isSuperAdmin ? 'Correction Required' : 'Confirm resubmission') : workflowDialog.action === 'request_edit' ? 'Request Edit Access' : workflowDialog.action === 'request_delete' ? 'Request Delete' : 'Approve Delete Request'}</h2>
+        <p className="mt-2 text-sm text-slate-600">{workflowDialog.action === 'approve' && isSuperAdmin ? 'Approve this session report?' : workflowDialog.action === 'approve' ? 'Are you sure you want to submit this session report? After submission, direct editing and deletion will be disabled.' : workflowDialog.action === 'request_edit' ? 'Provide a reason for requesting edit access.' : workflowDialog.action === 'request_delete' ? 'Provide a reason for requesting deletion. The report will remain available until approved.' : workflowDialog.action === 'send_correction' && isSuperAdmin ? 'Provide the correction or feedback required before resubmission.' : workflowDialog.action === 'approve_delete' ? 'Approve deletion? This will permanently delete the report and its attached photos.' : 'Confirm this report action.'}</p>
+        {['request_edit', 'request_delete', 'send_correction'].includes(workflowDialog.action) && isSuperAdmin === (workflowDialog.action === 'send_correction') && <textarea value={workflowReason} onChange={(event) => setWorkflowReason(event.target.value)} rows={4} className={`${inputClass} mt-4`} placeholder={workflowDialog.action === 'send_correction' ? 'Correction / Feedback' : 'Reason'} />}
+        {workflowError && <p className="mt-3 text-sm text-rose-700">{workflowError}</p>}
+        <div className="mt-5 flex justify-end gap-2"><button onClick={() => { setWorkflowDialog(null); setWorkflowError(''); }} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">Cancel</button><button onClick={async () => {
+          try {
+            if (workflowDialog.action === 'approve' && !isSuperAdmin) { const saveError = await saveReport('SUBMITTED'); if (saveError) setWorkflowError(saveError); else setWorkflowDialog(null); }
+            else if (workflowDialog.action === 'send_correction' && !isSuperAdmin) { const saveError = await saveReport('SUBMITTED'); if (saveError) setWorkflowError(saveError); else setWorkflowDialog(null); }
+            else await doWorkflow(workflowDialog.action, workflowDialog.report, workflowReason);
+          } catch (reason) { setWorkflowError(reason instanceof Error ? reason.message : 'Unable to complete the action.'); }
+        }} className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white">{workflowDialog.action === 'approve' ? (isSuperAdmin ? 'Approve' : 'Submit') : workflowDialog.action === 'send_correction' && !isSuperAdmin ? 'Resubmit' : 'Confirm'}</button></div>
+      </div></div>}
     </div>
   );
 };

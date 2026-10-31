@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type SendMailOptions } from 'nodemailer';
 import { renderOtpEmail } from './templates/otpEmailTemplate.js';
 import { renderOnboardingEmail } from './templates/onboardingEmailTemplate.js';
 import { renderWorkflowEmail, WorkflowEmailProps } from './templates/workflowEmailTemplate.js';
@@ -23,6 +23,9 @@ export async function sendLoginOtp({
   const smtpFrom = (process.env.SMTP_FROM || smtpUser).trim();
 
   if (!smtpUser || !smtpPass) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('SMTP credentials are not configured for production OTP delivery.');
+    }
     console.warn('[SMTP WARNING] SMTP_USER or SMTP_PASS not set. Falling back to console output.');
     console.log(`\n========================================\n[DEV OTP] For: ${recipient} | Code: ${otp}\n========================================\n`);
     return;
@@ -44,7 +47,7 @@ export async function sendLoginOtp({
   );
 
   const { html, text } = renderOtpEmail({ name, otp, expiryMinutes });
-  const mailOptions: nodemailer.SendMailOptions = {
+  const mailOptions: SendMailOptions = {
     from: `TQI Secure Access <${smtpFrom}>`,
     to: recipient,
     subject: `${otp} is your TQI sign-in code`,
@@ -62,7 +65,9 @@ export async function sendLoginOtp({
     console.log(`[SMTP] OTP email sent successfully to ${recipient} (Message ID: ${info.messageId})`);
   } catch (error: any) {
     console.error(`[SMTP ERROR] Failed to send email via SMTP to ${recipient}:`, error.message);
-    console.log(`\n========================================\n[DEV FALLBACK OTP] For: ${recipient} | Code: ${otp}\n========================================\n`);
+    if (process.env.NODE_ENV !== 'production') {
+      console.log(`\n========================================\n[DEV FALLBACK OTP] For: ${recipient} | Code: ${otp}\n========================================\n`);
+    }
     throw new Error(`Email delivery failed: ${error.message}`);
   }
 }
@@ -122,7 +127,7 @@ export async function sendOnboardingCredentialsEmail({
     clusterName,
     loginUrl,
   });
-  const mailOptions: nodemailer.SendMailOptions = {
+  const mailOptions: SendMailOptions = {
     from: `TQI Administration <${smtpFrom}>`,
     to: recipient,
     subject: `Welcome to TQI ERP — Your Account Credentials`,
@@ -167,7 +172,7 @@ export async function sendWorkflowEmail({
   const transporter = nodemailer.createTransport(isGmail
     ? { service: 'gmail', auth: { user: smtpUser, pass: smtpPass } }
     : { host: smtpHost, port: smtpPort, secure: smtpPort === 465, auth: { user: smtpUser, pass: smtpPass } });
-  const mailOptions: nodemailer.SendMailOptions = {
+  const mailOptions: SendMailOptions = {
     from: `TQI Workflow <${smtpFrom}>`,
     to: recipient,
     subject: template.title.startsWith('TQI') ? template.title : `TQI ERP: ${template.title}`,

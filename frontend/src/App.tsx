@@ -173,6 +173,11 @@ export default function App() {
     const verifyPasswordState = async () => {
       try {
         const response = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${currentUser.token}` }, cache: 'no-store' });
+        if (response.status === 401) {
+          localStorage.removeItem('tqi_auth_session');
+          setCurrentUser(null);
+          return;
+        }
         const data = await response.json().catch(() => null);
         if (data?.user?.mustChangePassword) {
           localStorage.removeItem('tqi_auth_session');
@@ -303,8 +308,8 @@ export default function App() {
         get(`/api/sessions?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/attendance?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/finance?clusterId=${currentUserClusterId}`),
-        get(`/api/lesson-plans?clusterId=${currentUserClusterId}`),
-        get(`/api/approvals?clusterId=${currentUserClusterId}`),
+        get(`/api/lesson-plans?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
+        get(`/api/approvals?clusterId=${currentUserClusterId}&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
         get(`/api/audit-logs?clusterId=${currentUserClusterId}`),
         get('/api/notifications'),
         get(`/api/clusters?includeArchived=true&academicYearId=${encodeURIComponent(selectedAcademicYearId)}`),
@@ -414,6 +419,11 @@ export default function App() {
           cache: 'no-store',
           signal: controller.signal,
         });
+        if (response.status === 401) {
+          localStorage.removeItem('tqi_auth_session');
+          setCurrentUser(null);
+          return;
+        }
         const data = await response.json().catch(() => null);
         if (!response.ok || !data?.success) return;
         setMaintenanceState(data.maintenance || null);
@@ -625,7 +635,7 @@ export default function App() {
           'x-user-role': currentUserRole,
           'x-user-cluster-id': currentUserClusterId,
         },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason, academicYearId: selectedAcademicYearId }),
       });
     const responseData = await response.json().catch(() => null);
     if (!response.ok || !responseData?.success) throw new Error(responseData?.error || 'Unable to request correction.');
@@ -1722,64 +1732,81 @@ export default function App() {
 
   // Lesson Plan mutations
   const handleAddLessonPlan = async (plan: Omit<LessonPlan, 'id'>) => {
-    const newId = `lp-${Date.now()}`;
-    const created: LessonPlan = {
-      ...plan,
-      id: newId,
-    };
-    setLessonPlans((prev) => [created, ...prev]);
-
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl('/api/lesson-plans'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentUser.token}`,
-          },
-          body: JSON.stringify(created),
-        });
-      } catch (err) {
-        console.error('Failed to save lesson plan to backend:', err);
-      }
-    }
+    if (!currentUser?.token) throw new Error('Sign in is required to save a lesson plan.');
+    const response = await fetch(apiUrl('/api/lesson-plans'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser.token}`,
+      },
+      body: JSON.stringify({ ...plan, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to save lesson plan.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleUpdateLessonPlan = async (id: string, plan: Partial<LessonPlan>) => {
-    setLessonPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...plan } : p)));
+    if (!currentUser?.token) throw new Error('Sign in is required to update a lesson plan.');
+    const existing = lessonPlans.find((p) => p.id === id);
+    const response = await fetch(apiUrl('/api/lesson-plans'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${currentUser.token}`,
+      },
+      body: JSON.stringify({ ...(existing || {}), ...plan, id, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update lesson plan.');
+    await fetchBackendData(new AbortController().signal);
+  };
 
-    if (currentUser?.token) {
-      const existing = lessonPlans.find(p => p.id === id);
-      const merged = { ...(existing || {}), ...plan, id };
-      try {
-        await fetch(apiUrl('/api/lesson-plans'), {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${currentUser.token}`,
-          },
-          body: JSON.stringify(merged),
-        });
-      } catch (err) {
-        console.error('Failed to update lesson plan in backend:', err);
-      }
-    }
+  const handleReviewLessonPlan = async (id: string, action: 'approve' | 'correction', reason?: string) => {
+    if (!currentUser?.token) throw new Error('Sign in is required to review a lesson plan.');
+    const response = await fetch(apiUrl(`/api/lesson-plans/${encodeURIComponent(id)}/review`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ action, reason, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to review lesson plan.');
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleRequestLessonPlanAction = async (id: string, type: 'edit' | 'delete', reason: string) => {
+    if (!currentUser?.token) throw new Error('Sign in is required to request lesson-plan access.');
+    const response = await fetch(apiUrl(`/api/lesson-plans/${encodeURIComponent(id)}/requests`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ type, reason, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to send lesson-plan request.');
+    await fetchBackendData(new AbortController().signal);
+  };
+
+  const handleReviewLessonPlanRequest = async (approvalId: string, action: 'approve' | 'reject') => {
+    if (!currentUser?.token) throw new Error('Sign in is required to review this request.');
+    const response = await fetch(apiUrl(`/api/lesson-plan-requests/${encodeURIComponent(approvalId)}/review`), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentUser.token}` },
+      body: JSON.stringify({ action, academicYearId: selectedAcademicYearId }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to review lesson-plan request.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   const handleDeleteLessonPlan = async (id: string) => {
-    setLessonPlans((prev) => prev.filter((p) => p.id !== id));
-    if (currentUser?.token) {
-      try {
-        await fetch(apiUrl(`/api/lesson-plans/${id}`), {
-          method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${currentUser.token}`,
-          },
-        });
-      } catch (err) {
-        console.error('Failed to delete lesson plan from backend:', err);
-      }
-    }
+    if (!currentUser?.token) throw new Error('Sign in is required to delete a lesson plan.');
+    const response = await fetch(apiUrl(`/api/lesson-plans/${encodeURIComponent(id)}?academicYearId=${encodeURIComponent(selectedAcademicYearId)}`), {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${currentUser.token}` },
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete lesson plan.');
+    await fetchBackendData(new AbortController().signal);
   };
 
   // Notification actions
@@ -1861,7 +1888,7 @@ export default function App() {
       const index = previous.findIndex((item) => item.id === data.sessionReport.id);
       if (index >= 0) {
         const copy = [...previous];
-        copy[index] = data.sessionReport;
+        copy[index] = { ...data.sessionReport, photos: data.sessionReport.photos?.length ? data.sessionReport.photos : previous[index].photos };
         return copy;
       }
       return [data.sessionReport, ...previous];
@@ -1877,6 +1904,12 @@ export default function App() {
     const data = await response.json().catch(() => null);
     if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to delete session report.');
     setSessionReports((previous) => previous.filter((item) => item.id !== reportId));
+  };
+
+  const handleSessionReportWorkflowUpdate = (reportId: string, status: string, fields: Partial<SessionReport> = {}) => {
+    setSessionReports((previous) => status === 'DELETED'
+      ? previous.filter((report) => report.id !== reportId)
+      : previous.map((report) => report.id === reportId ? { ...report, ...fields, status: status as SessionReport['status'], updatedAt: new Date().toISOString() } : report));
   };
 
   // Session Submission handlers
@@ -2264,6 +2297,7 @@ export default function App() {
                   onSubmitDateChange={handleSubmitDateChangeRequest}
                   onReviewDateChange={handleReviewDateChangeRequest}
                   onReviewFinanceEditRequest={handleReviewFinanceEditRequest}
+                  onReviewLessonPlanRequest={handleReviewLessonPlanRequest}
                 />
               )}
 
@@ -2433,13 +2467,15 @@ export default function App() {
                   volunteers={displayVolunteers}
                   currentUserRole={currentUserRole}
                   currentCluster={currentUserRole === 'Super Admin' && currentUserClusterId === 'all' ? 'All Clusters' : (currentClusterObj?.name || currentUserClusterId)}
+                  currentClusterId={currentUserClusterId}
                   currentAcademicYear={academicYears.find((year) => year.id === selectedAcademicYearId)?.name || ''}
                   selectedLessonPlanId={selectedLessonPlanId}
                   onNavigate={handleNavigate}
                   onAddLessonPlan={handleAddLessonPlan}
                   onUpdateLessonPlan={handleUpdateLessonPlan}
                   onDeleteLessonPlan={handleDeleteLessonPlan}
-                  onRefreshLessonPlans={fetchBackendData}
+                  onReviewLessonPlan={handleReviewLessonPlan}
+                  onRequestLessonPlanAction={handleRequestLessonPlanAction}
                 />
               )}
 
@@ -2600,6 +2636,9 @@ export default function App() {
               {currentTab === 'session-reports' && (
                 <SessionReportView
                   sessionReports={displaySessionReports}
+                  lessonPlans={lessonPlans}
+                  panchayats={displayPanchayats}
+                  volunteers={displayVolunteers}
                   sessions={displaySessions}
                   clusters={clusters}
                   currentUserRole={currentUserRole}
@@ -2610,6 +2649,7 @@ export default function App() {
                   onSaveReport={handleSaveSessionReport}
                   onReportPhotosUpdate={(reportId, photos) => setSessionReports((previous) => previous.map((report) => report.id === reportId ? { ...report, photos } : report))}
                   onDeleteReport={handleDeleteSessionReport}
+                  onWorkflowUpdate={handleSessionReportWorkflowUpdate}
                 />
               )}
 

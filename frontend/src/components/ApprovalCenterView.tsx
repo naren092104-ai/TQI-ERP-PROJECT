@@ -27,6 +27,7 @@ interface ApprovalCenterViewProps {
   onSubmitDateChange: (sessionId: string, originalDate: string, requestedDate: string, reason: string) => Promise<void>;
   onReviewDateChange: (requestId: string, action: 'approve' | 'reject', remarks: string) => Promise<void>;
   onReviewFinanceEditRequest: (reportId: string, action: 'approve' | 'reject', reason?: string) => Promise<void>;
+  onReviewLessonPlanRequest: (approvalId: string, action: 'approve' | 'reject') => Promise<void>;
 }
 
 export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
@@ -44,6 +45,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   onSubmitDateChange,
   onReviewDateChange,
   onReviewFinanceEditRequest,
+  onReviewLessonPlanRequest,
 }) => {
   const [selectedModuleTab, setSelectedModuleTab] = useState<string>('all');
   const [selectedClusterFilter, setSelectedClusterFilter] = useState<string>('all');
@@ -60,6 +62,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
   const [financeEditReviewItem, setFinanceEditReviewItem] = useState<ApprovalItem | null>(null);
   const [financeEditRejectionReason, setFinanceEditRejectionReason] = useState('');
   const [isReviewingFinanceEdit, setIsReviewingFinanceEdit] = useState(false);
+  const [lessonPlanRequestItem, setLessonPlanRequestItem] = useState<ApprovalItem | null>(null);
+  const [isReviewingLessonPlanRequest, setIsReviewingLessonPlanRequest] = useState(false);
 
   const matchesApprovalCategory = (item: ApprovalItem, category: string) => {
     const module = item.module.toLowerCase();
@@ -184,6 +188,8 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
       case 'Finance':
         return 'bg-amber-50 text-amber-900 border-amber-200';
       case 'Finance Edit Request':
+      case 'Lesson Plan Edit Request':
+      case 'Lesson Plan Delete Request':
         return 'bg-orange-50 text-orange-900 border-orange-200';
       case 'Correction Request':
         return 'bg-orange-50 text-orange-900 border-orange-200';
@@ -213,266 +219,298 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
     }
   };
 
+  const resetFilters = () => {
+    setSelectedClusterFilter('all');
+    setSelectedStatusFilter('Pending');
+    setSearchTerm('');
+  };
+
+  const summaryCards = [
+    { label: 'Attendance', value: tabCounts.attendance, tone: 'bg-[#EAF4FF] border-[#D7E9FF] text-[#0C3A75]' },
+    { label: 'Lesson Plans', value: tabCounts.lessonPlan, tone: 'bg-[#F3EEFF] border-[#E4D9FF] text-[#4C2D9D]' },
+    { label: 'Finance Claims', value: tabCounts.finance, tone: 'bg-[#FFF5E8] border-[#FFE6C2] text-[#8A4B00]' },
+    { label: 'Edit Requests', value: tabCounts.financeEdit, tone: 'bg-[#EAFBF3] border-[#CDEEDB] text-[#115B3E]' },
+  ];
+
+  const tabs = [
+    { id: 'all', label: 'All', count: tabCounts.all },
+    { id: 'dateChanges', label: 'Date Changes', count: tabCounts.dateChanges },
+    { id: 'photos', label: 'Photos', count: tabCounts.photos },
+    { id: 'sessions', label: 'Sessions', count: tabCounts.sessions },
+    { id: 'attendance', label: 'Attendance', count: tabCounts.attendance },
+    { id: 'lessonPlan', label: 'Lesson Plans', count: tabCounts.lessonPlan },
+    { id: 'finance', label: 'Finance', count: tabCounts.finance },
+    { id: 'financeEdit', label: 'Finance Edit Requests', count: tabCounts.financeEdit },
+    { id: 'corrections', label: 'Corrections', count: tabCounts.corrections },
+  ];
+
   return (
-    <div className="w-full space-y-6">
-      {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-border/50 pb-5">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">
-              Approval Center
-            </h1>
-            {tabCounts.all > 0 && (
-              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                {tabCounts.all} pending
-              </span>
-            )}
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Review and action attendance, lesson plans, finance claims and correction requests.
-          </p>
-        </div>
-        <div className="flex items-center gap-6 text-xs">
-          {[
-            { label: 'Attendance', val: tabCounts.attendance },
-            { label: 'Lesson plans', val: tabCounts.lessonPlan },
-            { label: 'Finance claims', val: tabCounts.finance },
-          ].map((s) => (
-            <div key={s.label} className="space-y-0.5">
-              <div className="text-[10px] uppercase font-semibold text-muted-foreground">{s.label}</div>
-              <div className="text-lg font-bold text-foreground">{s.val}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Module Navigation Tabs */}
-      <div className="flex items-center gap-6 border-b border-border/40 text-xs font-medium overflow-x-auto">
-        {[
-          { id: 'all', label: 'All', count: tabCounts.all },
-          { id: 'dateChanges', label: 'Date Changes', count: tabCounts.dateChanges },
-          { id: 'photos', label: 'Photos', count: tabCounts.photos },
-          { id: 'sessions', label: 'Sessions', count: tabCounts.sessions },
-          { id: 'attendance', label: 'Attendance', count: tabCounts.attendance },
-          { id: 'lessonPlan', label: 'Lesson Plans', count: tabCounts.lessonPlan },
-          { id: 'finance', label: 'Finance', count: tabCounts.finance },
-          { id: 'financeEdit', label: 'Finance Edit Requests', count: tabCounts.financeEdit },
-          { id: 'corrections', label: 'Corrections', count: tabCounts.corrections },
-        ].map((tab) => {
-          const isActive = selectedModuleTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setSelectedModuleTab(tab.id)}
-              className={`relative pb-3 transition-colors whitespace-nowrap ${
-                isActive 
-                  ? 'text-foreground font-semibold' 
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              <span className="flex items-center gap-2">
-                <span>{tab.label}</span>
-                {tab.count > 0 && (
-                  <span className={`text-[10px] ${isActive ? 'text-foreground font-bold' : 'text-muted-foreground'}`}>
-                    ({tab.count})
-                  </span>
-                )}
-              </span>
-              {isActive && (
-                <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-foreground" />
+    <div className="w-full space-y-6 p-1 md:p-2">
+      <div className="rounded-[28px] border border-[#E2ECFF] bg-gradient-to-r from-[#F8FBFF] via-[#F4F9FF] to-[#EEF7FF] p-5 shadow-[0_16px_40px_rgba(15,23,42,0.04)] md:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <div className="mb-3 flex items-center gap-2">
+              <h1 className="text-2xl font-bold tracking-tight text-[#10234E] sm:text-3xl">Approval Center</h1>
+              {tabCounts.all > 0 && (
+                <span className="rounded-full border border-[#F5D58D] bg-[#FFF4CC] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-[#8C5E00]">
+                  {tabCounts.all} pending
+                </span>
               )}
-            </button>
-          );
-        })}
-      </div>
-
-      {selectedModuleTab === 'dateChanges' ? (
-        <DateChangeRequestView
-          dateChangeRequests={dateChangeRequests}
-          sessions={sessions}
-          currentUserRole={userRole}
-          currentUserId={currentUserId}
-          currentUserClusterId={currentUserClusterId}
-          onSubmitRequest={onSubmitDateChange}
-          onReviewRequest={onReviewDateChange}
-        />
-      ) : (
-        <>
-      {/* Filter & Search Bar - Cardless */}
-      <div className="flex flex-wrap items-center justify-between gap-3 py-1">
-        <div className="flex flex-wrap items-center gap-3 flex-1 min-w-[280px]">
-          {/* Cluster Filter */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <span className="font-semibold text-xs">Cluster:</span>
-            <div className="w-56">
-              <Select
-                value={selectedClusterFilter || "all"}
-                onValueChange={(val) => setSelectedClusterFilter(val)}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="All Clusters" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clusters (Tamil Nadu)</SelectItem>
-                  {clusters.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
+            <p className="max-w-xl text-sm leading-6 text-slate-600">
+              Review and action attendance, lesson plans, finance claims and correction requests.
+            </p>
           </div>
 
-          {/* Status Filter */}
-          <div className="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
-            <span className="font-semibold text-xs">Status:</span>
-            <div className="w-44">
-              <Select
-                value={selectedStatusFilter || "all"}
-                onValueChange={(val) => setSelectedStatusFilter(val)}
-              >
-                <SelectTrigger className="h-8 text-xs">
-                  <SelectValue placeholder="All Statuses" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  <SelectItem value="Pending">Pending Review</SelectItem>
-                  <SelectItem value="Approved">Approved</SelectItem>
-                  <SelectItem value="Correction Requested">Correction Requested</SelectItem>
-                  <SelectItem value="Rejected">Rejected</SelectItem>
-                </SelectContent>
-              </Select>
+          <div className="flex h-20 w-full max-w-[200px] items-center justify-center rounded-2xl border border-[#D9E9FF] bg-white/80 shadow-sm">
+            <div className="relative h-12 w-12 rounded-2xl bg-[#EAF3FF]">
+              <div className="absolute left-3 top-3 h-6 w-6 rounded-xl border-2 border-[#0C3A75] bg-white/90" />
+              <div className="absolute right-2.5 top-2.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#1E7AE6] text-[10px] text-white">
+                ✓
+              </div>
+              <div className="absolute bottom-2 right-3 h-2.5 w-2.5 rounded-full bg-[#7CC7FF]" />
             </div>
           </div>
         </div>
-
-        {/* Search Box */}
-        <div className="relative min-w-[220px]">
-          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Search submissions..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full rounded-xl border border-gray-200 bg-white pl-8 pr-3 py-1.5 text-xs text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
-          />
-        </div>
       </div>
 
-      {/* Approvals Table - Seamless & Borderless */}
-      <div className="w-full overflow-x-auto">
-        <table className="tqi-table-compact w-full text-left text-xs border-collapse">
-          <thead>
-            <tr className="border-b border-border/50 text-muted-foreground font-semibold">
-              <th className="py-2.5 px-3">Module</th>
-              <th className="py-2.5 px-3">Cluster</th>
-              <th className="py-2.5 px-3">Item & Description</th>
-              <th className="py-2.5 px-3">Submitted By</th>
-              <th className="py-2.5 px-3">Date & Time</th>
-              <th className="py-2.5 px-3">Status</th>
-              <th className="py-2.5 px-3 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/30">
-              {filteredApprovals.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-400">
-                    <span className="material-symbols-outlined text-[36px] text-slate-300 block mb-1">
-                      check_circle
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {summaryCards.map((card) => (
+          <div
+            key={card.label}
+            className={`rounded-2xl border p-4 shadow-[0_10px_28px_rgba(15,23,42,0.04)] ${card.tone}`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">{card.label}</div>
+                <div className="mt-3 text-3xl font-bold tracking-tight text-[#10234E]">{card.value}</div>
+              </div>
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-white/80 text-lg text-[#0F3D82] shadow-sm">
+                <CheckCircle2 className="h-5 w-5" />
+              </span>
+            </div>
+            <div className="mt-3 text-sm font-medium text-slate-600">Pending review</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-[24px] border border-[#E9EEF7] bg-white p-3 shadow-[0_12px_30px_rgba(15,23,42,0.03)] md:p-4">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-3 md:gap-3">
+          {tabs.map((tab) => {
+            const isActive = selectedModuleTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSelectedModuleTab(tab.id)}
+                className={`relative rounded-full px-3 py-2 text-xs font-semibold transition-all md:px-4 ${
+                  isActive
+                    ? 'bg-[#EAF3FF] text-[#0D3A7A] shadow-sm'
+                    : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <span>{tab.label}</span>
+                  {tab.count > 0 && (
+                    <span className={`rounded-full px-1.5 py-0.5 text-[9px] ${isActive ? 'bg-white text-[#0D3A7A]' : 'bg-slate-200 text-slate-600'}`}>
+                      {tab.count}
                     </span>
-                    <p className="font-semibold text-slate-600">No approval requests found</p>
-                    <p className="text-[11px] text-slate-400">All submissions in this category are up to date.</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredApprovals.map((item) => (
-                  <tr key={item.id} className="hover:bg-slate-50/70 transition-colors">
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold border ${getModuleBadgeColor(
-                          item.module
-                        )}`}
-                      >
-                        <span className="material-symbols-outlined text-[14px]">
-                          {getModuleIcon(item.module)}
-                        </span>
-                        {item.module}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap font-medium text-slate-700">
-                      <span className="inline-flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-[#002869]"></span>
-                        {item.clusterName}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 font-semibold text-[#002869] max-w-[280px]">
-                      <div className="truncate" title={item.recordTitle}>
-                        {item.recordTitle}
-                      </div>
-                      {item.details && (
-                        <div className="text-[10px] text-slate-500 font-normal truncate mt-0.5">
-                          {item.module === 'Attendance' && `${item.details.presentCount || 0} Present / ${item.details.totalCount || 0} Students (${item.details.villageName || ''})`}
-                          {item.module === 'Lesson Plan' && `${item.details.duration || '90 Mins'} • ${item.details.targetStandard || '6th-8th Std'}`}
-                          {(item.module === 'Finance' || item.module === 'Finance Edit Request') && `${item.details.collegeName || 'College not set'} • ${item.details.sessionName || 'Session not set'} • ₹${item.details.totalAmount || 0} • ${item.details.itemCount || 0} expenses`}
-                          {item.module === 'Correction Request' && `Reason: ${item.details.reason || ''}`}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap text-slate-600">
-                      {item.submittedBy}
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap text-slate-500 text-[11px]">
-                      {item.submittedAt}
-                    </td>
-                    <td className="py-3.5 px-4 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-[10.5px] font-bold ${
-                          item.status === 'Approved'
-                            ? 'bg-emerald-100 text-emerald-800'
-                            : item.status === 'Pending'
-                            ? 'bg-amber-100 text-amber-900 animate-pulse'
-                            : item.status === 'Correction Requested'
-                            ? 'bg-orange-100 text-orange-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {item.status}
-                      </span>
-                    </td>
-                    <td className="py-3.5 px-4 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <button
-                          onClick={() => item.module === 'Finance Edit Request'
-                            ? (setFinanceEditReviewItem(item), setFinanceEditRejectionReason(''))
-                            : handleOpenReview(item)}
-                          className="bg-[#002869] hover:bg-[#001f52] text-white px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-                        >
-                          <span className="material-symbols-outlined text-[14px]">visibility</span>
-                          Review
-                        </button>
-                        {item.status === 'Pending' && item.module !== 'Attendance' && item.module !== 'Finance Edit Request' && (
-                          <button
-                            onClick={() => onApprove(item.id, item.module, item.recordId)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
-                            title="Quick Approve"
-                          >
-                            <span className="material-symbols-outlined text-[14px]">check</span>
-                            Approve
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                  )}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        </>
-      )}
+        {selectedModuleTab === 'dateChanges' ? (
+          <div className="pt-4">
+            <DateChangeRequestView
+              dateChangeRequests={dateChangeRequests}
+              sessions={sessions}
+              currentUserRole={userRole}
+              currentUserId={currentUserId}
+              currentUserClusterId={currentUserClusterId}
+              onSubmitRequest={onSubmitDateChange}
+              onReviewRequest={onReviewDateChange}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 py-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-1 flex-col gap-3 md:flex-row md:items-center">
+                <div className="w-full md:w-[230px]">
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Cluster</label>
+                  <Select
+                    value={selectedClusterFilter || 'all'}
+                    onValueChange={(val) => setSelectedClusterFilter(val)}
+                  >
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm text-slate-700 shadow-sm">
+                      <SelectValue placeholder="All Clusters (Tamil Nadu)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Clusters (Tamil Nadu)</SelectItem>
+                      {clusters.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="w-full md:w-[200px]">
+                  <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Status</label>
+                  <Select
+                    value={selectedStatusFilter || 'Pending'}
+                    onValueChange={(val) => setSelectedStatusFilter(val)}
+                  >
+                    <SelectTrigger className="h-11 rounded-xl border-slate-200 bg-slate-50 text-sm text-slate-700 shadow-sm">
+                      <SelectValue placeholder="Pending Review" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="Pending">Pending Review</SelectItem>
+                      <SelectItem value="Approved">Approved</SelectItem>
+                      <SelectItem value="Correction Requested">Correction Requested</SelectItem>
+                      <SelectItem value="Rejected">Rejected</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex w-full items-center gap-2 lg:max-w-[390px]">
+                <div className="relative flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search submissions"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-[#7FB3FF] focus:outline-none focus:ring-2 focus:ring-[#EAF3FF]"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="inline-flex h-11 items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50"
+                >
+                  Reset
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[20px] border border-slate-200 bg-white shadow-[0_10px_24px_rgba(15,23,42,0.03)]">
+              <div className="overflow-x-auto">
+                <table className="min-w-full border-collapse text-left text-sm">
+                  <thead className="bg-[#F6F9FF] text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">Module</th>
+                      <th className="px-4 py-3">Cluster</th>
+                      <th className="px-4 py-3">Item & Description</th>
+                      <th className="px-4 py-3">Submitted By</th>
+                      <th className="px-4 py-3">Date & Time</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-200 bg-white">
+                    {filteredApprovals.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="px-6 py-16">
+                          <div className="flex flex-col items-center justify-center text-center">
+                            <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[#EAF3FF] text-[#0D3A7A] shadow-sm">
+                              <Clock className="h-8 w-8" />
+                            </div>
+                            <h3 className="text-xl font-bold text-slate-800">No approval requests found</h3>
+                            <p className="mt-2 max-w-md text-sm text-slate-500">All submissions in this category are up to date.</p>
+                            <button
+                              type="button"
+                              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0D3A7A] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0B315F]"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                              Check for new submissions
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredApprovals.map((item) => (
+                        <tr key={item.id} className="transition hover:bg-slate-50">
+                          <td className="px-4 py-4 align-top">
+                            <span className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${getModuleBadgeColor(item.module)}`}>
+                              <span className="material-symbols-outlined text-[14px]">{getModuleIcon(item.module)}</span>
+                              {item.module}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 align-top text-sm font-medium text-slate-700">
+                            <div className="flex items-center gap-2">
+                              <span className="h-2.5 w-2.5 rounded-full bg-[#0D3A7A]" />
+                              {item.clusterName}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 align-top">
+                            <div className="max-w-[280px]">
+                              <div className="truncate text-sm font-semibold text-[#10234E]" title={item.recordTitle}>{item.recordTitle}</div>
+                              {item.details && (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {item.module === 'Attendance' && `${item.details.presentCount || 0} Present / ${item.details.totalCount || 0} Students (${item.details.villageName || ''})`}
+                                  {item.module === 'Lesson Plan' && `${item.details.duration || '90 Mins'} • ${item.details.targetStandard || '6th-8th Std'}`}
+                                  {(item.module === 'Finance' || item.module === 'Finance Edit Request') && `${item.details.collegeName || 'College not set'} • ${item.details.sessionName || 'Session not set'} • ₹${item.details.totalAmount || 0} • ${item.details.itemCount || 0} expenses`}
+                                  {item.module === 'Correction Request' && `Reason: ${item.details.reason || ''}`}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-4 py-4 align-top text-sm text-slate-600">{item.submittedBy}</td>
+                          <td className="px-4 py-4 align-top text-xs text-slate-500">{item.submittedAt}</td>
+                          <td className="px-4 py-4 align-top">
+                            <span className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-semibold ${
+                              item.status === 'Approved'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : item.status === 'Pending'
+                                  ? 'bg-amber-100 text-amber-800'
+                                  : item.status === 'Correction Requested'
+                                    ? 'bg-orange-100 text-orange-800'
+                                    : 'bg-red-100 text-red-800'
+                            }`}>
+                              {item.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-4 align-top text-right">
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                onClick={() => item.module === 'Finance Edit Request'
+                                  ? (setFinanceEditReviewItem(item), setFinanceEditRejectionReason(''))
+                                  : item.module === 'Lesson Plan Edit Request' || item.module === 'Lesson Plan Delete Request'
+                                    ? setLessonPlanRequestItem(item)
+                                    : item.module === 'Lesson Plan'
+                                      ? onNavigate('lesson-plan', item.recordId)
+                                    : handleOpenReview(item)}
+                                className="inline-flex items-center gap-1.5 rounded-xl bg-[#0D3A7A] px-3 py-2 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#0B315F]"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Review
+                              </button>
+                              {item.status === 'Pending' && item.module !== 'Attendance' && item.module !== 'Finance Edit Request' && item.module !== 'Lesson Plan' && item.module !== 'Lesson Plan Edit Request' && item.module !== 'Lesson Plan Delete Request' && (
+                                <button
+                                  onClick={() => onApprove(item.id, item.module, item.recordId)}
+                                  className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+                                  title="Quick Approve"
+                                >
+                                  <Check className="h-3.5 w-3.5" />
+                                  Approve
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* DETAILED REVIEW & APPROVAL MODAL */}
       {reviewItem && (
@@ -604,7 +642,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                         isRejecting ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'
                       }`}
                     >
-                      {isRejecting ? 'Confirm Rejection' : 'Submit Correction Request'}
+                      {isRejecting ? 'Confirm Rejection' : reviewItem.module === 'Lesson Plan' ? 'Send for Resubmission' : 'Submit Correction Request'}
                     </button>
                   </div>
                 </div>
@@ -636,6 +674,16 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                 {approvalError && <p role="alert" className="mr-2 text-xs font-semibold text-rose-700">{approvalError}</p>}
                 {!showCorrectionForm && (
                   <>
+                    {reviewItem.module !== 'Lesson Plan' && <button
+                      onClick={() => {
+                        setIsRejecting(true);
+                        setShowCorrectionForm(true);
+                      }}
+                      className="bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
+                    >
+                      <span className="material-symbols-outlined text-[16px]">block</span>
+                      Reject Record
+                    </button>}
                     <button
                       onClick={() => {
                         setIsRejecting(false);
@@ -644,7 +692,7 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                       className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-md text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer shadow-xs"
                     >
                       <span className="material-symbols-outlined text-[16px]">edit_note</span>
-                      Request Correction
+                      {reviewItem.module === 'Lesson Plan' ? 'Send for Resubmission' : 'Request Correction'}
                     </button>
                     <button
                       onClick={handleApproveConfirm}
@@ -694,6 +742,49 @@ export const ApprovalCenterView: React.FC<ApprovalCenterViewProps> = ({
                 catch (error) { alert(error instanceof Error ? error.message : 'Unable to approve edit request.'); }
                 finally { setIsReviewingFinanceEdit(false); }
               }} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Approve Edit Request</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {lessonPlanRequestItem && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-gray-900/70 p-4">
+          <div className="w-full max-w-xl space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-bold text-slate-900">
+                  {lessonPlanRequestItem.module === 'Lesson Plan Edit Request' ? 'Review Edit Access Request' : 'Review Delete Request'}
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">{lessonPlanRequestItem.recordTitle} · {lessonPlanRequestItem.clusterName}</p>
+              </div>
+              <button type="button" onClick={() => setLessonPlanRequestItem(null)} className="text-sm text-slate-500">Close</button>
+            </div>
+            <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-950">
+              <strong>Request reason</strong>
+              <p className="mt-1 whitespace-pre-wrap">{lessonPlanRequestItem.details?.reason || 'No reason provided.'}</p>
+            </div>
+            <p className="text-xs leading-5 text-slate-500">
+              {lessonPlanRequestItem.module === 'Lesson Plan Edit Request'
+                ? 'Approving gives the Cluster Admin permission to edit and resubmit this lesson plan.'
+                : 'Approving permanently deletes the lesson plan. This action cannot be undone.'}
+            </p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => {
+                const lessonPlanId = lessonPlanRequestItem.recordId;
+                setLessonPlanRequestItem(null);
+                onNavigate('lesson-plan', lessonPlanId);
+              }} className="mr-auto rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">View Full Lesson Plan</button>
+              <button type="button" disabled={isReviewingLessonPlanRequest} onClick={async () => {
+                setIsReviewingLessonPlanRequest(true);
+                try { await onReviewLessonPlanRequest(lessonPlanRequestItem.id, 'reject'); setLessonPlanRequestItem(null); }
+                catch (error) { alert(error instanceof Error ? error.message : 'Unable to reject request.'); }
+                finally { setIsReviewingLessonPlanRequest(false); }
+              }} className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">Reject Request</button>
+              <button type="button" disabled={isReviewingLessonPlanRequest} onClick={async () => {
+                setIsReviewingLessonPlanRequest(true);
+                try { await onReviewLessonPlanRequest(lessonPlanRequestItem.id, 'approve'); setLessonPlanRequestItem(null); }
+                catch (error) { alert(error instanceof Error ? error.message : 'Unable to approve request.'); }
+                finally { setIsReviewingLessonPlanRequest(false); }
+              }} className="rounded-xl bg-[#0D3A7A] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">Approve Request</button>
             </div>
           </div>
         </div>

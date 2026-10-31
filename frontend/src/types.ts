@@ -204,6 +204,7 @@ export interface LessonPlanActivity {
   activityNumber: number;
   title: string;
   description: string;
+  duration?: number;
 }
 
 export interface LessonPlanGradeSegment {
@@ -221,7 +222,7 @@ export interface LessonPlan {
   moduleNumber?: number;
   title?: string;
   topic?: string;
-  status?: 'Draft' | 'Submitted' | 'Approved' | 'Correction Requested' | 'Resubmitted' | 'Completed' | 'Active' | 'Upcoming';
+  status?: 'Draft' | 'Submitted' | 'Approved' | 'Correction Requested' | 'Corrections Required' | 'Edit Request Pending' | 'Delete Request Pending' | 'Resubmitted' | 'Completed' | 'Active' | 'Upcoming';
   description?: string;
   objective?: string;
   objectives?: string[];
@@ -240,17 +241,25 @@ export interface LessonPlan {
   teamCollegeName?: string;
   panchayatId?: string;
   panchayatName?: string;
+  panchayatIds?: string[];
+  panchayatNames?: string[];
   villageId?: string;
   villageName?: string;
+  villageIds?: string[];
   villagesList?: string[];
   volunteerId?: string;
   volunteerName?: string;
+  volunteerIds?: string[];
   volunteersCount?: number;
   assignedVolunteers?: string[];
+  volunteerRoster?: Array<{ name: string; role: string; phone?: string; year?: string }>;
+  expectedOutcomes?: string[];
   dayOfSession?: string;
   dayNumber?: number;
   summitNumbers?: string;
+  summitNumbersList?: string[];
   grades?: string;
+  gradesList?: string[];
   overview?: string;
   gradeSegments?: LessonPlanGradeSegment[];
   activitiesDetailed?: LessonPlanActivity[];
@@ -271,6 +280,15 @@ export interface LessonPlan {
   correctionReason?: string;
   correctionRequestedBy?: string;
   correctionDate?: string;
+  submittedBy?: string;
+  submittedAt?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdBy?: string;
+  createdByName?: string;
+  createdAt?: string;
+  editRequestReason?: string;
+  deleteRequestReason?: string;
 }
 
 export interface SessionPhotoItem {
@@ -659,7 +677,7 @@ export interface CorrectionRequest {
 
 export interface ApprovalItem {
   id: string;
-  module: 'Attendance' | 'Lesson Plan' | 'Finance' | 'Finance Edit Request' | 'Sessions' | 'Correction Request' | 'Session Photos';
+  module: 'Attendance' | 'Lesson Plan' | 'Lesson Plan Edit Request' | 'Lesson Plan Delete Request' | 'Finance' | 'Finance Edit Request' | 'Sessions' | 'Correction Request' | 'Session Photos';
   clusterId: string;
   clusterName: string;
   recordId: string;
@@ -787,17 +805,34 @@ export interface SessionReport {
   clusterId: string;
   clusterName?: string;
   dayNumber?: number;
+  villageIds?: string[];
+  villageNames?: string[];
+  summitNumber?: string;
+  grade?: string;
   sessionSummary: string;
   studentCount: number | null;
   attendanceSummary: string;
   activities: string;
   outcome?: string;
+  volunteerNames?: string[];
   issues: string;
+  observations?: string;
   remarks: string;
-  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED';
+  status: 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'CORRECTIONS_REQUIRED' | 'EDIT_REQUEST_PENDING' | 'DELETE_REQUEST_PENDING';
   academicYearId?: string;
   photos?: SessionReportPhoto[];
   createdBy?: string;
+  createdByName?: string;
+  submittedBy?: string;
+  submittedByName?: string;
+  submittedAt?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  correctionReason?: string;
+  editRequestReason?: string;
+  deleteRequestReason?: string;
+  workflowPreviousStatus?: string;
   createdAt?: string;
   updatedAt?: string;
 }

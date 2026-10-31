@@ -4,6 +4,15 @@ import { pool, initializeDatabase } from '../db/connection.js';
 
 async function resetAndSeed() {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      const password = process.env.ADMIN_DEFAULT_PASSWORD?.trim() || '';
+      if (process.env.ALLOW_DESTRUCTIVE_DB_RESET !== 'true') {
+        throw new Error('Production database reset is blocked. Set ALLOW_DESTRUCTIVE_DB_RESET=true only for an intentional maintenance operation.');
+      }
+      if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+        throw new Error('Production reset requires a strong ADMIN_DEFAULT_PASSWORD before any database changes.');
+      }
+    }
     console.log('[RESET] Connecting to database...');
     await initializeDatabase();
 
@@ -56,7 +65,8 @@ async function resetAndSeed() {
     await pool.query('SET FOREIGN_KEY_CHECKS = 1');
 
     // Create default super admin with a random password.
-    const rawPassword = randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
+    const rawPassword = process.env.ADMIN_DEFAULT_PASSWORD?.trim()
+      || randomBytes(12).toString('base64').replace(/[+/=]/g, '').slice(0, 16);
     const passwordHash = await bcrypt.hash(rawPassword, 10);
 
     console.log('[RESET] Seeding default Super Admin user...');
@@ -81,7 +91,9 @@ async function resetAndSeed() {
     console.log('------------------------------------------------------');
     console.log('👤 Super Admin Account:');
     console.log('   Email    : admin@tqi.org');
-    console.log(`   Password : ${rawPassword}`);
+    console.log(process.env.NODE_ENV === 'production'
+      ? '   Password : supplied through ADMIN_DEFAULT_PASSWORD (not printed)'
+      : `   Password : ${rawPassword}`);
     console.log('   Role     : Super Admin');
     console.log('======================================================\n');
     process.exit(0);

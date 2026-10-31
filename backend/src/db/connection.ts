@@ -11,14 +11,16 @@ const envCandidates = [
 ];
 for (const envPath of envCandidates) {
   if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath, override: true, quiet: true });
+    dotenv.config({ path: envPath, override: false, quiet: true });
   }
 }
 
 const DB_NAME = process.env.DB_NAME || 'TQI_ERP';
 const DB_SSL = process.env.DB_SSL === 'true';
 const DB_SSL_CA = process.env.DB_SSL_CA?.replace(/\\n/g, '\n');
-const DB_CREATE_IF_MISSING = process.env.DB_CREATE_IF_MISSING !== 'false';
+const DB_CREATE_IF_MISSING = process.env.DB_CREATE_IF_MISSING !== undefined
+  ? process.env.DB_CREATE_IF_MISSING === 'true'
+  : process.env.NODE_ENV !== 'production';
 const baseConfig: PoolOptions = {
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),

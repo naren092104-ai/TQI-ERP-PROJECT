@@ -1,7 +1,7 @@
 import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
-import { createHash, randomInt, randomUUID } from 'crypto';
+import { createHash, randomBytes, randomInt, randomUUID } from 'crypto';
 import dotenv from 'dotenv';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -41,7 +41,7 @@ const loadDotenvFiles = () => {
   const uniqueCandidates = [...new Set(candidates.filter((candidate) => fs.existsSync(candidate)))];
 
   for (const candidate of uniqueCandidates) {
-    dotenv.config({ path: candidate, override: true, quiet: true });
+    dotenv.config({ path: candidate, override: false, quiet: true });
   }
 };
 
@@ -79,20 +79,33 @@ const resolveStoredUploadPath = (storedPath: unknown): string => {
   const legacyRelativePath = path.relative(LEGACY_UPLOADS_DIR, resolvedPath);
   if (
     legacyRelativePath &&
-    legacyRelativePath !== '..' &&
     !legacyRelativePath.startsWith(`..${path.sep}`) &&
     !path.isAbsolute(legacyRelativePath)
   ) {
     const relocatedPath = path.join(UPLOADS_DIR, legacyRelativePath);
     if (fs.existsSync(relocatedPath)) return relocatedPath;
   }
-
-  return resolvedPath;
+  return '';
 };
 
-const app = express();
-const PORT = Number(process.env.PORT || 3002);
-const JWT_SECRET = process.env.JWT_SECRET || 'replace-with-a-secret';
+const PORT = Number(process.env.PORT || 5000);
+const configuredJwtSecret = process.env.JWT_SECRET?.trim();
+if (
+  process.env.NODE_ENV === 'production' &&
+  (!configuredJwtSecret || configuredJwtSecret.length < 32 || /^(replace|change|your[-_])/i.test(configuredJwtSecret))
+) {
+  throw new Error('Production requires a unique JWT_SECRET of at least 32 characters.');
+}
+const JWT_SECRET = configuredJwtSecret || randomBytes(32).toString('hex');
+const configuredCorsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || [];
+if (process.env.NODE_ENV === 'production' && configuredCorsOrigins.length === 0) {
+  throw new Error('Production requires CORS_ORIGINS with the exact frontend origin(s).');
+}
+const allowedCorsOrigins = new Set(
+  configuredCorsOrigins.length > 0
+    ? configuredCorsOrigins
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'],
+);
 const DEFAULT_ACADEMIC_SESSION_NAMES = [
   'Parents Meet',
   'Know Your Locality',
@@ -109,8 +122,16 @@ const academicSessionId = (clusterId: string, academicYearId: string, dayNumber:
   return `academic-session-${key}-${dayNumber}`;
 };
 
+const app = express();
+
 app.use(cors({
-  origin: true,
+  origin: (origin, callback) => {
+    if (!origin || allowedCorsOrigins.has(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(null, false);
+  },
   credentials: true,
 }));
 
@@ -823,6 +844,125 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Login failed:', error);
     res.status(500).json({ success: false, error: 'Unable to sign in. Please try again.' });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  if (!email) {
+    res.status(400).json({ success: false, error: 'Email is required.' });
+    return;
+  }
+
+  const genericResponse = {
+    success: true,
+    message: 'If an account exists for that email, a password reset link will be sent.',
+  };
+
+  try {
+    const [users] = await pool.query<any[]>('SELECT id, name, email FROM users WHERE email = ? LIMIT 1', [email]);
+    if (!users.length) {
+      res.json(genericResponse);
+      return;
+    }
+
+    const user = users[0];
+    const token = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
+    await pool.query(
+      'INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
+      [tokenHash, user.id],
+    );
+
+    const resetUrl = new URL(process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:5173');
+    resetUrl.searchParams.set('token', token);
+    const emailSent = await sendWorkflowEmail({
+      recipient: user.email,
+      recipientName: user.name || 'TQI user',
+      projectRoot: PROJECT_ROOT,
+      title: 'Reset your TQI password',
+      summary: 'A password reset was requested for your TQI account. This link expires in one hour.',
+      details: [{ label: 'Expires', value: '1 hour' }],
+      actionLabel: 'Reset Password',
+      actionUrl: resetUrl.toString(),
+    });
+
+    if (!emailSent) {
+      await pool.query('DELETE FROM password_reset_tokens WHERE token_hash = ?', [tokenHash]);
+      console.warn(`[AUTH] Password reset email could not be delivered for user ${user.id}.`);
+    }
+    res.json(genericResponse);
+  } catch (error) {
+    console.error('Password reset request failed:', error);
+    res.status(503).json({ success: false, error: 'Unable to process the password reset request. Please try again.' });
+  }
+});
+
+app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
+  const token = String(req.body.token || '').trim();
+  const newPassword = String(req.body.newPassword || '');
+  if (!token) {
+    res.status(400).json({ success: false, error: 'Password reset link is invalid or expired.' });
+    return;
+  }
+  if (!isStrongPassword(newPassword)) {
+    res.status(400).json({ success: false, error: 'Password must have at least 8 characters, uppercase and lowercase letters, a number, and a special character.' });
+    return;
+  }
+
+  let connection: any;
+  try {
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const [tokens] = await connection.query(
+      `SELECT tokens.user_id, users.name, users.role, users.cluster_id
+       FROM password_reset_tokens tokens
+       INNER JOIN users ON users.id = tokens.user_id
+       WHERE tokens.token_hash = ? AND tokens.used_at IS NULL AND tokens.expires_at > NOW()
+       LIMIT 1 FOR UPDATE`,
+      [tokenHash],
+    ) as [any[], any];
+    if (!tokens.length) {
+      await connection.rollback();
+      res.status(400).json({ success: false, error: 'Password reset link is invalid or expired.' });
+      return;
+    }
+
+    const user = tokens[0];
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await connection.query(
+      `UPDATE users
+       SET password_hash = ?, must_change_password = FALSE, password_changed_at = NOW(),
+           password_reset_at = NOW(), password_reset_by = NULL,
+           password_created_at = COALESCE(password_created_at, NOW())
+       WHERE id = ?`,
+      [passwordHash, user.user_id],
+    );
+    await connection.query(
+      'UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL',
+      [user.user_id],
+    );
+    await recordPasswordEvent({
+      userId: user.user_id,
+      action: 'PASSWORD_CHANGED',
+      actorId: user.user_id,
+      actorName: user.name,
+      actorRole: user.role,
+      clusterId: user.cluster_id,
+      ip: req.ip || req.socket.remoteAddress,
+      userAgent: String(req.headers['user-agent'] || ''),
+      details: 'Password reset using a verified email link.',
+    }, connection);
+    await connection.commit();
+    res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
+  } catch (error) {
+    await connection?.rollback().catch(() => undefined);
+    console.error('Password reset failed:', error);
+    res.status(503).json({ success: false, error: 'Unable to reset password. Please try again.' });
+  } finally {
+    connection?.release();
   }
 });
 
@@ -1831,13 +1971,25 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
       attendance.present_count,
       attendance.total_count,
       panchayats.name AS attendance_panchayat_name,
-      villages.name AS attendance_village_name
+      villages.name AS attendance_village_name,
+      lesson_plan.day_number AS lesson_plan_day_number,
+      lesson_plan.topic AS lesson_plan_topic,
+      lesson_plan.title AS lesson_plan_title,
+      lesson_plan.target_standard AS lesson_plan_grade,
+      lesson_plan.objective AS lesson_plan_overview,
+      lesson_plan.remarks AS lesson_plan_remarks,
+      lesson_plan.panchayat_id AS lesson_plan_panchayat_id,
+      lesson_plan_submitter.name AS lesson_plan_submitter_name,
+      COALESCE(lesson_plan_village.name, CASE WHEN JSON_VALID(lesson_plan.remarks) THEN JSON_UNQUOTE(JSON_EXTRACT(lesson_plan.remarks, '$.villageName')) ELSE NULL END) AS lesson_plan_village_name
       FROM approvals
       LEFT JOIN clusters ON clusters.id = approvals.cluster_id
       LEFT JOIN users requester ON requester.id = approvals.requested_by
       LEFT JOIN attendance_sessions attendance ON attendance.id = approvals.record_id AND attendance.academic_year_id = approvals.academic_year_id
       LEFT JOIN panchayats ON panchayats.id = attendance.panchayat_id
       LEFT JOIN villages ON villages.id = attendance.village_id
+      LEFT JOIN lesson_plans lesson_plan ON lesson_plan.id = approvals.record_id AND lesson_plan.academic_year_id = approvals.academic_year_id
+      LEFT JOIN users lesson_plan_submitter ON lesson_plan_submitter.id = lesson_plan.submitted_by
+      LEFT JOIN villages lesson_plan_village ON lesson_plan_village.id = lesson_plan.village_id
       WHERE approvals.academic_year_id = ?`;
     const params: any[] = [year.id];
     if (req.user.role === 'Cluster Admin') {
@@ -1926,9 +2078,12 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
     res.json({ success: true, approvals: rows.map((row) => {
       const isAttendance = row.module === 'Attendance';
       const isFinance = row.module === 'Finance' || row.module === 'Finance Edit Request';
+      const isLessonPlan = ['Lesson Plan', 'Lesson Plan Edit Request', 'Lesson Plan Delete Request'].includes(String(row.module));
       const attendanceId = String(row.record_id || '');
       const financeRecordId = String(row.record_id || '');
       const financeDetail = financeDetails.get(financeRecordId);
+      let lessonPlanMeta: any = {};
+      try { lessonPlanMeta = JSON.parse(String(row.lesson_plan_remarks || '{}')); } catch { lessonPlanMeta = {}; }
       const dayNumber = Number(row.attendance_day_number || 0);
       const panchayatName = String(row.attendance_panchayat_name || 'Panchayat');
       const villageName = String(row.attendance_village_name || (row.attendance_village_id ? 'Village' : 'All Villages'));
@@ -1940,8 +2095,12 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
         ? `${panchayatName} · ${villageName} · Day ${dayNumber} Attendance`
         : isFinance
           ? `${financeDetail?.title || (row.module === 'Finance Edit Request' ? 'Finance Edit Request' : 'Finance Submission')} · ${financeDetail?.date || 'Date unavailable'}`
+          : isLessonPlan
+            ? `Day ${Number(row.lesson_plan_day_number || lessonPlanMeta.dayNumber || 1)} · ${row.lesson_plan_topic || row.lesson_plan_title || 'Summit Lesson Plan'}`
           : row.record_id || 'Approval request',
-      submittedBy: row.requester_name || row.requested_by || '',
+      submittedBy: row.module === 'Lesson Plan' && row.lesson_plan_submitter_name
+        ? row.lesson_plan_submitter_name
+        : (row.requester_name || row.requested_by || ''),
       submittedAt: row.created_at,
       status: row.status,
       clusterId: row.cluster_id || 'all',
@@ -1964,6 +2123,12 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
         sessionName: financeDetail?.sessionName || '',
         reason: row.remarks || '',
         sessionId: row.session_id || '',
+      } : isLessonPlan ? {
+        dayNumber: Number(row.lesson_plan_day_number || lessonPlanMeta.dayNumber || 1),
+        grade: row.lesson_plan_grade || lessonPlanMeta.grades || '',
+        villageName: row.lesson_plan_village_name || lessonPlanMeta.villageName || '',
+        overview: row.lesson_plan_overview || lessonPlanMeta.overview || '',
+        reason: (() => { try { return JSON.parse(String(row.remarks || '{}')).reason || row.remarks || ''; } catch { return row.remarks || ''; } })(),
       } : '',
       correctionReason: undefined,
     });
@@ -1986,7 +2151,7 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
       res.status(400).json({ success: false, error: 'Unsupported approval action.' });
       return;
     }
-    const remarks = req.body.remarks ? String(req.body.remarks).trim() : null;
+    const remarks = req.body.remarks || req.body.reason ? String(req.body.remarks || req.body.reason).trim() : null;
 
     const year = await resolveAcademicYear(req);
     if (!year) {
@@ -2002,6 +2167,31 @@ app.post('/api/approvals/:id/:action', requireAuth, async (req: AuthenticatedReq
     if (['Approved', 'Rejected', 'DELETED'].includes(String(approval.status))) {
       res.status(409).json({ success: false, error: 'This submission has already reached a final status.' });
       return;
+    }
+
+    if (approval.module === 'Lesson Plan') {
+      if (action === 'reject') {
+        res.status(400).json({ success: false, error: 'Use Send for Resubmission to return a lesson plan for correction.' });
+        return;
+      }
+      if (action === 'request-correction' && !remarks) {
+        res.status(400).json({ success: false, error: 'Correction feedback is required.' });
+        return;
+      }
+      const [lessonPlanRows] = await pool.query<any[]>(
+        'SELECT id, status FROM lesson_plans WHERE id = ? AND academic_year_id = ? LIMIT 1',
+        [approval.record_id, year.id],
+      );
+      if (!lessonPlanRows.length || !['Submitted', 'Resubmitted'].includes(String(lessonPlanRows[0].status))) {
+        res.status(409).json({ success: false, error: 'Only submitted lesson plans can be reviewed.' });
+        return;
+      }
+      if (action === 'approve' || action === 'request-correction') {
+        await pool.query(
+          'UPDATE lesson_plans SET status = ?, approved_by = ?, approved_at = ?, correction_reason = ? WHERE id = ? AND academic_year_id = ?',
+          [action === 'approve' ? 'Approved' : 'Corrections Required', action === 'approve' ? req.user.id : null, action === 'approve' ? new Date() : null, action === 'request-correction' ? remarks : null, approval.record_id, year.id],
+        );
+      }
     }
 
     await pool.query('UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ? AND academic_year_id = ?', [status, req.params.id, year.id]);
@@ -4045,30 +4235,78 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
       return;
     }
     const cluster = String(req.query.cluster || req.query.clusterId || 'all');
-    let sql = 'SELECT * FROM lesson_plans WHERE academic_year_id = ?';
+    let sql = `SELECT lesson_plans.*, clusters.name AS cluster_name_display,
+      creator.name AS creator_name, submitter.name AS submitter_name,
+      approver.name AS approver_name
+      FROM lesson_plans
+      LEFT JOIN clusters ON clusters.id = lesson_plans.cluster_id
+      LEFT JOIN users creator ON creator.id = lesson_plans.created_by
+      LEFT JOIN users submitter ON submitter.id = lesson_plans.submitted_by
+      LEFT JOIN users approver ON approver.id = lesson_plans.approved_by
+      WHERE lesson_plans.academic_year_id = ?`;
     const params: any[] = [year.id];
 
     if (req.user.role === 'Cluster Admin') {
       const clusterId = await resolveClusterForAcademicYear(req, year.id);
-      sql += ' AND cluster_id = ?';
+      sql += ' AND lesson_plans.cluster_id = ?';
       params.push(clusterId);
     } else if (cluster !== 'all') {
-      sql += ' AND cluster_id = ?';
+      sql += ' AND lesson_plans.cluster_id = ?';
       params.push(cluster);
     }
 
-    sql += ' ORDER BY created_at DESC';
+    if (req.user.role === 'Super Admin') {
+      sql += " AND lesson_plans.status IN ('Submitted','Resubmitted','Approved','Corrections Required','Correction Requested','Edit Request Pending','Delete Request Pending','Rejected')";
+    }
+
+    sql += ' ORDER BY lesson_plans.created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
-    
-    const lessonPlans = rows.map((row) => {
-      let extraMeta: any = {};
+
+    const lessonPlanMetadata = new Map<string, any>();
+    rows.forEach((row) => {
       try {
-        if (row.remarks && row.remarks.startsWith('{')) {
-          extraMeta = JSON.parse(row.remarks);
-        }
+        lessonPlanMetadata.set(String(row.id), row.remarks && row.remarks.startsWith('{') ? JSON.parse(row.remarks) : {});
       } catch {
-        extraMeta = {};
+        lessonPlanMetadata.set(String(row.id), {});
       }
+    });
+    const clusterIds = [...new Set(rows.map((row) => String(row.cluster_id || '')).filter(Boolean))];
+    const volunteerIds = [...new Set(rows.flatMap((row) => {
+      const metadata = lessonPlanMetadata.get(String(row.id)) || {};
+      return Array.isArray(metadata.volunteerIds) ? metadata.volunteerIds.map((id: unknown) => String(id)) : [];
+    }))];
+    const volunteerNames = [...new Set(rows.flatMap((row) => {
+      const metadata = lessonPlanMetadata.get(String(row.id)) || {};
+      const rosterNames = Array.isArray(metadata.volunteerRoster) ? metadata.volunteerRoster.map((item: any) => String(item.name || '')) : [];
+      const assignedNames = Array.isArray(metadata.assignedVolunteers) ? metadata.assignedVolunteers.map((name: unknown) => String(name)) : [];
+      return [...rosterNames, ...assignedNames].filter(Boolean);
+    }))];
+    const volunteersById = new Map<string, any>();
+    const volunteersByClusterName = new Map<string, any>();
+    if (clusterIds.length && (volunteerIds.length || volunteerNames.length)) {
+      const volunteerConditions: string[] = [];
+      const volunteerParams: any[] = [year.id, clusterIds];
+      if (volunteerIds.length) {
+        volunteerConditions.push('id IN (?)');
+        volunteerParams.push(volunteerIds);
+      }
+      if (volunteerNames.length) {
+        volunteerConditions.push('name IN (?)');
+        volunteerParams.push(volunteerNames);
+      }
+      const [volunteerRows] = await pool.query<any[]>(
+        `SELECT id, name, phone, study_year, cluster_id FROM volunteers
+         WHERE academic_year_id = ? AND cluster_id IN (?) AND (${volunteerConditions.join(' OR ')})`,
+        volunteerParams,
+      );
+      volunteerRows.forEach((volunteer) => {
+        volunteersById.set(String(volunteer.id), volunteer);
+        volunteersByClusterName.set(`${volunteer.cluster_id}:${String(volunteer.name || '').toLowerCase()}`, volunteer);
+      });
+    }
+
+    const lessonPlans = rows.map((row) => {
+      const extraMeta = lessonPlanMetadata.get(String(row.id)) || {};
 
       let parsedActivities: any = null;
       try {
@@ -4079,21 +4317,45 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
         parsedActivities = null;
       }
 
+      const savedRoster = Array.isArray(extraMeta.volunteerRoster) ? extraMeta.volunteerRoster : [];
+      const rosterNames = savedRoster.length
+        ? savedRoster.map((item: any) => String(item.name || '')).filter(Boolean)
+        : (Array.isArray(extraMeta.assignedVolunteers) ? extraMeta.assignedVolunteers.map((name: unknown) => String(name)) : []);
+      const rosterIds = Array.isArray(extraMeta.volunteerIds) ? extraMeta.volunteerIds.map((id: unknown) => String(id)) : [];
+      const volunteerRoster = rosterNames.map((name: string, index: number) => {
+        const savedItem = savedRoster[index] || {};
+        const dbVolunteer = (savedItem.id && volunteersById.get(String(savedItem.id)))
+          || (rosterIds[index] && volunteersById.get(rosterIds[index]))
+          || volunteersByClusterName.get(`${row.cluster_id}:${name.toLowerCase()}`);
+        return {
+          ...savedItem,
+          name,
+          phone: savedItem.phone || dbVolunteer?.phone || '',
+          year: savedItem.year || dbVolunteer?.study_year || '',
+        };
+      });
+
       return {
         id: row.id,
         sessionId: row.session_id,
         moduleId: row.module_id,
         clusterId: row.cluster_id,
-        cluster: row.cluster_id ? row.cluster_id.charAt(0).toUpperCase() + row.cluster_id.slice(1) : 'Dharmapuri',
+        cluster: row.cluster_name_display || row.cluster_id || '',
         panchayatId: row.panchayat_id,
+        panchayatIds: extraMeta.panchayatIds || (row.panchayat_id ? [row.panchayat_id] : []),
         panchayatName: extraMeta.panchayatName || '',
+        panchayatNames: extraMeta.panchayatNames || (extraMeta.panchayatName ? String(extraMeta.panchayatName).split(', ') : []),
+        villageId: row.village_id || extraMeta.villageId || '',
         villageName: extraMeta.villageName || '',
+        villageIds: extraMeta.villageIds || (row.village_id ? [row.village_id] : extraMeta.villageId ? [extraMeta.villageId] : []),
         villagesList: extraMeta.villagesList || (extraMeta.villageName ? [extraMeta.villageName] : []),
         teamCollegeName: extraMeta.teamCollegeName || 'K.S.Rangasamy College of Technology',
         summitNumbers: extraMeta.summitNumbers || 'I, III',
+        summitNumbersList: extraMeta.summitNumbersList || String(extraMeta.summitNumbers || 'I, III').split(',').map((value: string) => value.trim()).filter(Boolean),
         dayNumber: row.day_number || extraMeta.dayNumber || 7,
-        grades: row.target_standard || extraMeta.grades || 'IX, XI',
-        targetStandard: row.target_standard || extraMeta.grades || 'IX, XI',
+        grades: row.target_standard || extraMeta.grades || '',
+        gradesList: extraMeta.gradesList || String(row.target_standard || extraMeta.grades || '').split(',').map((value: string) => value.trim()).filter(Boolean),
+        targetStandard: row.target_standard || extraMeta.grades || '',
         date: extraMeta.date || (row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : ''),
         academicYear: extraMeta.academicYear || '2025 – 2026',
         title: row.title,
@@ -4104,15 +4366,26 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
         activitiesDetailed: extraMeta.activitiesDetailed || (Array.isArray(parsedActivities) ? parsedActivities : []),
         expectedOutcome: row.learning_outcomes || extraMeta.expectedOutcome || '',
         learningOutcomes: extraMeta.learningOutcomes || (row.learning_outcomes ? [row.learning_outcomes] : []),
+        volunteerIds: extraMeta.volunteerIds || [],
         assignedVolunteers: extraMeta.assignedVolunteers || [],
+        volunteerRoster,
+        expectedOutcomes: extraMeta.expectedOutcomes || (extraMeta.expectedOutcome ? String(extraMeta.expectedOutcome).split('\n').filter(Boolean) : []),
         volunteerName: extraMeta.volunteerName || (extraMeta.assignedVolunteers?.[0] || ''),
         teachingMethod: row.teaching_method || '',
         assessmentTask: row.assessment_task || '',
         materials: row.materials || '',
         duration: row.duration || '90 Mins',
-        status: row.status || 'Draft',
+        status: row.status === 'Rejected' ? 'Corrections Required' : (row.status || 'Draft'),
         createdBy: row.created_by,
-        correctionReason: extraMeta.correctionReason,
+        createdByName: row.creator_name || '',
+        submittedBy: row.submitter_name || '',
+        submittedAt: row.submitted_at || null,
+        approvedBy: row.approver_name || '',
+        approvedAt: row.approved_at || null,
+        correctionReason: row.correction_reason || extraMeta.correctionReason,
+        editRequestReason: row.edit_request_reason || '',
+        deleteRequestReason: row.delete_request_reason || '',
+        createdAt: row.created_at,
         correctionRequestedBy: extraMeta.correctionRequestedBy,
         correctionDate: extraMeta.correctionDate
       };
@@ -4127,6 +4400,10 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
 
 app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admins can create or edit lesson plans.' });
+      return;
+    }
     const year = await resolveAcademicYear(req);
     if (!year) {
       res.status(404).json({ success: false, error: 'No academic year is available.' });
@@ -4136,80 +4413,340 @@ app.post('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    const clusterId = await resolveClusterForAcademicYear(req, year.id, String(req.body.clusterId || '')) || 'dharmapuri';
-    const id = String(req.body.id || `lesson-${Date.now()}`).trim();
-    // Phase 4: Check if session is editable
-    const lpSessionId = String(req.body.sessionId || '');
-    if (lpSessionId) {
-      const editCheck = await isSessionEditable(lpSessionId);
-      if (!editCheck.editable) {
-        res.status(403).json({ success: false, error: editCheck.reason });
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    if (!clusterId) {
+      res.status(403).json({ success: false, error: 'Your account is not assigned to a cluster for this academic year.' });
+      return;
+    }
+    const id = String(req.body.id || `lesson-${randomUUID()}`).trim();
+    const dayNumber = Number(req.body.dayNumber);
+    const statusRequested = String(req.body.status || 'Draft');
+    const normalizeStringArray = (value: unknown): string[] => {
+      if (!Array.isArray(value)) return [];
+      const strings: string[] = value.map((item: unknown) => String(item).trim()).filter((item: string) => item.length > 0);
+      return [...new Set<string>(strings)];
+    };
+    const villageIds = normalizeStringArray(req.body.villageIds);
+    if (!villageIds.length && String(req.body.villageId || '').trim()) villageIds.push(String(req.body.villageId).trim());
+    const panchayatIds = normalizeStringArray(req.body.panchayatIds);
+    if (!panchayatIds.length && String(req.body.panchayatId || '').trim()) panchayatIds.push(String(req.body.panchayatId).trim());
+    const gradesList = normalizeStringArray(req.body.gradesList);
+    if (!gradesList.length) gradesList.push(...String(req.body.grades || req.body.targetStandard || '').split(',').map((value: string) => value.trim()).filter(Boolean));
+    const summitNumbersList = normalizeStringArray(req.body.summitNumbersList);
+    if (!summitNumbersList.length) summitNumbersList.push(...String(req.body.summitNumbers || '').split(',').map((value: string) => value.trim()).filter(Boolean));
+    const volunteerIds = normalizeStringArray(req.body.volunteerIds);
+    const grade = gradesList.join(', ');
+    const summitNumber = summitNumbersList.join(', ');
+    const overview = String(req.body.overview || req.body.objective || '').trim();
+    const allowedGrades = new Set(['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12']);
+    const allowedSummits = new Set(['I', 'II', 'III', 'IV']);
+    if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 8 || !panchayatIds.length || !villageIds.length || !summitNumber || !overview) {
+      res.status(400).json({ success: false, error: 'Day, panchayat, village, summit number, and overview are required.' });
+      return;
+    }
+    if (gradesList.some((value: string) => !allowedGrades.has(value)) || summitNumbersList.some((value: string) => !allowedSummits.has(value))) {
+      res.status(400).json({ success: false, error: 'Select valid summit values.' });
+      return;
+    }
+    if (!['Draft', 'Submitted'].includes(statusRequested)) {
+      res.status(400).json({ success: false, error: 'Lesson plans can only be saved as Draft or Submitted.' });
+      return;
+    }
+
+    const [clusterRows] = await pool.query<any[]>(
+      'SELECT id, name, college_name FROM clusters WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [clusterId, year.id],
+    );
+    if (!clusterRows.length) {
+      res.status(403).json({ success: false, error: 'Your cluster is not available in this academic year.' });
+      return;
+    }
+    const [villageRows] = await pool.query<any[]>(
+      `SELECT villages.id, villages.name, villages.panchayat_id, panchayats.name AS panchayat_name
+       FROM villages JOIN panchayats ON panchayats.id = villages.panchayat_id
+       WHERE villages.id IN (?) AND villages.cluster_id = ? AND panchayats.academic_year_id = ?`,
+      [villageIds, clusterId, year.id],
+    );
+    const villageRowsById = new Map(villageRows.map((row) => [String(row.id), row]));
+    const selectedVillages = villageIds.map((villageId: string) => villageRowsById.get(villageId)).filter(Boolean);
+    const selectedPanchayatIds = [...new Set(selectedVillages.map((village: any) => String(village.panchayat_id)))];
+    if (selectedVillages.length !== villageIds.length || panchayatIds.some((id: string) => !selectedPanchayatIds.includes(id)) || selectedPanchayatIds.some((id: string) => !panchayatIds.includes(id))) {
+      res.status(400).json({ success: false, error: 'Select villages that belong to each selected panchayat in your cluster.' });
+      return;
+    }
+    const panchayatNamesById = new Map(selectedVillages.map((village: any) => [String(village.panchayat_id), String(village.panchayat_name || '')]));
+    const villageNames = selectedVillages.map((village: any) => String(village.name || ''));
+    const panchayatNames = panchayatIds.map((panchayatId: string) => panchayatNamesById.get(panchayatId) || '').filter(Boolean);
+    const villageId = String(selectedVillages[0].id);
+
+    const [existingRows] = await pool.query<any[]>(
+      'SELECT id, status, cluster_id, correction_reason FROM lesson_plans WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [id, year.id],
+    );
+    const existing = existingRows[0];
+    if (existing && String(existing.cluster_id) !== String(clusterId)) {
+      res.status(403).json({ success: false, error: 'This lesson plan is outside your cluster.' });
+      return;
+    }
+    if (existing && !['Draft', 'Correction Requested', 'Corrections Required', 'Rejected'].includes(String(existing.status))) {
+      res.status(403).json({ success: false, error: 'This lesson plan is locked. Request edit access from Super Admin.' });
+      return;
+    }
+    if (!existing) {
+      const [duplicateRows] = await pool.query<any[]>(
+        `SELECT id FROM lesson_plans WHERE cluster_id = ? AND academic_year_id = ? AND day_number = ? LIMIT 1`,
+        [clusterId, year.id, dayNumber],
+      );
+      if (duplicateRows.length) {
+        res.status(409).json({ success: false, error: 'A lesson plan already exists for this day. Open that plan to update it.' });
         return;
       }
-      await autoTransitionToInProgress(lpSessionId);
     }
 
-    const extraMeta = {
-      teamCollegeName: req.body.teamCollegeName || 'K.S.Rangasamy College of Technology',
-      summitNumbers: req.body.summitNumbers || 'I, III',
-      dayNumber: req.body.dayNumber || 7,
-      grades: req.body.grades || req.body.targetStandard || 'IX, XI',
-      date: req.body.date || new Date().toISOString().split('T')[0],
-      academicYear: year.name,
-      panchayatName: req.body.panchayatName || '',
-      villageName: req.body.villageName || '',
-      villagesList: req.body.villagesList || [],
-      assignedVolunteers: req.body.assignedVolunteers || [],
-      volunteerName: req.body.volunteerName || (req.body.assignedVolunteers?.[0] || ''),
-      overview: req.body.overview || req.body.objective || '',
-      gradeSegments: req.body.gradeSegments || [],
-      activitiesDetailed: req.body.activitiesDetailed || [],
-      expectedOutcome: req.body.expectedOutcome || req.body.learningOutcomes || '',
-      correctionReason: req.body.correctionReason,
-      correctionRequestedBy: req.body.correctionRequestedBy,
-      correctionDate: req.body.correctionDate
-    };
-
-    const statusVal = ['Draft', 'Submitted', 'Approved', 'Rejected'].includes(req.body.status) 
-      ? req.body.status 
-      : (req.body.status === 'Correction Requested' ? 'Rejected' : 'Draft');
-
-    let finalModuleId: string | null = req.body.moduleId ? String(req.body.moduleId) : null;
-    if (finalModuleId) {
-      const [modCheck] = await pool.query<any[]>('SELECT id FROM modules WHERE id = ? LIMIT 1', [finalModuleId]);
-      if (!modCheck.length) {
-        finalModuleId = null;
+    const [scheduleRows] = await pool.query<any[]>(
+      `SELECT COALESCE(s.date, a.session_date) AS planned_date
+       FROM academic_setup a
+       JOIN clusters c ON c.academic_year_id = a.academic_year_id
+       LEFT JOIN sessions s ON s.academic_year_id = a.academic_year_id AND s.cluster_id = c.id AND s.day_number = a.day_number
+       WHERE a.academic_year_id = ? AND c.id = ? AND a.day_number = ?
+       ORDER BY s.created_at DESC LIMIT 1`,
+      [year.id, clusterId, dayNumber],
+    );
+    const plannedDate = scheduleRows[0]?.planned_date
+      ? new Date(scheduleRows[0].planned_date).toISOString().slice(0, 10)
+      : String(req.body.date || '').slice(0, 10);
+    const cluster = clusterRows[0];
+    let selectedVolunteerRows: any[] = [];
+    if (volunteerIds.length) {
+      const [volunteerRows] = await pool.query<any[]>(
+        "SELECT id, name, role, phone, study_year FROM volunteers WHERE id IN (?) AND cluster_id = ? AND status = 'Active'",
+        [volunteerIds, clusterId],
+      );
+      const volunteersById = new Map(volunteerRows.map((volunteer) => [String(volunteer.id), volunteer]));
+      selectedVolunteerRows = volunteerIds.map((volunteerId) => volunteersById.get(volunteerId)).filter(Boolean);
+      if (selectedVolunteerRows.length !== volunteerIds.length) {
+        res.status(400).json({ success: false, error: 'Choose active volunteers assigned to your cluster.' });
+        return;
       }
     }
+    const volunteerRoster = selectedVolunteerRows.map((volunteer) => ({
+      id: String(volunteer.id),
+      name: String(volunteer.name || ''),
+      role: String(volunteer.role || 'Volunteer'),
+      phone: String(volunteer.phone || ''),
+      year: String(volunteer.study_year || ''),
+    }));
+    const extraMeta = {
+      teamCollegeName: String(cluster.college_name || cluster.name || ''),
+      summitNumbers: summitNumber,
+      summitNumbersList,
+      dayNumber,
+      grades: grade,
+      gradesList,
+      date: plannedDate,
+      academicYear: year.name,
+      panchayatId: panchayatIds[0],
+      panchayatIds,
+      panchayatName: panchayatNames.join(', '),
+      panchayatNames,
+      villageId,
+      villageIds,
+      villageName: villageNames.join(', '),
+      villagesList: villageNames,
+      volunteerIds,
+      assignedVolunteers: volunteerRoster.map((volunteer) => volunteer.name),
+      volunteerRoster,
+      overview,
+      gradeSegments: Array.isArray(req.body.gradeSegments) ? req.body.gradeSegments : [],
+      activitiesDetailed: Array.isArray(req.body.activitiesDetailed) ? req.body.activitiesDetailed : [],
+      expectedOutcome: Array.isArray(req.body.expectedOutcomes)
+        ? req.body.expectedOutcomes.join('\n')
+        : String(req.body.expectedOutcome || ''),
+      expectedOutcomes: Array.isArray(req.body.expectedOutcomes) ? req.body.expectedOutcomes : [],
+      correctionReason: existing?.status === 'Correction Requested' || existing?.status === 'Corrections Required'
+        ? (req.body.correctionReason || existing.correction_reason || null)
+        : null,
+    };
+
+    const statusVal = existing && ['Correction Requested', 'Corrections Required', 'Rejected'].includes(String(existing.status))
+      ? (statusRequested === 'Submitted' ? 'Submitted' : 'Corrections Required')
+      : statusRequested;
 
     await pool.query(
-      `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, academic_year_id, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), module_id = VALUES(module_id), cluster_id = VALUES(cluster_id), panchayat_id = VALUES(panchayat_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), materials = VALUES(materials), duration = VALUES(duration), remarks = VALUES(remarks), teaching_method = VALUES(teaching_method), assessment_task = VALUES(assessment_task), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), volunteer_id = VALUES(volunteer_id), academic_year_id = VALUES(academic_year_id), status = VALUES(status), created_by = VALUES(created_by)`,
+      `INSERT INTO lesson_plans (id, session_id, module_id, cluster_id, panchayat_id, village_id, title, topic, objective, activities, materials, duration, remarks, teaching_method, assessment_task, target_standard, learning_outcomes, day_number, volunteer_id, academic_year_id, status, created_by, submitted_by, submitted_at, correction_reason)
+       VALUES (?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, NULL, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)
+      ON DUPLICATE KEY UPDATE panchayat_id = VALUES(panchayat_id), village_id = VALUES(village_id), title = VALUES(title), topic = VALUES(topic), objective = VALUES(objective), activities = VALUES(activities), remarks = VALUES(remarks), target_standard = VALUES(target_standard), learning_outcomes = VALUES(learning_outcomes), day_number = VALUES(day_number), status = VALUES(status), submitted_by = IF(VALUES(status) = 'Submitted', VALUES(submitted_by), submitted_by), submitted_at = IF(VALUES(status) = 'Submitted', VALUES(submitted_at), submitted_at), approved_by = IF(VALUES(status) = 'Submitted', NULL, approved_by), approved_at = IF(VALUES(status) = 'Submitted', NULL, approved_at), correction_reason = VALUES(correction_reason)`,
       [
-        id, String(req.body.sessionId || ''), finalModuleId, clusterId, String(req.body.panchayatId || ''), String(req.body.title || req.body.topic || 'Lesson Plan').trim(),
-        req.body.topic ? String(req.body.topic) : null,
-        req.body.objective || req.body.overview ? String(req.body.objective || req.body.overview) : null,
-        req.body.activitiesDetailed ? JSON.stringify(req.body.activitiesDetailed) : (req.body.activities ? String(req.body.activities) : null),
-        req.body.materials ? (typeof req.body.materials === 'string' ? req.body.materials : JSON.stringify(req.body.materials)) : null,
-        req.body.duration ? String(req.body.duration) : null,
+        id, clusterId, panchayatIds[0], villageId, String(req.body.title || `Day ${dayNumber} Lesson Plan`).trim(),
+        String(req.body.title || `Day ${dayNumber} Lesson Plan`).trim(), overview,
+        JSON.stringify(extraMeta.activitiesDetailed),
         JSON.stringify(extraMeta),
-        req.body.teachingMethod ? String(req.body.teachingMethod) : null,
-        req.body.assessmentTask ? String(req.body.assessmentTask) : null,
-        req.body.grades || req.body.targetStandard ? String(req.body.grades || req.body.targetStandard) : null,
-        req.body.expectedOutcome || req.body.learningOutcomes ? (typeof req.body.expectedOutcome === 'string' ? req.body.expectedOutcome : JSON.stringify(req.body.expectedOutcome || req.body.learningOutcomes)) : null,
-        req.body.dayNumber ? Number(req.body.dayNumber) : 7,
-        req.body.volunteerId ? String(req.body.volunteerId) : null,
-        year.id,
-        statusVal,
-        String(req.user.id)
+        grade, extraMeta.expectedOutcome, dayNumber, year.id, statusVal, String(req.user.id),
+        statusVal === 'Submitted' ? String(req.user.id) : null,
+        statusVal === 'Submitted' ? new Date() : null,
+        statusVal === 'Corrections Required' ? String(extraMeta.correctionReason || '') : null,
       ]
     );
 
-    res.json({ success: true, lessonPlan: { id, title: req.body.title || req.body.topic || 'Lesson Plan', clusterId, status: req.body.status || 'Draft', ...extraMeta } });
+    if (statusVal === 'Submitted') {
+      const approvalId = `lp-${randomUUID()}`;
+      await pool.query(
+        `INSERT INTO approvals (id, module, status, requested_by, session_id, academic_year_id, remarks, date, cluster_id, record_id)
+         VALUES (?, 'Lesson Plan', 'Pending', ?, NULL, ?, NULL, ?, ?, ?)`,
+        [approvalId, req.user.id, year.id, plannedDate || null, clusterId, id],
+      );
+    }
+    res.json({ success: true, lessonPlan: { id, title: req.body.title || `Day ${dayNumber} Lesson Plan`, clusterId, status: statusVal, ...extraMeta } });
   } catch (error) {
     console.error('Failed to save lesson plan:', error);
     res.status(500).json({ success: false, error: 'Unable to save lesson plan.' });
+  }
+});
+
+app.post('/api/lesson-plans/:id/review', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can review lesson plans.' });
+    return;
+  }
+  const action = String(req.body.action || '');
+  const reason = String(req.body.reason || req.body.remarks || '').trim();
+  if (!['approve', 'correction'].includes(action) || (action === 'correction' && !reason)) {
+    res.status(400).json({ success: false, error: 'Choose approve or provide required correction feedback.' });
+    return;
+  }
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
+    const [plans] = await pool.query<any[]>(
+      'SELECT id, cluster_id, status FROM lesson_plans WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!plans.length || !['Submitted', 'Resubmitted'].includes(String(plans[0].status))) {
+      res.status(409).json({ success: false, error: 'Only submitted lesson plans can be reviewed.' });
+      return;
+    }
+    const nextStatus = action === 'approve' ? 'Approved' : 'Corrections Required';
+    await pool.query(
+      'UPDATE lesson_plans SET status = ?, approved_by = ?, approved_at = ?, correction_reason = ? WHERE id = ? AND academic_year_id = ?',
+      [nextStatus, action === 'approve' ? req.user.id : null, action === 'approve' ? new Date() : null, action === 'correction' ? reason : null, req.params.id, year.id],
+    );
+    await pool.query(
+      'UPDATE approvals SET status = ?, updated_at = NOW() WHERE record_id = ? AND module = ? AND academic_year_id = ? AND status = \'Pending\'',
+      [action === 'approve' ? 'Approved' : 'Correction Requested', req.params.id, 'Lesson Plan', year.id],
+    );
+    res.json({ success: true, status: nextStatus });
+  } catch (error) {
+    console.error('Failed to review lesson plan:', error);
+    res.status(503).json({ success: false, error: 'Unable to review lesson plan.' });
+  }
+});
+
+app.post('/api/lesson-plans/:id/requests', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Cluster Admin') {
+    res.status(403).json({ success: false, error: 'Only Cluster Admins can request lesson-plan changes.' });
+    return;
+  }
+  const requestType = String(req.body.type || '');
+  const reason = String(req.body.reason || '').trim();
+  if (!['edit', 'delete'].includes(requestType) || !reason) {
+    res.status(400).json({ success: false, error: 'Request type and reason are required.' });
+    return;
+  }
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
+    if (isArchivedAcademicYear(year)) { res.status(409).json({ success: false, error: 'Archived academic years are read-only.' }); return; }
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [plans] = await pool.query<any[]>(
+      'SELECT id, cluster_id, status FROM lesson_plans WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!plans.length || String(plans[0].cluster_id) !== String(clusterId)) {
+      res.status(404).json({ success: false, error: 'Lesson plan was not found in your cluster.' });
+      return;
+    }
+    const previousStatus = String(plans[0].status);
+    if (!['Submitted', 'Approved'].includes(previousStatus)) {
+      res.status(409).json({ success: false, error: 'Only submitted or approved lesson plans can have edit/delete requests.' });
+      return;
+    }
+    const module = requestType === 'edit' ? 'Lesson Plan Edit Request' : 'Lesson Plan Delete Request';
+    const nextStatus = requestType === 'edit' ? 'Edit Request Pending' : 'Delete Request Pending';
+    const approvalId = `lp-request-${randomUUID()}`;
+    await pool.query(
+      'UPDATE lesson_plans SET status = ?, edit_request_reason = ?, delete_request_reason = ? WHERE id = ? AND academic_year_id = ?',
+      [nextStatus, requestType === 'edit' ? reason : null, requestType === 'delete' ? reason : null, req.params.id, year.id],
+    );
+    await pool.query(
+      `INSERT INTO approvals (id, module, status, requested_by, session_id, academic_year_id, remarks, date, cluster_id, record_id)
+       VALUES (?, ?, 'Pending', ?, NULL, ?, ?, CURDATE(), ?, ?)`,
+      [approvalId, module, req.user.id, year.id, JSON.stringify({ reason, previousStatus }), clusterId, req.params.id],
+    );
+    await pool.query(
+      "UPDATE approvals SET status = 'Open', updated_at = NOW() WHERE module = 'Lesson Plan' AND record_id = ? AND academic_year_id = ? AND status = 'Pending'",
+      [req.params.id, year.id],
+    );
+    res.json({ success: true, status: nextStatus, approvalId });
+  } catch (error) {
+    console.error('Failed to request lesson-plan change:', error);
+    res.status(503).json({ success: false, error: 'Unable to submit the lesson-plan request.' });
+  }
+});
+
+app.post('/api/lesson-plan-requests/:approvalId/review', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  if (req.user.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can review lesson-plan requests.' });
+    return;
+  }
+  const action = String(req.body.action || '');
+  if (!['approve', 'reject'].includes(action)) {
+    res.status(400).json({ success: false, error: 'Choose approve or reject.' });
+    return;
+  }
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
+    const [rows] = await pool.query<any[]>(
+      'SELECT * FROM approvals WHERE id = ? AND academic_year_id = ? AND module IN (?, ?) AND status = \'Pending\' LIMIT 1',
+      [req.params.approvalId, year.id, 'Lesson Plan Edit Request', 'Lesson Plan Delete Request'],
+    );
+    if (!rows.length) { res.status(404).json({ success: false, error: 'Pending lesson-plan request was not found.' }); return; }
+    const request = rows[0];
+    let metadata: any = {};
+    try { metadata = JSON.parse(String(request.remarks || '{}')); } catch { metadata = {}; }
+    if (action === 'approve' && request.module === 'Lesson Plan Delete Request') {
+      await pool.query('DELETE FROM lesson_plans WHERE id = ? AND academic_year_id = ?', [request.record_id, year.id]);
+    } else if (request.module === 'Lesson Plan Edit Request') {
+      await pool.query(
+        'UPDATE lesson_plans SET status = ?, correction_reason = ?, edit_request_reason = NULL WHERE id = ? AND academic_year_id = ?',
+        [action === 'approve' ? 'Corrections Required' : (metadata.previousStatus || 'Submitted'), action === 'approve' ? String(metadata.reason || '') : null, request.record_id, year.id],
+      );
+    } else {
+      await pool.query(
+        'UPDATE lesson_plans SET status = ?, delete_request_reason = NULL WHERE id = ? AND academic_year_id = ?',
+        [metadata.previousStatus || 'Submitted', request.record_id, year.id],
+      );
+    }
+    if (action === 'reject' && metadata.previousStatus === 'Submitted') {
+      await pool.query(
+        "UPDATE approvals SET status = 'Pending', updated_at = NOW() WHERE module = 'Lesson Plan' AND record_id = ? AND academic_year_id = ? AND status = 'Open' ORDER BY created_at DESC LIMIT 1",
+        [request.record_id, year.id],
+      );
+    }
+    await pool.query(
+      'UPDATE approvals SET status = ?, updated_at = NOW() WHERE id = ? AND academic_year_id = ?',
+      [action === 'approve' ? 'Approved' : 'Rejected', req.params.approvalId, year.id],
+    );
+    if (action === 'approve') {
+      await pool.query(
+        'UPDATE approvals SET status = ?, updated_at = NOW() WHERE module = ? AND record_id = ? AND academic_year_id = ? AND status = \'Open\'',
+        [request.module === 'Lesson Plan Delete Request' ? 'Approved' : 'Correction Requested', 'Lesson Plan', request.record_id, year.id],
+      );
+    }
+    res.json({ success: true, status: action === 'approve' ? 'Approved' : 'Rejected' });
+  } catch (error) {
+    console.error('Failed to review lesson-plan request:', error);
+    res.status(503).json({ success: false, error: 'Unable to review the lesson-plan request.' });
   }
 });
 
@@ -6377,6 +6914,10 @@ app.delete('/api/sessions/:id', requireAuth, async (req: AuthenticatedRequest, r
 // 14. DELETE /api/lesson-plans/:id
 app.delete('/api/lesson-plans/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admins can delete their own draft lesson plans.' });
+      return;
+    }
     const year = await resolveAcademicYear(req);
     if (!year) {
       res.status(404).json({ success: false, error: 'No academic year is available.' });
@@ -6386,7 +6927,8 @@ app.delete('/api/lesson-plans/:id', requireAuth, async (req: AuthenticatedReques
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    const [result] = await pool.query<any>("DELETE FROM lesson_plans WHERE id = ? AND academic_year_id = ?", [req.params.id, year.id]);
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [result] = await pool.query<any>("DELETE FROM lesson_plans WHERE id = ? AND academic_year_id = ? AND cluster_id = ? AND status = 'Draft'", [req.params.id, year.id, clusterId]);
     if (!result.affectedRows) { res.status(404).json({ success: false, error: 'Lesson plan not found.' }); return; }
     res.json({ success: true });
   } catch (error) {
@@ -6565,15 +7107,32 @@ const mapSessionReport = (row: any, photos: any[] = []) => ({
   clusterName: row.cluster_name || '',
   academicYearId: String(row.academic_year_id || ''),
   dayNumber: row.day_number == null ? undefined : Number(row.day_number),
+  villageIds: (() => { try { return JSON.parse(row.village_ids || '[]'); } catch { return []; } })(),
+  villageNames: (() => { try { return JSON.parse(row.village_names || '[]'); } catch { return []; } })(),
+  summitNumber: String(row.summit_number || ''),
+  grade: String(row.grade || ''),
   sessionSummary: String(row.session_summary || ''),
   studentCount: row.student_count == null ? null : Number(row.student_count),
   attendanceSummary: String(row.attendance_summary || ''),
   activities: String(row.activities || ''),
   outcome: String(row.outcome || ''),
+  volunteerNames: (() => { try { return JSON.parse(row.volunteer_names || '[]'); } catch { return []; } })(),
   issues: String(row.issues || ''),
+  observations: String(row.observations || ''),
   remarks: String(row.remarks || ''),
-  status: String(row.status || 'Draft').toUpperCase(),
+  status: String(row.status || 'Draft').toUpperCase().replace(/\s+/g, '_'),
   createdBy: row.created_by || '',
+  createdByName: row.created_by_name || '',
+  submittedBy: row.submitted_by || '',
+  submittedByName: row.submitted_by_name || '',
+  submittedAt: row.submitted_at || null,
+  approvedBy: row.approved_by || '',
+  approvedByName: row.approved_by_name || '',
+  approvedAt: row.approved_at || null,
+  correctionReason: row.correction_reason || '',
+  editRequestReason: row.edit_request_reason || '',
+  deleteRequestReason: row.delete_request_reason || '',
+  workflowPreviousStatus: row.workflow_previous_status || '',
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   photos: photos.map(mapSessionReportPhoto),
@@ -6632,13 +7191,34 @@ const getSessionReportContext = async (req: AuthenticatedRequest, sessionId: str
   const [lessonPlans] = await pool.query<any[]>(
     `SELECT id, module_id, title, topic, target_standard, activities, remarks
      FROM lesson_plans
-     WHERE session_id = ? AND academic_year_id = ? AND cluster_id = ?
-     ORDER BY created_at ASC`,
-    [row.id, year.id, row.cluster_id],
+     WHERE academic_year_id = ? AND cluster_id = ? AND (session_id = ? OR day_number = ?)
+    ORDER BY CASE WHEN status = 'Approved' THEN 0 WHEN status IN ('Submitted', 'Resubmitted') THEN 1 ELSE 2 END, created_at DESC`,
+    [year.id, row.cluster_id, row.id, row.day_number],
   );
+
+  const lessonPlanMetadata = lessonPlans.map((plan: any) => {
+    try { return plan.remarks ? JSON.parse(plan.remarks) : {}; } catch { return {}; }
+  });
+  const plannedVillageIds = [...new Set(lessonPlanMetadata.flatMap((metadata: any) =>
+    Array.isArray(metadata.villageIds) ? metadata.villageIds.map((id: unknown) => String(id)) : metadata.villageId ? [String(metadata.villageId)] : [],
+  ))];
+  const plannedVolunteerIds = [...new Set(lessonPlanMetadata.flatMap((metadata: any) =>
+    Array.isArray(metadata.volunteerIds) ? metadata.volunteerIds.map((id: unknown) => String(id)) : [],
+  ))];
+  const plannedVolunteerNames = [...new Set(lessonPlanMetadata.flatMap((metadata: any) => {
+    const rosterNames = Array.isArray(metadata.volunteerRoster) ? metadata.volunteerRoster.map((item: any) => String(item?.name || '').trim()) : [];
+    const assignedNames = Array.isArray(metadata.assignedVolunteers) ? metadata.assignedVolunteers.map((name: unknown) => String(name).trim()) : [];
+    return [...rosterNames, ...assignedNames].filter(Boolean);
+  }))];
+  const plannedGrades = [...new Set(lessonPlans.flatMap((plan: any, index: number) => {
+    const metadata = lessonPlanMetadata[index] || {};
+    const storedGrades = Array.isArray(metadata.gradesList) ? metadata.gradesList : String(metadata.grades || plan.target_standard || '').split(',');
+    return storedGrades.map((grade: unknown) => String(grade).trim()).filter(Boolean);
+  }))];
 
   const volunteerIds = new Set<string>();
   if (row.volunteer_id && row.primary_volunteer_name) volunteerIds.add(String(row.volunteer_id));
+  plannedVolunteerIds.forEach((id) => volunteerIds.add(id));
   const [attendanceVolunteers] = await pool.query<any[]>(
     `SELECT DISTINCT va.volunteer_id
      FROM volunteer_attendance va
@@ -6652,30 +7232,42 @@ const getSessionReportContext = async (req: AuthenticatedRequest, sessionId: str
       row.panchayat_id, row.panchayat_id, row.village_id, row.village_id],
   );
   attendanceVolunteers.forEach((volunteer: any) => volunteerIds.add(String(volunteer.volunteer_id)));
-  const volunteers = volunteerIds.size
+  const volunteerConditions: string[] = [];
+  const volunteerParams: any[] = [year.id, row.cluster_id];
+  if (volunteerIds.size) {
+    volunteerConditions.push(`id IN (${Array.from(volunteerIds).map(() => '?').join(',')})`);
+    volunteerParams.push(...volunteerIds);
+  }
+  if (plannedVolunteerNames.length) {
+    volunteerConditions.push(`name IN (${plannedVolunteerNames.map(() => '?').join(',')})`);
+    volunteerParams.push(...plannedVolunteerNames);
+  }
+  const volunteerRows = volunteerConditions.length
     ? (await pool.query<any[]>(
-      `SELECT id, name FROM volunteers
-       WHERE academic_year_id = ? AND cluster_id = ? AND id IN (${Array.from(volunteerIds).map(() => '?').join(',')})
+      `SELECT id, name, phone, study_year FROM volunteers
+       WHERE academic_year_id = ? AND cluster_id = ? AND (${volunteerConditions.join(' OR ')})
        ORDER BY name ASC`,
-      [year.id, row.cluster_id, ...volunteerIds],
-    ))[0].map((volunteer: any) => ({ id: String(volunteer.id), name: String(volunteer.name) }))
+      volunteerParams,
+    ))[0]
     : [];
+  const volunteers = volunteerRows.map((volunteer: any) => ({
+    id: String(volunteer.id),
+    name: String(volunteer.name),
+    phone: String(volunteer.phone || ''),
+    year: String(volunteer.study_year || ''),
+  }));
 
-  const villages = row.panchayat_id
-    ? (await pool.query<any[]>(
-      `SELECT id, name FROM villages
-       WHERE academic_year_id = ? AND cluster_id = ? AND panchayat_id = ?
-       ORDER BY name ASC`,
-      [year.id, row.cluster_id, row.panchayat_id],
-    ))[0].map((village: any) => ({ id: String(village.id), name: String(village.name) }))
-    : [];
+  const [villageRows] = await pool.query<any[]>(
+    `SELECT id, name FROM villages
+     WHERE academic_year_id = ? AND cluster_id = ?
+     ORDER BY name ASC`,
+    [year.id, row.cluster_id],
+  );
+  const villages = villageRows.map((village: any) => ({ id: String(village.id), name: String(village.name) }));
 
-  const grades = Array.from(new Set(lessonPlans
-    .map((plan: any) => String(plan.target_standard || '').trim())
-    .filter(Boolean)));
-  const lessonPlanActivities = lessonPlans.map((plan: any) => {
-    let metadata: any = {};
-    try { metadata = plan.remarks ? JSON.parse(plan.remarks) : {}; } catch { metadata = {}; }
+  const grades = plannedGrades;
+  const lessonPlanActivities = lessonPlans.map((plan: any, index: number) => {
+    const metadata = lessonPlanMetadata[index] || {};
     return {
       lessonPlanId: String(plan.id),
       moduleId: plan.module_id ? String(plan.module_id) : undefined,
@@ -6685,6 +7277,29 @@ const getSessionReportContext = async (req: AuthenticatedRequest, sessionId: str
     };
   });
   const summitNumbers = Array.from(new Set(lessonPlanActivities.map((activity: any) => activity.summitNumber).filter(Boolean)));
+  const preferredLessonPlanIndex = Math.max(0, lessonPlans.findIndex((plan: any) => String(plan.status || '').toLowerCase() === 'approved'));
+  const preferredLessonPlan = lessonPlans[preferredLessonPlanIndex];
+  const preferredMetadata = lessonPlanMetadata[preferredLessonPlanIndex] || {};
+  let savedActivities: any[] = Array.isArray(preferredMetadata.activitiesDetailed) ? preferredMetadata.activitiesDetailed : [];
+  if (!savedActivities.length) {
+    try {
+      const parsed = JSON.parse(String(preferredLessonPlan?.activities || '[]'));
+      if (Array.isArray(parsed)) savedActivities = parsed;
+    } catch { savedActivities = []; }
+  }
+  const reportActivities = savedActivities.map((activity: any, index: number) => ({
+    topic: String(activity?.title || activity?.topic || `Activity ${index + 1}`),
+    details: String(activity?.description || activity?.details || ''),
+  }));
+  if (!reportActivities.length && Array.isArray(preferredMetadata.gradeSegments)) {
+    reportActivities.push(...preferredMetadata.gradeSegments.map((segment: any) => ({
+      topic: String(segment?.title || segment?.grade || ''),
+      details: String(segment?.description || ''),
+    })));
+  }
+  const savedOutcomes = Array.isArray(preferredMetadata.expectedOutcomes)
+    ? preferredMetadata.expectedOutcomes.map((outcome: unknown) => String(outcome).trim()).filter(Boolean)
+    : String(preferredMetadata.expectedOutcome || preferredLessonPlan?.learning_outcomes || '').split(/\r?\n/).map((outcome: string) => outcome.trim()).filter(Boolean);
 
   return {
     session: {
@@ -6711,6 +7326,15 @@ const getSessionReportContext = async (req: AuthenticatedRequest, sessionId: str
     summitNumbers,
     grades,
     volunteers,
+    reportDefaults: {
+      villageIds: plannedVillageIds.filter((id) => villages.some((village: any) => village.id === id)),
+      grade: plannedGrades.join(', '),
+      summitNumbers,
+      volunteerNames: plannedVolunteerNames.filter((name) => volunteers.some((volunteer: any) => volunteer.name === name)),
+      overview: String(preferredMetadata.overview || preferredLessonPlan?.objective || ''),
+      activities: reportActivities.length ? reportActivities : [{ topic: '', details: '' }],
+      outcome: savedOutcomes.join('\n'),
+    },
     activities: lessonPlanActivities.map(({ summitNumber: _summitNumber, ...activity }: any) => activity),
     attendance: {
       available: Number(attendance.attendance_records || 0) > 0,
@@ -6746,25 +7370,51 @@ app.get('/api/session-reports/context', requireAuth, async (req: AuthenticatedRe
 
 app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
+    if (!['Cluster Admin', 'Super Admin'].includes(req.user.role)) {
+      res.status(403).json({ success: false, error: 'You do not have permission to view Session Reports.' });
+      return;
+    }
     const year = await resolveAcademicYear(req);
     if (!year) {
       res.status(404).json({ success: false, error: 'No academic year is available.' });
       return;
     }
-    let sql = `SELECT r.*, c.name AS cluster_name
+    let sql = `SELECT r.*, c.name AS cluster_name,
+        creator.name AS created_by_name, submitter.name AS submitted_by_name, approver.name AS approved_by_name
       FROM session_reports r
       JOIN clusters c ON c.id = r.cluster_id
+      LEFT JOIN users creator ON creator.id = r.created_by
+      LEFT JOIN users submitter ON submitter.id = r.submitted_by
+      LEFT JOIN users approver ON approver.id = r.approved_by
       WHERE r.academic_year_id = ?`;
     const params: any[] = [year.id];
     if (req.user.role === 'Cluster Admin') {
       const clusterId = await resolveClusterForAcademicYear(req, year.id);
       sql += ' AND r.cluster_id = ?';
       params.push(clusterId);
+    } else if (req.user.role === 'Super Admin') {
+      sql += " AND r.status IN ('Submitted','Approved','Corrections Required','Edit Request Pending','Delete Request Pending')";
     }
     sql += ' ORDER BY r.created_at DESC';
     const [rows] = await pool.query<any[]>(sql, params);
     const reportIds = rows.map((row: any) => String(row.id));
     const photosByReport = new Map<string, any[]>();
+    const villageIdsByReport = new Map<string, string[]>();
+    const allVillageIds = new Set<string>();
+    rows.forEach((row: any) => {
+      let ids: string[] = [];
+      try { ids = JSON.parse(row.village_ids || '[]'); } catch { ids = []; }
+      villageIdsByReport.set(String(row.id), ids);
+      ids.forEach((id) => allVillageIds.add(String(id)));
+    });
+    const villageNamesById = new Map<string, string>();
+    if (allVillageIds.size) {
+      const [villageRows] = await pool.query<any[]>(
+        `SELECT id, name FROM villages WHERE academic_year_id=? AND id IN (${Array.from(allVillageIds).map(() => '?').join(',')})`,
+        [year.id, ...allVillageIds],
+      );
+      villageRows.forEach((village: any) => villageNamesById.set(String(village.id), String(village.name)));
+    }
     if (reportIds.length) {
       const [photoRows] = await pool.query<any[]>(
         `SELECT * FROM session_report_photos
@@ -6778,7 +7428,10 @@ app.get('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, r
         photosByReport.set(String(photo.session_report_id), list);
       });
     }
-    const sessionReports = rows.map((row: any) => mapSessionReport(row, photosByReport.get(String(row.id)) || []));
+    const sessionReports = rows.map((row: any) => mapSessionReport({
+      ...row,
+      village_names: JSON.stringify((villageIdsByReport.get(String(row.id)) || []).map((id) => villageNamesById.get(id)).filter(Boolean)),
+    }, photosByReport.get(String(row.id)) || []));
     res.json({ success: true, data: sessionReports, sessionReports });
   } catch (error) {
     console.error('Failed to fetch session reports:', error);
@@ -6805,25 +7458,48 @@ app.post('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, 
       return;
     }
     const reportId = String(req.body.id || `report-${randomUUID()}`).trim();
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Only Cluster Admins can create or update Session Reports.' });
+      return;
+    }
+    const requestedStatus = String(req.body.status || 'DRAFT').toUpperCase();
+    let previousStatus = '';
     if (req.body.id) {
       const [existingRows] = await pool.query<any[]>(
-        'SELECT id, cluster_id, status FROM session_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
+        'SELECT id, cluster_id, session_id, status FROM session_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
         [reportId, year.id],
       );
       if (!existingRows.length) {
         res.status(404).json({ success: false, error: 'Session report was not found in the selected academic year.' });
         return;
       }
-      if (req.user.role === 'Cluster Admin' && existingRows[0].cluster_id !== context.cluster.id) {
+      if (existingRows[0].cluster_id !== context.cluster.id) {
         res.status(403).json({ success: false, error: 'This report is outside your cluster.' });
         return;
       }
-      if (String(existingRows[0].status).toUpperCase() === 'APPROVED') {
-        res.status(409).json({ success: false, error: 'Approved reports cannot be edited.' });
+      if (existingRows[0].session_id !== context.session.id) {
+        res.status(409).json({ success: false, error: 'The scheduled session linked to a report cannot be changed.' });
+        return;
+      }
+      previousStatus = String(existingRows[0].status || '');
+      const editable = previousStatus === 'Draft' || previousStatus === 'Corrections Required';
+      if (!editable || (previousStatus === 'Draft' && requestedStatus !== 'DRAFT' && requestedStatus !== 'SUBMITTED') || (previousStatus === 'Corrections Required' && requestedStatus !== 'SUBMITTED')) {
+        res.status(409).json({ success: false, error: 'This report is not editable in its current state.' });
         return;
       }
     }
-    const status = String(req.body.status || 'DRAFT').toUpperCase() === 'SUBMITTED' ? 'Submitted' : 'Draft';
+    if (!req.body.id && !['DRAFT', 'SUBMITTED'].includes(requestedStatus)) {
+      res.status(400).json({ success: false, error: 'New reports must be saved as draft or submitted.' });
+      return;
+    }
+    const villages = Array.isArray(req.body.villageIds) ? req.body.villageIds.map(String) : [];
+    const volunteers = Array.isArray(req.body.volunteerNames) ? req.body.volunteerNames.map((name: unknown) => String(name).trim()).filter(Boolean) : [];
+    const villageNames = context.villages.filter((village: any) => villages.includes(village.id)).map((village: any) => village.name);
+    if (villages.some((id: string) => !context.villages.some((village: any) => village.id === id))) {
+      res.status(400).json({ success: false, error: 'One or more selected villages are outside this session.' });
+      return;
+    }
+    const status = requestedStatus === 'SUBMITTED' ? 'Submitted' : 'Draft';
     const activityContent = typeof req.body.activities === 'string'
       ? req.body.activities
       : JSON.stringify(Array.isArray(req.body.activities) ? req.body.activities : []);
@@ -6833,41 +7509,54 @@ app.post('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, 
 
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    await connection.query(
-      `INSERT INTO session_reports
-       (id, session_id, cluster_id, academic_year_id, day_number, session_summary,
-        student_count, attendance_summary, activities, outcome, issues, remarks, status, created_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE session_id = VALUES(session_id), cluster_id = VALUES(cluster_id),
-        day_number = VALUES(day_number), session_summary = VALUES(session_summary),
-        student_count = VALUES(student_count), attendance_summary = VALUES(attendance_summary),
-        activities = VALUES(activities), outcome = VALUES(outcome), issues = VALUES(issues),
-        remarks = VALUES(remarks), status = VALUES(status)`,
-      [
-        reportId,
-        context.session.id,
-        context.cluster.id,
-        year.id,
-        context.session.dayNumber,
-        String(req.body.sessionSummary || '').trim(),
-        context.attendance.available ? context.attendance.presentCount : null,
-        attendanceSummary,
-        activityContent,
-        String(req.body.outcome || '').trim() || null,
-        String(req.body.issues || '').trim() || null,
-        String(req.body.remarks || '').trim() || null,
-        status,
-        req.user.id,
-      ],
-    );
+    const reportValues = [
+      context.session.id, context.cluster.id, year.id, context.session.dayNumber,
+      JSON.stringify(villages), String(req.body.summitNumber || '').trim() || null,
+      String(req.body.grade || '').trim() || null, String(req.body.sessionSummary || '').trim(),
+      context.attendance.available ? context.attendance.presentCount : null, attendanceSummary,
+      activityContent, String(req.body.outcome || '').trim() || null, JSON.stringify(volunteers),
+      String(req.body.issues || '').trim() || null, String(req.body.observations || '').trim() || null,
+      String(req.body.remarks || '').trim() || null,
+    ];
+    if (req.body.id) {
+      await connection.query(
+        `UPDATE session_reports SET session_id=?, cluster_id=?, academic_year_id=?, day_number=?,
+          village_ids=?, summit_number=?, grade=?, session_summary=?, student_count=?, attendance_summary=?,
+          activities=?, outcome=?, volunteer_names=?, issues=?, observations=?, remarks=?, status=?,
+          submitted_by=IF(?='Submitted', ?, submitted_by), submitted_at=IF(?='Submitted', NOW(), submitted_at),
+          correction_reason=IF(?='Submitted', NULL, correction_reason),
+          approved_by=IF(?='Submitted', NULL, approved_by), approved_at=IF(?='Submitted', NULL, approved_at),
+          workflow_previous_status=NULL
+         WHERE id=? AND academic_year_id=? AND cluster_id=?`,
+        [...reportValues, status, status, req.user.id, status, status, status, status, reportId, year.id, context.cluster.id],
+      );
+    } else {
+      await connection.query(
+        `INSERT INTO session_reports
+         (id, session_id, cluster_id, academic_year_id, day_number, village_ids, summit_number, grade,
+          session_summary, student_count, attendance_summary, activities, outcome, volunteer_names,
+          issues, observations, remarks, status, created_by, submitted_by, submitted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(?='Submitted', ?, NULL), IF(?='Submitted', NOW(), NULL))`,
+        [reportId, ...reportValues, status, req.user.id, status, req.user.id, status],
+      );
+    }
     await connection.commit();
 
     const [rows] = await pool.query<any[]>(
-      `SELECT r.*, c.name AS cluster_name FROM session_reports r
-       JOIN clusters c ON c.id = r.cluster_id WHERE r.id = ? AND r.academic_year_id = ? LIMIT 1`,
+      `SELECT r.*, c.name AS cluster_name, creator.name AS created_by_name,
+        submitter.name AS submitted_by_name, approver.name AS approved_by_name
+       FROM session_reports r JOIN clusters c ON c.id = r.cluster_id
+       LEFT JOIN users creator ON creator.id = r.created_by
+       LEFT JOIN users submitter ON submitter.id = r.submitted_by
+       LEFT JOIN users approver ON approver.id = r.approved_by
+       WHERE r.id = ? AND r.academic_year_id = ? LIMIT 1`,
       [reportId, year.id],
     );
-    res.json({ success: true, data: { id: reportId }, sessionReport: mapSessionReport(rows[0]) });
+    res.json({
+      success: true,
+      data: { id: reportId },
+      sessionReport: mapSessionReport({ ...rows[0], village_names: JSON.stringify(villageNames) }),
+    });
   } catch (error) {
     await connection?.rollback().catch(() => undefined);
     console.error('Failed to save session report:', error);
@@ -6877,7 +7566,102 @@ app.post('/api/session-reports', requireAuth, async (req: AuthenticatedRequest, 
   }
 });
 
-app.post('/api/session-reports/:id/photos', requireAuth, photoUploadMiddleware.array('photos', 20), async (req: AuthenticatedRequest, res: Response) => {
+app.post('/api/session-reports/:id/workflow', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const year = await resolveAcademicYear(req);
+    if (!year) {
+      res.status(404).json({ success: false, error: 'No academic year is available.' });
+      return;
+    }
+    if (isArchivedAcademicYear(year)) {
+      res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
+      return;
+    }
+    const action = String(req.body.action || '').trim().toLowerCase();
+    const reason = String(req.body.reason || '').trim();
+    const [rows] = await pool.query<any[]>(
+      'SELECT id, cluster_id, status, workflow_previous_status, edit_request_reason FROM session_reports WHERE id=? AND academic_year_id=? LIMIT 1',
+      [req.params.id, year.id],
+    );
+    if (!rows.length) {
+      res.status(404).json({ success: false, error: 'Session report not found.' });
+      return;
+    }
+    const report = rows[0];
+    const isAdmin = req.user.role === 'Super Admin';
+    if (!isAdmin && (req.user.role !== 'Cluster Admin' || report.cluster_id !== await resolveClusterForAcademicYear(req, year.id))) {
+      res.status(403).json({ success: false, error: 'This report is outside your permissions.' });
+      return;
+    }
+    if (['request_edit', 'request_delete', 'send_correction'].includes(action) && !reason) {
+      res.status(400).json({ success: false, error: 'A reason or correction message is required.' });
+      return;
+    }
+    let updateSql = '';
+    let params: any[] = [];
+    let nextStatus = '';
+    if (action === 'request_edit' || action === 'request_delete') {
+      if (isAdmin || !['Submitted', 'Approved'].includes(report.status)) {
+        res.status(409).json({ success: false, error: 'Edit/delete requests are available only for submitted or approved reports.' });
+        return;
+      }
+      nextStatus = action === 'request_edit' ? 'Edit Request Pending' : 'Delete Request Pending';
+      const reasonColumn = action === 'request_edit' ? 'edit_request_reason' : 'delete_request_reason';
+      updateSql = `UPDATE session_reports SET workflow_previous_status=?, status=?, ${reasonColumn}=? WHERE id=? AND academic_year_id=?`;
+      params = [report.status, nextStatus, reason, req.params.id, year.id];
+    } else if (action === 'approve' || action === 'send_correction') {
+      if (!isAdmin || report.status !== 'Submitted') {
+        res.status(409).json({ success: false, error: 'Only a submitted report can be reviewed by Super Admin.' });
+        return;
+      }
+      nextStatus = action === 'approve' ? 'Approved' : 'Corrections Required';
+      updateSql = action === 'approve'
+        ? 'UPDATE session_reports SET status=?, approved_by=?, approved_at=NOW(), correction_reason=NULL WHERE id=? AND academic_year_id=?'
+        : 'UPDATE session_reports SET status=?, correction_reason=?, approved_by=NULL, approved_at=NULL WHERE id=? AND academic_year_id=?';
+      params = action === 'approve' ? [nextStatus, req.user.id, req.params.id, year.id] : [nextStatus, reason, req.params.id, year.id];
+    } else if (action === 'allow_edit' || action === 'deny_edit') {
+      if (!isAdmin || report.status !== 'Edit Request Pending') {
+        res.status(409).json({ success: false, error: 'There is no pending edit request to review.' });
+        return;
+      }
+      nextStatus = action === 'allow_edit' ? 'Corrections Required' : String(report.workflow_previous_status || 'Submitted');
+      updateSql = action === 'allow_edit'
+        ? 'UPDATE session_reports SET status=?, correction_reason=?, workflow_previous_status=NULL WHERE id=? AND academic_year_id=?'
+        : 'UPDATE session_reports SET status=?, workflow_previous_status=NULL, edit_request_reason=NULL WHERE id=? AND academic_year_id=?';
+      params = action === 'allow_edit'
+        ? [nextStatus, `Edit access approved: ${String(report.edit_request_reason || '')}`, req.params.id, year.id]
+        : [nextStatus, req.params.id, year.id];
+    } else if (action === 'deny_delete') {
+      if (!isAdmin || report.status !== 'Delete Request Pending') {
+        res.status(409).json({ success: false, error: 'There is no pending delete request to review.' });
+        return;
+      }
+      nextStatus = String(report.workflow_previous_status || 'Submitted');
+      updateSql = 'UPDATE session_reports SET status=?, workflow_previous_status=NULL, delete_request_reason=NULL WHERE id=? AND academic_year_id=?';
+      params = [nextStatus, req.params.id, year.id];
+    } else if (action === 'approve_delete') {
+      if (!isAdmin || report.status !== 'Delete Request Pending') {
+        res.status(409).json({ success: false, error: 'There is no pending delete request to approve.' });
+        return;
+      }
+      const [photos] = await pool.query<any[]>('SELECT file_path FROM session_report_photos WHERE session_report_id=?', [req.params.id]);
+      await pool.query('DELETE FROM session_reports WHERE id=? AND academic_year_id=?', [req.params.id, year.id]);
+      photos.forEach((photo: any) => { try { fs.unlinkSync(resolveStoredUploadPath(photo.file_path)); } catch { /* best effort cleanup */ } });
+      res.json({ success: true, deleted: true });
+      return;
+    } else {
+      res.status(400).json({ success: false, error: 'Unsupported Session Report workflow action.' });
+      return;
+    }
+    await pool.query(updateSql, params);
+    res.json({ success: true, status: nextStatus.toUpperCase().replace(/\s+/g, '_') });
+  } catch (error) {
+    console.error('Failed to process session report workflow action:', error);
+    res.status(503).json({ success: false, error: 'Unable to process the report request.' });
+  }
+});
+
+app.post('/api/session-reports/:id/photos', requireAuth, photoUploadMiddleware.array('photos', 6), async (req: AuthenticatedRequest, res: Response) => {
   const filePaths = ((req.files || []) as Express.Multer.File[]).map((file) => file.path);
   let connection: any;
   try {
@@ -6891,7 +7675,7 @@ app.post('/api/session-reports/:id/photos', requireAuth, photoUploadMiddleware.a
       return;
     }
     const [reports] = await pool.query<any[]>(
-      'SELECT id, cluster_id FROM session_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
+      'SELECT id, cluster_id, status FROM session_reports WHERE id = ? AND academic_year_id = ? LIMIT 1',
       [req.params.id, year.id],
     );
     if (!reports.length) {
@@ -6899,13 +7683,31 @@ app.post('/api/session-reports/:id/photos', requireAuth, photoUploadMiddleware.a
       return;
     }
     const report = reports[0];
-    if (req.user.role === 'Cluster Admin' && report.cluster_id !== await resolveClusterForAcademicYear(req, year.id)) {
+    if (req.user.role !== 'Cluster Admin' || report.cluster_id !== await resolveClusterForAcademicYear(req, year.id)) {
       res.status(403).json({ success: false, error: 'This report is outside your cluster.' });
+      return;
+    }
+    if (!['Draft', 'Corrections Required'].includes(report.status)) {
+      res.status(409).json({ success: false, error: 'Photos can only be changed on drafts or reports requiring correction.' });
       return;
     }
     const files = (req.files || []) as Express.Multer.File[];
     if (!files.length) {
       res.status(400).json({ success: false, error: 'Choose at least one photo to upload.' });
+      return;
+    }
+    const [existingPhotoRows] = await pool.query<any[]>(
+      'SELECT COUNT(*) AS photo_count FROM session_report_photos WHERE session_report_id = ? AND academic_year_id = ?',
+      [report.id, year.id],
+    );
+    if (Number(existingPhotoRows[0]?.photo_count || 0) + files.length > 6) {
+      filePaths.forEach((filePath) => { try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ } });
+      res.status(400).json({ success: false, error: 'A maximum of 6 photos can be attached to a Session Report.' });
+      return;
+    }
+    if (files.some((file) => !['image/jpeg', 'image/png', 'image/jpg'].includes(file.mimetype))) {
+      filePaths.forEach((filePath) => { try { fs.unlinkSync(filePath); } catch { /* best effort cleanup */ } });
+      res.status(400).json({ success: false, error: 'Session Report photos must be JPG, JPEG, or PNG files.' });
       return;
     }
     connection = await pool.getConnection();
@@ -6987,7 +7789,7 @@ app.delete('/api/session-report-photos/:id', requireAuth, async (req: Authentica
       return;
     }
     const [rows] = await pool.query<any[]>(
-      `SELECT photo.id, photo.file_path, photo.cluster_id
+      `SELECT photo.id, photo.file_path, photo.cluster_id, report.status
        FROM session_report_photos photo
        JOIN session_reports report ON report.id = photo.session_report_id
        WHERE photo.id = ? AND photo.academic_year_id = ? AND report.academic_year_id = ? LIMIT 1`,
@@ -6997,8 +7799,12 @@ app.delete('/api/session-report-photos/:id', requireAuth, async (req: Authentica
       res.status(404).json({ success: false, error: 'Photo not found in the selected academic year.' });
       return;
     }
-    if (req.user.role === 'Cluster Admin' && rows[0].cluster_id !== await resolveClusterForAcademicYear(req, year.id)) {
+    if (req.user.role !== 'Cluster Admin' || rows[0].cluster_id !== await resolveClusterForAcademicYear(req, year.id)) {
       res.status(403).json({ success: false, error: 'This photo is outside your cluster.' });
+      return;
+    }
+    if (!['Draft', 'Corrections Required'].includes(rows[0].status)) {
+      res.status(409).json({ success: false, error: 'Photos can only be changed on drafts or reports requiring correction.' });
       return;
     }
     await pool.query('DELETE FROM session_report_photos WHERE id = ? AND academic_year_id = ?', [req.params.id, year.id]);
@@ -7021,17 +7827,21 @@ app.delete('/api/session-reports/:id', requireAuth, async (req: AuthenticatedReq
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    let sql = 'DELETE FROM session_reports WHERE id = ? AND academic_year_id = ?';
-    const params: any[] = [req.params.id, year.id];
-    if (req.user.role === 'Cluster Admin') {
-      sql += ' AND cluster_id = ?';
-      params.push(await resolveClusterForAcademicYear(req, year.id));
+    if (req.user.role !== 'Cluster Admin') {
+      res.status(403).json({ success: false, error: 'Direct report deletion is not permitted.' });
+      return;
     }
-    const [result] = await pool.query<any>(sql, params);
+    const clusterId = await resolveClusterForAcademicYear(req, year.id);
+    const [photos] = await pool.query<any[]>('SELECT file_path FROM session_report_photos WHERE session_report_id=?', [req.params.id]);
+    const [result] = await pool.query<any>(
+      "DELETE FROM session_reports WHERE id = ? AND academic_year_id = ? AND cluster_id = ? AND status = 'Draft'",
+      [req.params.id, year.id, clusterId],
+    );
     if (!result.affectedRows) {
       res.status(404).json({ success: false, error: 'Session report not found in this academic year and cluster.' });
       return;
     }
+    photos.forEach((photo: any) => { try { fs.unlinkSync(resolveStoredUploadPath(photo.file_path)); } catch { /* best effort cleanup */ } });
     res.json({ success: true });
   } catch (error) {
     console.error('Failed to delete session report:', error);
@@ -7332,7 +8142,21 @@ const moduleUploadMiddleware = multer({
       cb(null, dir); 
     }, 
     filename: (req, file, cb) => cb(null, randomUUID() + path.extname(file.originalname)) 
-  }) 
+  }),
+  limits: { fileSize: 50 * 1024 * 1024, files: 1 },
+  fileFilter: (_req, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const allowedTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    };
+    if (allowedTypes[extension] === file.mimetype) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('Only PDF, PPT, and PPTX files are allowed.'));
+  },
 });
 
 app.post('/api/modules/:id/resources', requireAuth, moduleUploadMiddleware.single('file'), async (req: AuthenticatedRequest & { file?: Express.Multer.File }, res: Response) => {
@@ -7645,8 +8469,8 @@ const copyAcademicYearMasterData = async (
       const sessionId = sessionIds.get(row.session_id);
       if (!clusterId || !sessionId) continue;
       await connection.query(
-        'INSERT INTO session_reports (id, session_id, cluster_id, academic_year_id, day_number, session_summary, student_count, attendance_summary, activities, issues, remarks, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [`report-${randomUUID()}`, sessionId, clusterId, targetYearId, row.day_number, row.session_summary, row.student_count, row.attendance_summary, row.activities, row.issues, row.remarks, row.status, row.created_by],
+        'INSERT INTO session_reports (id, session_id, cluster_id, academic_year_id, day_number, session_summary, student_count, attendance_summary, activities, issues, observations, remarks, status, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [`report-${randomUUID()}`, sessionId, clusterId, targetYearId, row.day_number, row.session_summary, row.student_count, row.attendance_summary, row.activities, row.issues, row.observations, row.remarks, row.status, row.created_by],
       );
     }
   }
@@ -8129,6 +8953,28 @@ app.get('/api/health', async (_req, res) => {
 
 app.use('/assets', express.static(path.join(PROJECT_ROOT, 'frontend', 'public', 'assets')));
 app.use('/storage/uploads', express.static(UPLOADS_DIR));
+
+app.use('/api', (_req: Request, res: Response) => {
+  res.status(404).json({ success: false, error: 'API endpoint not found.' });
+});
+
+app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
+  if (res.headersSent) return;
+  if (error?.code === 'LIMIT_FILE_SIZE' || error?.type === 'entity.too.large') {
+    res.status(413).json({ success: false, error: 'The request exceeds the allowed size.' });
+    return;
+  }
+  if (error instanceof SyntaxError && Object.prototype.hasOwnProperty.call(error, 'body')) {
+    res.status(400).json({ success: false, error: 'The request body is not valid JSON.' });
+    return;
+  }
+  if (error instanceof multer.MulterError || /Only JPG, PNG, WEBP|Only PDF, PPT, and PPTX/i.test(String(error?.message || ''))) {
+    res.status(400).json({ success: false, error: error.message || 'Invalid uploaded file.' });
+    return;
+  }
+  console.error('Unhandled API error:', error);
+  res.status(500).json({ success: false, error: 'An unexpected server error occurred.' });
+});
 
 const startServer = async () => {
   console.log('\n==================================================');

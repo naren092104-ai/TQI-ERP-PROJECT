@@ -1,8 +1,11 @@
 {
-  "name": "react-example",
+  "name": "tqi-academic-erp",
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n \"backend,frontend\" -c \"blue,green\" \"npm run dev:backend\" \"npm run dev:frontend\"",
     "dev:backend": "tsx backend/src/server.ts",
@@ -10,9 +13,11 @@
     "build": "npm run build:frontend && npm run build:backend",
     "build:frontend": "vite build --config frontend/vite.config.ts",
     "build:backend": "esbuild backend/src/server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=backend/dist/server.cjs --tsconfig=backend/tsconfig.json",
+    "prestart": "npm run build:backend",
     "start": "node backend/dist/server.cjs",
     "preview": "vite preview --config frontend/vite.config.ts",
     "test:e2e": "playwright test",
+    "test:e2e:responsive": "playwright test frontend/tests/e2e/responsive-public.spec.ts",
     "clean": "node -e \"const fs=require('fs'); for (const p of ['frontend/dist','backend/dist']) fs.rmSync(p,{recursive:true,force:true})\"",
     "lint": "npm run lint:frontend && npm run lint:backend",
     "lint:frontend": "tsc --noEmit -p frontend/tsconfig.json",
@@ -53,7 +58,7 @@
     "motion": "^12.23.24",
     "multer": "^2.2.0",
     "mysql2": "^3.23.4",
-    "nodemailer": "^9.0.5",
+    "nodemailer": "^10.3.1",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "tailwind-merge": "^3.6.0",
@@ -74,10 +79,13 @@
     "autoprefixer": "^10.4.21",
     "concurrently": "^10.0.5",
     "esbuild": "^0.25.0",
-    "playwright": "^1.63.0",
+    "playwright": "^1.62.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
+  },
+  "overrides": {
+    "qs": "6.16.2"
   }
 }

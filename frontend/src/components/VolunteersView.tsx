@@ -476,11 +476,15 @@ export const VolunteersView: React.FC<VolunteersViewProps> = ({
     setBulkError('');
     setBulkRows([]);
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+      if (file.size > 10 * 1024 * 1024) {
+        throw new Error('Spreadsheet must be 10 MB or smaller.');
+      }
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', sheetRows: 10001 });
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
       if (!firstSheet) throw new Error('The uploaded workbook has no worksheet.');
       const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, { defval: '', raw: false });
       if (!rawRows.length) throw new Error('The spreadsheet has no volunteer rows.');
+      if (rawRows.length > 10000) throw new Error('Spreadsheet can contain at most 10,000 volunteer rows.');
       const normalizeHeader = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
       const rows = rawRows.map((raw, index) => {
         const cells = new Map(Object.entries(raw).map(([key, value]) => [normalizeHeader(key), String(value ?? '').trim()]));

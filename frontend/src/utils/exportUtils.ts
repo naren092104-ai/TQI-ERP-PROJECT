@@ -38,7 +38,6 @@ export function exportLessonPlanExcel(plan: LessonPlan) {
     ['College / Team', plan.teamCollegeName || plan.collegeName || '—'],
     ['Villages Covered', plan.villagesList?.join(', ') || plan.villageName || '—'],
     ['Summit / Day', `Summit ${plan.summitNumbers || '—'} / Day ${plan.dayNumber || '01'}`],
-    ['Target Grade', plan.grades || plan.targetStandard || '—'],
     ['Planned Date', plan.date || '—'],
     ['Status', plan.status || 'Draft'],
     [],
@@ -47,16 +46,16 @@ export function exportLessonPlanExcel(plan: LessonPlan) {
     ['Overview / Objective', plan.overview || plan.objective || '—'],
     ['Expected Outcome', plan.expectedOutcome || '—'],
     [],
-    ['GRADE-SPECIFIC BREAKDOWN'],
-    ['Grade', 'Key Topic / Focus', 'Detailed Description']
+    ['LESSON PLAN CONTENT'],
+    ['Content Title', 'Description']
   ];
 
   if (plan.gradeSegments && plan.gradeSegments.length > 0) {
     plan.gradeSegments.forEach((seg) => {
-      metadataRows.push([seg.grade, seg.title, seg.description]);
+      metadataRows.push([seg.title || 'Summit content', seg.description]);
     });
   } else {
-    metadataRows.push(['Grade IX', plan.title || '—', plan.overview || '—']);
+    metadataRows.push(['Summit content', plan.title || plan.overview || '—']);
   }
 
   metadataRows.push([]);
@@ -99,7 +98,6 @@ export function exportAllLessonPlansExcel(plans: LessonPlan[], clusterName = 'Dh
     'Cluster': p.cluster || clusterName,
     'College / Team': p.teamCollegeName || p.collegeName || '—',
     'Topic': p.topic || p.title || '—',
-    'Grades': p.grades || p.targetStandard || '—',
     'Villages': p.villagesList?.join(', ') || p.villageName || '—',
     'Volunteers': p.assignedVolunteers?.join(', ') || p.volunteerName || '—',
     'Status': p.status || 'Draft',
@@ -112,93 +110,106 @@ export function exportAllLessonPlansExcel(plans: LessonPlan[], clusterName = 'Dh
 }
 
 export function exportLessonPlanPdf(plan: LessonPlan) {
-  // Render printable window
   const printWindow = window.open('', '_blank');
   if (!printWindow) {
-    window.print();
+    window.alert('Allow pop-ups to open the print-ready lesson plan PDF.');
     return;
   }
-
-  const activitiesHtml = (plan.activitiesDetailed || [])
-    .map(
-      (a) => `<tr>
-        <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: bold; width: 120px;">Activity ${a.activityNumber}</td>
-        <td style="padding: 8px; border: 1px solid #e2e8f0; font-weight: 600; width: 200px;">${a.title}</td>
-        <td style="padding: 8px; border: 1px solid #e2e8f0;">${a.description}</td>
-      </tr>`
-    )
-    .join('');
-
-  const volunteersHtml = (plan.assignedVolunteers || [plan.volunteerName || 'Volunteer Team'])
-    .map((v) => `<span style="display: inline-block; background: #f1f5f9; padding: 4px 10px; border-radius: 6px; margin: 3px; font-size: 12px; font-weight: 600;">${v}</span>`)
-    .join(' ');
+  const escapeHtml = (value: unknown) => String(value ?? '—')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const lines = (value: unknown) => escapeHtml(value).replace(/\r?\n/g, '<br/>');
+  const activities = plan.activitiesDetailed || [];
+  const gradeSegments = plan.gradeSegments || [];
+  const outcomes = plan.expectedOutcomes?.length
+    ? plan.expectedOutcomes
+    : String(plan.expectedOutcome || '').split('\n').map((item) => item.trim()).filter(Boolean);
+  const volunteers: NonNullable<LessonPlan['volunteerRoster']> = plan.volunteerRoster?.length
+    ? plan.volunteerRoster
+    : (plan.assignedVolunteers || []).map((name) => ({ name, role: '', phone: '', year: '' }));
+  const activityRows = activities.map((activity, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td><strong>${escapeHtml(activity.title)}</strong></td>
+      <td>${lines(activity.description)}</td>
+      <td>${escapeHtml(activity.duration || '—')}</td>
+    </tr>`).join('');
+  const volunteerRows = volunteers.map((volunteer, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td>${escapeHtml(volunteer.name)}</td>
+      <td>${escapeHtml(volunteer.phone || '—')}</td>
+      <td>${escapeHtml(volunteer.year || '—')}</td>
+    </tr>`).join('');
+  const gradeContent = gradeSegments.length
+    ? gradeSegments.map((segment) => `<div class="grade-block"><h3>${escapeHtml(segment.title || 'Summit content')}</h3><p>${lines(segment.description)}</p></div>`).join('')
+    : `<p>${lines(plan.description || '—')}</p>`;
+  const outcomeItems = outcomes.length ? outcomes.map((outcome) => `<li>${escapeHtml(outcome)}</li>`).join('') : '<li>—</li>';
+  const planVillages = plan.villagesList?.length ? plan.villagesList : (plan.villageName ? [plan.villageName] : []);
+  const village = planVillages.join(', ') || '—';
+  const panchayat = plan.panchayatNames?.join(', ') || plan.panchayatName || '—';
 
   printWindow.document.write(`
     <!DOCTYPE html>
-    <html>
+    <html lang="en">
       <head>
-        <title>TQI Lesson Plan - Day ${plan.dayNumber || 1}</title>
+        <meta charset="utf-8" />
+        <title>TQI Lesson Plan - Day ${escapeHtml(plan.dayNumber || 1)}</title>
         <style>
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; color: #0f172a; }
-          .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 16px; margin-bottom: 24px; }
-          .title { font-size: 18px; font-weight: 900; letter-spacing: 0.5px; text-transform: uppercase; }
-          .sub { font-size: 12px; font-weight: 700; color: #64748b; margin-top: 4px; }
-          .meta-table { width: 100%; border-collapse: collapse; margin-bottom: 24px; background: #f8fafc; border-radius: 8px; }
-          .meta-table td { padding: 8px 12px; font-size: 13px; border: 1px solid #e2e8f0; }
-          .meta-label { font-weight: 700; color: #334155; width: 180px; }
-          .section-title { font-size: 14px; font-weight: 800; text-transform: uppercase; margin: 20px 0 8px 0; border-bottom: 1px solid #cbd5e1; padding-bottom: 4px; }
-          .section-content { font-size: 13px; line-height: 1.6; color: #334155; margin-bottom: 16px; }
-          table.activities { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 13px; }
-          @media print { body { margin: 20px; } }
+          * { box-sizing: border-box; }
+          body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #17233b; font-size: 11pt; line-height: 1.5; }
+          .document { max-width: 900px; margin: 0 auto; }
+          .header { display: flex; align-items: center; gap: 18px; border-bottom: 2px solid #173f78; padding: 0 0 18px; margin-bottom: 20px; }
+          .logo { display: block; flex: 0 0 88px; width: 88px; height: 88px; object-fit: contain; margin: 0; }
+          .header-copy { flex: 1; text-align: center; padding-right: 88px; }
+          .title { font-size: 17pt; font-weight: 800; letter-spacing: .3px; }
+          .program { color: #52627a; font-size: 10pt; font-weight: 600; margin-top: 2px; }
+          .subtitle { color: #173f78; font-size: 12pt; font-weight: 800; letter-spacing: .6px; margin-top: 10px; }
+          .academic-year { color: #52627a; font-size: 9pt; font-weight: 700; margin-top: 4px; }
+          .meta, .data-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          .meta { margin: 0 0 22px; }
+          .meta td, .data-table th, .data-table td { border: 1px solid #cbd5e1; padding: 8px 9px; vertical-align: top; overflow-wrap: anywhere; }
+          .meta .label { width: 18%; background: #f2f6fb; color: #334155; font-size: 9pt; font-weight: 700; }
+          .meta .value { width: 32%; font-size: 10pt; }
+          .section { margin: 20px 0 0; break-inside: auto; }
+          .section-title { color: #173f78; font-size: 11pt; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; border-bottom: 1px solid #cbd5e1; padding-bottom: 5px; margin: 0 0 9px; break-after: avoid; }
+          .content { color: #334155; font-size: 10pt; white-space: normal; }
+          .grade-block { margin: 0 0 12px; break-inside: avoid; }
+          .grade-block h3 { margin: 0 0 4px; font-size: 10pt; }
+          .grade-block p, .content p { margin: 0; white-space: pre-wrap; }
+          .outcomes { margin: 0; padding-left: 20px; }
+          .data-table { font-size: 9.5pt; }
+          .data-table thead { display: table-header-group; }
+          .data-table th { background: #edf3fa; color: #334155; text-align: left; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .3px; }
+          .data-table tr { break-inside: avoid; }
+          @page { size: A4; margin: 16mm 15mm; }
+          @media screen { body { background: #eef2f7; padding: 24px; } .document { background: white; padding: 32px 38px; box-shadow: 0 8px 30px #0f172a1a; } }
+          @media print { .document { max-width: none; } }
         </style>
       </head>
       <body>
-        <div class="header">
-          <div class="title">TALENT QUEST FOR INDIA &bull; STUDENT HOLISTIC DEVELOPMENT PROGRAM</div>
-          <div class="sub">ACADEMIC YEAR : ${plan.academicYear || '2025 – 2026'} | LESSON PLAN FOR THE SUMMIT</div>
-        </div>
-
-        <table class="meta-table">
-          <tr>
-            <td class="meta-label">Cluster:</td>
-            <td>${plan.cluster || 'Dharmapuri'}</td>
-            <td class="meta-label">College / Team:</td>
-            <td>${plan.teamCollegeName || plan.collegeName || '—'}</td>
-          </tr>
-          <tr>
-            <td class="meta-label">Villages Covered:</td>
-            <td>${plan.villagesList?.join(', ') || plan.villageName || '—'}</td>
-            <td class="meta-label">Planned Date:</td>
-            <td>${plan.date || '—'}</td>
-          </tr>
-          <tr>
-            <td class="meta-label">Session / Day:</td>
-            <td>Day ${String(plan.dayNumber || 1).padStart(2, '0')}</td>
-            <td class="meta-label">Target Grade:</td>
-            <td>${plan.grades || plan.targetStandard || '—'}</td>
-          </tr>
-        </table>
-
-        <div class="section-title">1. Topic & Overview</div>
-        <div class="section-content">
-          <strong>${plan.topic || plan.title}</strong><br/>
-          ${plan.overview || plan.objective || '—'}
-        </div>
-
-        ${plan.expectedOutcome ? `
-          <div class="section-title">2. Expected Outcomes</div>
-          <div class="section-content">${plan.expectedOutcome}</div>
-        ` : ''}
-
-        ${activitiesHtml ? `
-          <div class="section-title">3. Session Activities</div>
-          <table class="activities">
-            <tbody>${activitiesHtml}</tbody>
-          </table>
-        ` : ''}
-
-        <div class="section-title" style="margin-top: 24px;">4. Assigned Volunteers</div>
-        <div style="margin-top: 8px;">${volunteersHtml}</div>
+        <main class="document">
+          <header class="header">
+            <img class="logo" src="${window.location.origin}/logo.png" alt="Talent Quest for India logo" />
+            <div class="header-copy">
+              <div class="title">TALENT QUEST FOR INDIA</div>
+              <div class="program">Student Holistic Development Program</div>
+              <div class="subtitle">LESSON PLAN FOR THE SUMMIT</div>
+              <div class="academic-year">Academic Year: ${escapeHtml(plan.academicYear || '—')}</div>
+            </div>
+          </header>
+          <table class="meta"><tbody>
+            <tr><td class="label">Cluster</td><td class="value">${escapeHtml(plan.cluster)}</td><td class="label">Team</td><td class="value">${escapeHtml(plan.teamCollegeName || plan.collegeName)}</td></tr>
+            <tr><td class="label">Panchayat</td><td class="value">${escapeHtml(panchayat)}</td><td class="label">Village Name</td><td class="value">${escapeHtml(village)}</td></tr>
+            <tr><td class="label">No. of Summit</td><td class="value">${escapeHtml(plan.summitNumbers)}</td><td class="label">Session / Day</td><td class="value">Day ${escapeHtml(plan.dayNumber || 1)}</td></tr>
+            <tr><td class="label">Planned Date</td><td class="value" colspan="3">${escapeHtml(plan.date)}</td></tr>
+          </tbody></table>
+          <section class="section"><h2 class="section-title">Overview</h2><div class="content"><p>${lines(plan.overview || plan.objective)}</p></div></section>
+          <section class="section"><h2 class="section-title">Lesson Plan Content</h2><div class="content">${gradeContent}</div></section>
+          <section class="section"><h2 class="section-title">Detailed View / Activities</h2><table class="data-table"><thead><tr><th style="width:8%">S.No</th><th style="width:22%">Activity / Task</th><th>Description</th><th style="width:14%">Time (mins)</th></tr></thead><tbody>${activityRows || '<tr><td colspan="4">No activities provided.</td></tr>'}</tbody></table></section>
+          <section class="section"><h2 class="section-title">Expected Outcome</h2><ul class="outcomes">${outcomeItems}</ul></section>
+          <section class="section"><h2 class="section-title">Volunteers Involved</h2><table class="data-table"><thead><tr><th style="width:10%">S.No</th><th>Volunteer Name</th><th style="width:25%">Contact</th><th style="width:18%">Year</th></tr></thead><tbody>${volunteerRows || '<tr><td colspan="4">No volunteers listed.</td></tr>'}</tbody></table></section>
+        </main>
 
         <script>
           window.onload = function() {

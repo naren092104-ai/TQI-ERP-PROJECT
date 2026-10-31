@@ -2,6 +2,9 @@
   "name": "tqi-backend",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx src/server.ts",
     "prestart": "npm run build",
@@ -13,7 +16,6 @@
     "db:clean": "tsx src/scripts/cleanReset.ts"
   },
   "dependencies": {
-    "@google/genai": "^2.4.0",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
@@ -22,8 +24,7 @@
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
     "mysql2": "^3.23.4",
-    "nodemailer": "^9.0.5",
-    "xlsx": "^0.18.5"
+    "nodemailer": "^10.3.1"
   },
   "devDependencies": {
     "@types/archiver": "^8.0.0",
@@ -37,5 +38,8 @@
     "esbuild": "^0.25.0",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2"
+  },
+  "overrides": {
+    "qs": "6.16.2"
   }
 }

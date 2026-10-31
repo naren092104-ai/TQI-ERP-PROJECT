@@ -4,6 +4,7 @@ import path from 'path';
 import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
+  const apiProxyTarget = process.env.VITE_API_PROXY_TARGET || 'http://localhost:5000';
   return {
     root: __dirname,
     plugins: [react(), tailwindcss()],
@@ -33,11 +34,11 @@ export default defineConfig(() => {
       watch: { ignored: ['**/tests/**', '**/test-results/**', '**/.git/**'] },
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:3002',
+          target: apiProxyTarget,
           changeOrigin: true,
         },
         '/storage': {
-          target: 'http://127.0.0.1:3002',
+          target: apiProxyTarget,
           changeOrigin: true,
         },
       },

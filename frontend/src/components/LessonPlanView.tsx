@@ -1,14 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import { TabType, LessonPlan, Panchayat, Volunteer, Session, UserRole, Cluster } from '../types';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from './ui/select';
-import { Plus, Search, BookOpen, AlertTriangle, X, Download, Trash2, Edit3, Eye, CheckCircle2, ArrowLeft } from './ui/icons';
-import { exportLessonPlanExcel, exportAllLessonPlansExcel, exportLessonPlanPdf } from '../utils/exportUtils';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Cluster, LessonPlan, Panchayat, Session, TabType, UserRole, Volunteer } from '../types';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { AlertTriangle, ArrowLeft, BookOpen, CheckCircle2, Clock, Download, Eye, FileText, Plus, Search, Trash2, Users, X } from './ui/icons';
+import { exportLessonPlanPdf } from '../utils/exportUtils';
 
 interface LessonPlanViewProps {
   lessonPlans: LessonPlan[];
@@ -18,1336 +12,602 @@ interface LessonPlanViewProps {
   volunteers: Volunteer[];
   currentUserRole?: UserRole;
   currentCluster?: string;
+  currentClusterId?: string;
   currentAcademicYear?: string;
   selectedLessonPlanId?: string;
   onNavigate: (tab: TabType, targetId?: string) => void;
-  onAddLessonPlan: (plan: Omit<LessonPlan, 'id'>) => void;
-  onUpdateLessonPlan: (id: string, updated: Partial<LessonPlan>) => void;
-  onDeleteLessonPlan?: (id: string) => void;
-  onRefreshLessonPlans?: () => Promise<void>;
+  onAddLessonPlan: (plan: Omit<LessonPlan, 'id'>) => Promise<void> | void;
+  onUpdateLessonPlan: (id: string, updated: Partial<LessonPlan>) => Promise<void> | void;
+  onDeleteLessonPlan?: (id: string) => Promise<void> | void;
+  onReviewLessonPlan?: (id: string, action: 'approve' | 'correction', reason?: string) => Promise<void>;
+  onRequestLessonPlanAction?: (id: string, type: 'edit' | 'delete', reason: string) => Promise<void>;
 }
 
 type ViewMode = 'list' | 'create' | 'edit' | 'detail';
+type PlanActivity = { activityNumber: number; title: string; description: string; duration: number };
+type LessonPlanForm = {
+  panchayatIds: string[];
+  villageIds: string[];
+  summitNumbers: string[];
+  grades: string[];
+  volunteerIds: string[];
+  dayNumber: number;
+  overview: string;
+  lessonPlanContent: string;
+  activities: PlanActivity[];
+  expectedOutcomes: string[];
+  status?: string;
+};
+
+const emptyForm = (dayNumber = 1): LessonPlanForm => ({
+  panchayatIds: [], villageIds: [], summitNumbers: [], grades: [], volunteerIds: [], dayNumber, overview: '', lessonPlanContent: '',
+  activities: [{ activityNumber: 1, title: '', description: '', duration: 0 }],
+  expectedOutcomes: [''], status: 'Draft',
+});
+
+const visibleToSuperAdmin = (plan: LessonPlan) => [
+  'Submitted', 'Resubmitted', 'Approved', 'Corrections Required', 'Correction Requested',
+  'Edit Request Pending', 'Delete Request Pending',
+].includes(String(plan.status || ''));
 
 export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
-  lessonPlans = [],
-  clusters = [],
-  sessions = [],
-  panchayats = [],
-  volunteers = [],
-  currentUserRole = 'Cluster Admin',
-  currentCluster = 'Dharmapuri',
-  currentAcademicYear = '2025 – 2026',
-  selectedLessonPlanId,
-  onNavigate,
-  onAddLessonPlan,
-  onUpdateLessonPlan,
-  onDeleteLessonPlan,
-  onRefreshLessonPlans,
+  lessonPlans = [], clusters = [], sessions = [], panchayats = [], volunteers = [],
+  currentUserRole = 'Cluster Admin', currentCluster = '', currentClusterId = '',
+  currentAcademicYear = '', selectedLessonPlanId, onNavigate,
+  onAddLessonPlan, onUpdateLessonPlan, onDeleteLessonPlan,
+  onReviewLessonPlan, onRequestLessonPlanAction,
 }) => {
-  // Navigation / View Modes: 'list', 'create', 'edit', 'detail'
-  const [viewMode, setViewMode] = useState<ViewMode>(() => selectedLessonPlanId ? 'detail' : 'list');
-  const [activePlanDetail, setActivePlanDetail] = useState<LessonPlan | null>(() => {
-    if (selectedLessonPlanId) {
-      return lessonPlans.find((lp) => lp.id === selectedLessonPlanId || lp.sessionId === selectedLessonPlanId) || null;
+  const isSuperAdmin = currentUserRole === 'Super Admin';
+  const [viewMode, setViewMode] = useState<ViewMode>(selectedLessonPlanId ? 'detail' : 'list');
+  const [activePlanId, setActivePlanId] = useState(selectedLessonPlanId || '');
+  const [form, setForm] = useState<LessonPlanForm>(() => emptyForm());
+  const [editingPlanId, setEditingPlanId] = useState('');
+  const [search, setSearch] = useState('');
+  const [clusterFilter, setClusterFilter] = useState('all');
+  const [villageFilter, setVillageFilter] = useState('all');
+  const [dayFilter, setDayFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [submitConfirmOpen, setSubmitConfirmOpen] = useState(false);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionText, setCorrectionText] = useState('');
+  const [requestType, setRequestType] = useState<'edit' | 'delete' | null>(null);
+  const [requestReason, setRequestReason] = useState('');
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  const availablePlans = useMemo(
+    () => (isSuperAdmin ? lessonPlans.filter(visibleToSuperAdmin) : lessonPlans),
+    [isSuperAdmin, lessonPlans],
+  );
+  const activePlan = availablePlans.find((plan) => plan.id === activePlanId) || null;
+  const activeCluster = clusters.find((cluster) => cluster.id === currentClusterId);
+  const getClusterDisplayName = (plan: LessonPlan) =>
+    clusters.find((cluster) => cluster.id === plan.clusterId)?.name || plan.cluster || currentCluster || '—';
+  const schedule = sessions.find((session) => Number(session.dayNumber) === Number(form.dayNumber));
+  const plannedDate = schedule?.date ? String(schedule.date).slice(0, 10) : '';
+
+  useEffect(() => {
+    if (!selectedLessonPlanId) return;
+    const matching = lessonPlans.find((plan) => plan.id === selectedLessonPlanId || plan.sessionId === selectedLessonPlanId);
+    if (matching && (!isSuperAdmin || visibleToSuperAdmin(matching))) {
+      setActivePlanId(matching.id);
+      setViewMode('detail');
     }
-    return null;
-  });
+  }, [selectedLessonPlanId, lessonPlans, isSuperAdmin]);
 
-  // Filter States
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDayFilter, setSelectedDayFilter] = useState<number | 'all'>('all');
-  const [selectedStatus, setSelectedStatus] = useState('all');
-  const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
-  const isSuperAdminClusterOverview = currentUserRole === 'Super Admin';
-  const selectedCluster = clusters.find((cluster) => cluster.id === selectedClusterId) || null;
-  const lessonPlansInScope = useMemo(() => {
-    if (!isSuperAdminClusterOverview || !selectedCluster) return lessonPlans;
-    return lessonPlans.filter((plan) =>
-      plan.clusterId === selectedCluster.id ||
-      plan.cluster === selectedCluster.name ||
-      plan.cluster === selectedCluster.id
-    );
-  }, [lessonPlans, isSuperAdminClusterOverview, selectedCluster]);
-  const clusterPlanCount = (cluster: Cluster) => lessonPlans.filter((plan) =>
-    plan.clusterId === cluster.id || plan.cluster === cluster.name || plan.cluster === cluster.id
-  ).length;
+  const villageOptions = useMemo(() => panchayats.flatMap((panchayat) =>
+    panchayat.villages.map((village) => ({
+      id: village.id,
+      name: village.name,
+      panchayatId: panchayat.id,
+      panchayatName: panchayat.name,
+      clusterId: panchayat.clusterId || '',
+    })),
+  ), [panchayats]);
+  const clusterPanchayats = panchayats.filter((panchayat) => !currentClusterId || panchayat.clusterId === currentClusterId);
+  const clusterVillages = villageOptions.filter((village) => !currentClusterId || village.clusterId === currentClusterId);
+  const selectableVillages = clusterVillages.filter((village) => form.panchayatIds.includes(village.panchayatId));
+  const selectableVolunteers = volunteers.filter((volunteer) =>
+    (!currentClusterId || volunteer.clusterId === currentClusterId) && volunteer.status !== 'Inactive',
+  );
 
-  // Correction Modal
-  const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
-  const [correctionReasonInput, setCorrectionReasonInput] = useState('');
+  const filteredPlans = useMemo(() => availablePlans.filter((plan) => {
+    const planClusterId = plan.clusterId || '';
+    const planVillages = plan.villagesList?.length ? plan.villagesList : (plan.villageName ? [plan.villageName] : []);
+    const term = search.trim().toLowerCase();
+    const searchMatches = !term || [plan.topic, plan.title, plan.cluster, plan.teamCollegeName, ...planVillages, plan.overview]
+      .some((value) => String(value || '').toLowerCase().includes(term));
+    const clusterMatches = clusterFilter === 'all' || planClusterId === clusterFilter || plan.cluster === clusters.find((cluster) => cluster.id === clusterFilter)?.name;
+    const villageMatches = villageFilter === 'all' || planVillages.includes(villageFilter);
+    const dayMatches = dayFilter === 'all' || Number(plan.dayNumber || 1) === Number(dayFilter);
+    const statusMatches = statusFilter === 'all' || String(plan.status || 'Draft') === statusFilter;
+    return searchMatches && clusterMatches && villageMatches && dayMatches && statusMatches;
+  }), [availablePlans, search, clusterFilter, villageFilter, dayFilter, statusFilter, clusters]);
 
-  // Clean form state without prefilled placeholder texts
-  const emptyFormState = {
-    id: '',
-    program: 'TALENT QUEST FOR INDIA • STUDENT HOLISTIC DEVELOPMENT PROGRAM',
-    academicYear: currentAcademicYear,
-    cluster: selectedCluster?.name || currentCluster,
-    teamCollegeName: '',
-    panchayatId: '',
-    panchayatName: '',
-    villagesText: '',
-    summitNumbers: '',
-    dayNumber: 1,
-    grades: '',
-    plannedDate: new Date().toISOString().split('T')[0],
-    topic: '',
-    overview: '',
-    grade9Title: '',
-    grade9Description: '',
-    grade11Title: '',
-    grade11Description: '',
-    activity1Title: '',
-    activity1Description: '',
-    activity2Title: '',
-    activity2Description: '',
-    expectedOutcome: '',
-    volunteersText: '',
-    status: 'Draft' as LessonPlan['status'],
+  const statusCounts = useMemo(() => ({
+    total: availablePlans.length,
+    draft: availablePlans.filter((plan) => plan.status === 'Draft').length,
+    submitted: availablePlans.filter((plan) => plan.status === 'Submitted' || plan.status === 'Resubmitted').length,
+    approved: availablePlans.filter((plan) => plan.status === 'Approved').length,
+    corrections: availablePlans.filter((plan) => plan.status === 'Corrections Required' || plan.status === 'Correction Requested').length,
+  }), [availablePlans]);
+
+  const resetFilters = () => {
+    setSearch(''); setClusterFilter('all'); setVillageFilter('all'); setDayFilter('all'); setStatusFilter('all');
   };
 
-  const [formData, setFormData] = useState(emptyFormState);
-  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
-
-  // Filtered Lesson Plans
-  const filteredPlans = useMemo(() => {
-    return lessonPlansInScope.filter((lp) => {
-      const topic = (lp.topic || lp.title || '').toLowerCase();
-      const cluster = (lp.cluster || lp.clusterId || '').toLowerCase();
-      const college = (lp.teamCollegeName || lp.collegeName || '').toLowerCase();
-      const vill = (lp.villagesList?.join(', ') || lp.villageName || '').toLowerCase();
-      const search = searchTerm.toLowerCase().trim();
-
-      const matchSearch =
-        !search ||
-        topic.includes(search) ||
-        cluster.includes(search) ||
-        college.includes(search) ||
-        vill.includes(search) ||
-        (lp.overview || lp.objective || '').toLowerCase().includes(search);
-
-      const matchDay = selectedDayFilter === 'all' || (lp.dayNumber || 1) === selectedDayFilter;
-      const matchStatus = selectedStatus === 'all' || (lp.status || '').toLowerCase() === selectedStatus.toLowerCase();
-
-      return matchSearch && matchDay && matchStatus;
-    });
-  }, [lessonPlansInScope, searchTerm, selectedDayFilter, selectedStatus]);
-
-  // Counts
-  const totalCount = lessonPlansInScope.length;
-  const approvedCount = lessonPlansInScope.filter((lp) => lp.status === 'Approved').length;
-  const submittedCount = lessonPlansInScope.filter((lp) => lp.status === 'Submitted' || lp.status === 'Resubmitted').length;
-  const correctionCount = lessonPlansInScope.filter((lp) => lp.status === 'Correction Requested' || (lp.status as string) === 'Rejected').length;
-
-  const handleClearFilters = () => {
-    setSearchTerm('');
-    setSelectedDayFilter('all');
-    setSelectedStatus('all');
+  const backToList = () => {
+    setActivePlanId('');
+    setViewMode('list');
+    onNavigate('lesson-plan');
   };
 
-  // Open Full-Page Create View
-  const handleOpenCreateView = () => {
-    setFormErrors({});
-    setFormData({
-      ...emptyFormState,
-      dayNumber: selectedDayFilter !== 'all' ? selectedDayFilter : 1,
-      cluster: selectedCluster?.name || currentCluster,
-      academicYear: currentAcademicYear,
-    });
-    setViewMode('create');
+  const openCreate = (dayNumber = 1) => {
+    setError(''); setEditingPlanId(''); setForm(emptyForm(dayNumber)); setViewMode('create');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Open Full-Page Edit View
-  const handleOpenEditView = (plan: LessonPlan) => {
-    setFormErrors({});
-    const act1 = plan.activitiesDetailed?.[0];
-    const act2 = plan.activitiesDetailed?.[1];
-    const gr9 = plan.gradeSegments?.find(g => g.grade.includes('9')) || plan.gradeSegments?.[0];
-    const gr11 = plan.gradeSegments?.find(g => g.grade.includes('11')) || plan.gradeSegments?.[1];
-
-    setFormData({
-      id: plan.id,
-      program: 'TALENT QUEST FOR INDIA • STUDENT HOLISTIC DEVELOPMENT PROGRAM',
-      academicYear: plan.academicYear || currentAcademicYear,
-      cluster: plan.cluster || currentCluster,
-      teamCollegeName: plan.teamCollegeName || plan.collegeName || '',
-      panchayatId: plan.panchayatId || '',
-      panchayatName: plan.panchayatName || '',
-      villagesText: plan.villagesList?.join(', ') || plan.villageName || '',
-      summitNumbers: plan.summitNumbers || '',
-      dayNumber: plan.dayNumber || 1,
-      grades: plan.grades || plan.targetStandard || '',
-      plannedDate: plan.date || new Date().toISOString().split('T')[0],
-      topic: plan.topic || plan.title || '',
+  const openEdit = (plan: LessonPlan) => {
+    const villageIds = plan.villageIds?.length
+      ? plan.villageIds
+      : plan.villageId
+        ? [plan.villageId]
+        : villageOptions.filter((village) => (plan.villagesList || [plan.villageName || '']).includes(village.name)).map((village) => village.id);
+    const panchayatIds = plan.panchayatIds?.length
+      ? plan.panchayatIds
+      : plan.panchayatId
+        ? [plan.panchayatId]
+        : [...new Set(villageOptions.filter((village) => villageIds.includes(village.id)).map((village) => village.panchayatId))];
+    setError(''); setEditingPlanId(plan.id);
+    setForm({
+      panchayatIds,
+      villageIds,
+      summitNumbers: plan.summitNumbersList?.length ? [...plan.summitNumbersList] : (plan.summitNumbers || '').split(',').map((value) => value.trim()).filter(Boolean),
+      grades: plan.gradesList?.length ? [...plan.gradesList] : (plan.grades || plan.targetStandard || '').split(',').map((value) => value.trim()).filter(Boolean),
+      volunteerIds: plan.volunteerIds?.length
+        ? [...plan.volunteerIds]
+        : selectableVolunteers.filter((volunteer) => (plan.assignedVolunteers || []).includes(volunteer.name)).map((volunteer) => volunteer.id),
+      dayNumber: Number(plan.dayNumber || 1),
       overview: plan.overview || plan.objective || '',
-      grade9Title: gr9?.title || '',
-      grade9Description: gr9?.description || '',
-      grade11Title: gr11?.title || '',
-      grade11Description: gr11?.description || '',
-      activity1Title: act1?.title || '',
-      activity1Description: act1?.description || '',
-      activity2Title: act2?.title || '',
-      activity2Description: act2?.description || '',
-      expectedOutcome: plan.expectedOutcome || (plan.learningOutcomes?.join('\n') || ''),
-      volunteersText: plan.assignedVolunteers?.join(', ') || plan.volunteerName || '',
+      lessonPlanContent: plan.gradeSegments?.map((segment) => segment.description).filter(Boolean).join('\n\n') || '',
+      activities: plan.activitiesDetailed?.length
+        ? plan.activitiesDetailed.map((activity) => ({ ...activity, duration: Number(activity.duration || 0) }))
+        : [{ activityNumber: 1, title: '', description: '', duration: 0 }],
+      expectedOutcomes: plan.expectedOutcomes?.length ? [...plan.expectedOutcomes] : (plan.expectedOutcome ? plan.expectedOutcome.split('\n').filter(Boolean) : ['']),
       status: plan.status || 'Draft',
     });
-    setViewMode('edit');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setViewMode('edit'); window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Open Full-Page Document Detail View
-  const handleOpenDetailView = (plan: LessonPlan) => {
-    setActivePlanDetail(plan);
-    setViewMode('detail');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  const toPayload = (status: 'Draft' | 'Submitted'): Omit<LessonPlan, 'id'> => {
+    const selectedVillages = villageOptions.filter((item) => form.villageIds.includes(item.id));
+    const selectedPanchayats = clusterPanchayats.filter((item) => form.panchayatIds.includes(item.id));
+    const villageNames = selectedVillages.map((village) => village.name);
+    const panchayatNames = selectedPanchayats.map((panchayat) => panchayat.name);
+    const teamName = activeCluster?.collegeName || activeCluster?.name || currentCluster;
+    const gradeSegments = form.lessonPlanContent.trim()
+      ? [{ grade: 'Summit', title: 'Lesson Plan Content', description: form.lessonPlanContent.trim() }]
+      : [];
+    const activitiesDetailed = form.activities
+      .filter((activity) => activity.title.trim() || activity.description.trim())
+      .map((activity, index) => ({ ...activity, activityNumber: index + 1 }));
+    const outcomes = form.expectedOutcomes.map((outcome) => outcome.trim()).filter(Boolean);
+    const selectedVolunteers = selectableVolunteers.filter((volunteer) => form.volunteerIds.includes(volunteer.id));
+    const volunteerRoster = selectedVolunteers.map((volunteer) => ({
+      name: volunteer.name,
+      role: volunteer.role || 'Volunteer',
+      phone: volunteer.phone || '',
+      year: volunteer.year || '',
+    }));
+    return {
+      sessionName: schedule?.name || `Day ${form.dayNumber}`,
+      title: `Day ${form.dayNumber} Lesson Plan`,
+      topic: `Day ${form.dayNumber} Lesson Plan`,
+      academicYear: currentAcademicYear,
+      cluster: activeCluster?.name || currentCluster,
+      clusterId: currentClusterId || activeCluster?.id || '',
+      teamCollegeName: teamName,
+      panchayatId: selectedPanchayats[0]?.id || '',
+      panchayatIds: form.panchayatIds,
+      panchayatName: panchayatNames.join(', '),
+      panchayatNames,
+      villageId: selectedVillages[0]?.id || '',
+      villageIds: form.villageIds,
+      villageName: villageNames.join(', '),
+      villagesList: villageNames,
+      summitNumbers: form.summitNumbers.join(', '),
+      summitNumbersList: form.summitNumbers,
+      dayNumber: form.dayNumber,
+      grades: form.grades.join(', '),
+      gradesList: form.grades,
+      targetStandard: form.grades.join(', '),
+      date: plannedDate,
+      overview: form.overview.trim(),
+      objective: form.overview.trim(),
+      gradeSegments,
+      activitiesDetailed,
+      expectedOutcomes: outcomes,
+      expectedOutcome: outcomes.join('\n'),
+      volunteerRoster,
+      volunteerIds: form.volunteerIds,
+      assignedVolunteers: volunteerRoster.map((volunteer) => volunteer.name),
+      volunteersCount: volunteerRoster.length,
+      status,
+    } as Omit<LessonPlan, 'id'>;
   };
 
-  // Form Submit
-  const handleFormSubmit = (targetStatus: LessonPlan['status']) => {
-    const errors: Record<string, string> = {};
-    if (!formData.topic.trim()) errors.topic = 'Please enter the session topic or theme.';
-    if (!formData.teamCollegeName.trim()) errors.teamCollegeName = 'Please enter the team or college name.';
-    if (!formData.villagesText.trim()) errors.villagesText = 'Please enter covered village names.';
-    if (!formData.overview.trim()) errors.overview = 'Please enter the session overview.';
-
-    if (Object.keys(errors).length > 0) {
-      setFormErrors(errors);
+  const savePlan = async (status: 'Draft' | 'Submitted') => {
+    setError('');
+    if (!form.panchayatIds.length || !form.villageIds.length || !form.summitNumbers.length || !form.overview.trim()) {
+      setError('Select at least one panchayat, village, and summit number, and complete the overview before saving.');
       return;
     }
-
-    const villagesList = formData.villagesText.split(',').map(s => s.trim()).filter(Boolean);
-    const assignedVolunteers = formData.volunteersText.split(',').map(s => s.trim()).filter(Boolean);
-
-    const gradeSegments = [
-      { grade: 'Grade IX', title: formData.grade9Title.trim(), description: formData.grade9Description.trim() },
-      { grade: 'Grade XI', title: formData.grade11Title.trim(), description: formData.grade11Description.trim() }
-    ].filter(g => g.title || g.description);
-
-    const activitiesDetailed = [
-      { activityNumber: 1, title: formData.activity1Title.trim(), description: formData.activity1Description.trim() },
-      { activityNumber: 2, title: formData.activity2Title.trim(), description: formData.activity2Description.trim() }
-    ].filter(a => a.title || a.description);
-
-    const payload: Partial<LessonPlan> = {
-      title: formData.topic.trim(),
-      topic: formData.topic.trim(),
-      academicYear: formData.academicYear,
-      cluster: formData.cluster,
-      teamCollegeName: formData.teamCollegeName.trim(),
-      panchayatId: formData.panchayatId,
-      panchayatName: formData.panchayatName,
-      villagesList: villagesList,
-      villageName: villagesList[0] || '',
-      summitNumbers: formData.summitNumbers.trim(),
-      dayNumber: formData.dayNumber,
-      grades: formData.grades.trim(),
-      targetStandard: formData.grades.trim(),
-      date: formData.plannedDate,
-      overview: formData.overview.trim(),
-      objective: formData.overview.trim(),
-      gradeSegments: gradeSegments,
-      activitiesDetailed: activitiesDetailed,
-      expectedOutcome: formData.expectedOutcome.trim(),
-      assignedVolunteers: assignedVolunteers,
-      volunteerName: assignedVolunteers[0] || '',
-      status: targetStatus,
-      lastUpdated: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}`,
-    };
-
-    if (viewMode === 'edit' && formData.id) {
-      onUpdateLessonPlan(formData.id, payload);
-      if (activePlanDetail?.id === formData.id) {
-        setActivePlanDetail((prev) => (prev ? { ...prev, ...payload } : null));
-      }
-    } else {
-      const newPlan: Omit<LessonPlan, 'id'> = {
-        ...payload,
-        sessionName: formData.topic.trim(),
-        volunteersCount: assignedVolunteers.length,
-      };
-      onAddLessonPlan(newPlan);
+    if (!plannedDate) {
+      setError(`No planned date is configured for Day ${form.dayNumber}. Set the date in the academic schedule before saving.`);
+      return;
     }
-
-    setViewMode('list');
+    setBusy(true);
+    try {
+      const payload = toPayload(status);
+      if (editingPlanId) await onUpdateLessonPlan(editingPlanId, payload);
+      else await onAddLessonPlan(payload);
+      setEditingPlanId('');
+      backToList();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Unable to save lesson plan.');
+    } finally { setBusy(false); }
   };
 
-  // Status Action: Approve
-  const handleApprovePlan = (planId: string) => {
-    onUpdateLessonPlan(planId, {
-      status: 'Approved',
-      correctionReason: undefined,
-      correctionRequestedBy: undefined,
-      lastUpdated: 'Approved by Super Admin',
-    });
-    if (activePlanDetail?.id === planId) {
-      setActivePlanDetail((prev) => (prev ? { ...prev, status: 'Approved', correctionReason: undefined } : null));
+  const openSubmitConfirmation = () => {
+    setError('');
+    if (!form.panchayatIds.length || !form.villageIds.length || !form.summitNumbers.length || !form.overview.trim()) {
+      setError('Select at least one panchayat, village, and summit number, and complete the overview before submitting.');
+      return;
     }
+    if (!plannedDate) {
+      setError(`No planned date is configured for Day ${form.dayNumber}. Set the date in the academic schedule before submitting.`);
+      return;
+    }
+    setSubmitConfirmOpen(true);
   };
 
-  // Status Action: Submit Correction Request
-  const handleSubmitCorrection = () => {
-    if (!activePlanDetail || !correctionReasonInput.trim()) return;
-
-    onUpdateLessonPlan(activePlanDetail.id, {
-      status: 'Correction Requested',
-      correctionReason: correctionReasonInput.trim(),
-      correctionRequestedBy: currentUserRole === 'Super Admin' ? 'Super Admin' : 'Cluster Admin',
-      correctionDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-      lastUpdated: 'Correction requested',
-    });
-
-    setActivePlanDetail((prev) =>
-      prev
-        ? {
-            ...prev,
-            status: 'Correction Requested',
-            correctionReason: correctionReasonInput.trim(),
-            correctionRequestedBy: currentUserRole === 'Super Admin' ? 'Super Admin' : 'Cluster Admin',
-            correctionDate: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
-          }
-        : null
-    );
-
-    setIsCorrectionModalOpen(false);
-    setCorrectionReasonInput('');
+  const confirmSubmit = async () => {
+    setSubmitConfirmOpen(false);
+    await savePlan('Submitted');
   };
 
-  // Export PDF / Print
-  const handlePrintPDF = () => {
-    window.print();
+  const runReview = async (action: 'approve' | 'correction', reason?: string) => {
+    if (!activePlan || !onReviewLessonPlan) return;
+    setBusy(true); setError('');
+    try {
+      await onReviewLessonPlan(activePlan.id, action, reason);
+      if (action === 'correction') setCorrectionOpen(false);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : 'Unable to review lesson plan.');
+    } finally { setBusy(false); }
   };
 
-  // Status Badge Helper
-  const renderStatusBadge = (status?: string) => {
+  const submitRequest = async () => {
+    if (!activePlan || !requestType || !requestReason.trim() || !onRequestLessonPlanAction) return;
+    setBusy(true); setError('');
+    try {
+      await onRequestLessonPlanAction(activePlan.id, requestType, requestReason.trim());
+      setRequestType(null); setRequestReason('');
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'Unable to send request.');
+    } finally { setBusy(false); }
+  };
+
+  const deleteDraft = async () => {
+    if (!activePlan || !onDeleteLessonPlan) return;
+    setBusy(true); setError('');
+    try {
+      await onDeleteLessonPlan(activePlan.id);
+      setDeleteConfirmOpen(false);
+      backToList();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete draft.');
+    } finally { setBusy(false); }
+  };
+
+  const statusStyle = (status?: string) => {
     switch (status) {
-      case 'Approved':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:border-emerald-500/20">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            Approved
-          </span>
-        );
-      case 'Submitted':
-      case 'Resubmitted':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20">
-            <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-            Submitted
-          </span>
-        );
-      case 'Correction Requested':
-      case 'Rejected':
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300 dark:bg-amber-500/10 dark:text-amber-400 dark:border-amber-500/20">
-            <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-            Correction Requested
-          </span>
-        );
-      case 'Draft':
-      default:
-        return (
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-gray-100 text-gray-700 border border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700">
-            <span className="w-2 h-2 rounded-full bg-gray-400"></span>
-            Draft
-          </span>
-        );
+      case 'Approved': return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+      case 'Submitted': case 'Resubmitted': return 'border-blue-200 bg-blue-50 text-blue-700';
+      case 'Corrections Required': case 'Correction Requested': case 'Rejected': return 'border-red-200 bg-red-50 text-red-700';
+      case 'Edit Request Pending': case 'Delete Request Pending': return 'border-orange-200 bg-orange-50 text-orange-700';
+      default: return 'border-amber-200 bg-amber-50 text-amber-800';
     }
   };
 
-  // ==========================================
-  // VIEW 1: FULL DOCUMENT DETAIL VIEW (No popup)
-  // ==========================================
-  if (viewMode === 'detail' && activePlanDetail) {
+  const StatusBadge = ({ status }: { status?: string }) => (
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${statusStyle(status)}`}>
+      {status === 'Correction Requested' ? 'Corrections Required' : status || 'Draft'}
+    </span>
+  );
+
+  if (viewMode === 'detail' && activePlan) {
+    const canEdit = !isSuperAdmin && (activePlan.status === 'Draft' || activePlan.status === 'Corrections Required' || activePlan.status === 'Correction Requested');
+    const canRequestChange = !isSuperAdmin && (activePlan.status === 'Submitted' || activePlan.status === 'Approved');
+    const canReview = isSuperAdmin && (activePlan.status === 'Submitted' || activePlan.status === 'Resubmitted');
+    const villages = activePlan.villagesList?.join(', ') || activePlan.villageName || '—';
+    const outcomes = activePlan.expectedOutcomes?.length ? activePlan.expectedOutcomes : (activePlan.expectedOutcome || '').split('\n').filter(Boolean);
+    const roster: NonNullable<LessonPlan['volunteerRoster']> = activePlan.volunteerRoster?.length
+      ? activePlan.volunteerRoster
+      : (activePlan.assignedVolunteers || []).map((name) => ({ name, role: '', phone: '', year: '' }));
     return (
-      <div className="w-full max-w-5xl mx-auto space-y-6 pb-12">
-        {/* Top Navigation Banner */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-800">
-          <button
-            type="button"
-            onClick={() => setViewMode('list')}
-            className="inline-flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white transition group"
-          >
-            <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
-            <span>Back to All Lesson Plans</span>
-          </button>
-
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {renderStatusBadge(activePlanDetail.status)}
-            <button
-              type="button"
-              onClick={() => exportLessonPlanExcel(activePlanDetail)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 text-sm font-semibold rounded-xl shadow-theme-xs transition"
-              title="Export this Lesson Plan to Excel (.xlsx)"
-            >
-              <Download className="w-4 h-4 text-emerald-600" />
-              <span>Excel</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => exportLessonPlanPdf(activePlanDetail)}
-              className="inline-flex items-center gap-2 px-3.5 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 text-sm font-semibold rounded-xl shadow-theme-xs transition"
-            >
-              <Download className="w-4 h-4 text-brand-500" />
-              <span>PDF Document</span>
-            </button>
-            {(currentUserRole === 'Super Admin' || activePlanDetail.status === 'Draft' || activePlanDetail.status === 'Correction Requested') && (
-              <button
-                type="button"
-                onClick={() => handleOpenEditView(activePlanDetail)}
-                className="inline-flex items-center gap-2 px-4 py-2 bg-brand-500 hover:bg-brand-600 text-white text-sm font-semibold rounded-xl shadow-theme-xs transition"
-              >
-                <Edit3 className="w-4 h-4" />
-                <span>Edit Document</span>
-              </button>
-            )}
+      <main className="mx-auto w-full max-w-6xl space-y-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" onClick={backToList} className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 hover:text-[#123C75]"><ArrowLeft className="h-4 w-4" /> Back to Lesson Plans</button>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={activePlan.status} />
+            <button type="button" onClick={() => exportLessonPlanPdf({ ...activePlan, cluster: getClusterDisplayName(activePlan) })} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><Download className="h-4 w-4" /> Export PDF</button>
+            {canEdit && <button type="button" onClick={() => openEdit(activePlan)} className="rounded-xl bg-[#123C75] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[#0D2F5D]">Edit</button>}
+            {canRequestChange && <>
+              <button type="button" onClick={() => { setRequestType('edit'); setRequestReason(''); }} className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700">Request Edit</button>
+              <button type="button" onClick={() => { setRequestType('delete'); setRequestReason(''); }} className="rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2 text-sm font-semibold text-orange-700">Request Delete</button>
+            </>}
+            {activePlan.status === 'Draft' && !isSuperAdmin && <button type="button" onClick={() => setDeleteConfirmOpen(true)} className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"><Trash2 className="h-4 w-4" /> Delete</button>}
           </div>
         </div>
 
-        {/* Official Printable Document Layout */}
-        <div className="bg-white dark:bg-gray-900 rounded-3xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 sm:p-12 space-y-8 print:p-0 print:border-none print:shadow-none">
-          {/* Official Letterhead */}
-          <div className="text-center pb-6 border-b-2 border-gray-900 dark:border-gray-100 space-y-1.5">
-            <h1 className="text-lg sm:text-2xl font-black tracking-wide uppercase text-gray-900 dark:text-white">
-              TALENT QUEST FOR INDIA • STUDENT HOLISTIC DEVELOPMENT PROGRAM
-            </h1>
-            <div className="text-sm font-bold tracking-widest text-gray-600 dark:text-gray-400 uppercase">
-              ACADEMIC YEAR : {activePlanDetail.academicYear || currentAcademicYear}
-            </div>
-            <div className="text-base sm:text-lg font-extrabold text-brand-600 dark:text-brand-400 uppercase tracking-wide pt-1">
-              LESSON PLAN FOR THE SUMMIT
-            </div>
-          </div>
+        {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        <article className="space-y-7 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-9">
+          <header className="border-b-2 border-[#123C75] pb-5 text-center">
+            <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-xl bg-[#F0F6FF]"><img src="/logo.png" alt="TQI" className="max-h-12 max-w-12 object-contain" /></div>
+            <h1 className="text-lg font-extrabold tracking-wide text-slate-900">TALENT QUEST FOR INDIA</h1>
+            <p className="text-sm font-medium text-slate-600">Student Holistic Development Program</p>
+            <p className="mt-3 text-base font-bold uppercase tracking-wide text-[#123C75]">Lesson Plan for the Summit</p>
+            <p className="mt-1 text-xs font-semibold text-slate-500">Academic Year: {activePlan.academicYear || currentAcademicYear || '—'}</p>
+          </header>
 
-          {/* Key Metadata Table */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-5 bg-gray-50/80 dark:bg-white/[0.02] rounded-2xl border border-gray-200 dark:border-gray-800 text-sm">
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">Cluster: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">{activePlanDetail.cluster || currentCluster}</span>
-            </div>
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">Team: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">{activePlanDetail.teamCollegeName || activePlanDetail.collegeName || 'Not Specified'}</span>
-            </div>
-            <div className="sm:col-span-2 space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">Villages Name: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">
-                {activePlanDetail.villagesList?.join(', ') || activePlanDetail.villageName || 'Not Specified'}
-              </span>
-            </div>
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">No. of the Summit: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">{activePlanDetail.summitNumbers || '—'}</span>
-            </div>
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">No. of Session/Day: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">Day {String(activePlanDetail.dayNumber || 1).padStart(2, '0')}</span>
-            </div>
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">Grade: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">{activePlanDetail.grades || activePlanDetail.targetStandard || '—'}</span>
-            </div>
-            <div className="space-y-1">
-              <span className="font-bold text-gray-900 dark:text-white">Planned Date: </span>
-              <span className="text-gray-700 dark:text-gray-300 font-medium">{activePlanDetail.date || '—'}</span>
-            </div>
-          </div>
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {[
+              ['Cluster', getClusterDisplayName(activePlan)], ['Team', activePlan.teamCollegeName || activePlan.collegeName || '—'], ['Panchayat', activePlan.panchayatNames?.join(', ') || activePlan.panchayatName || '—'], ['Village Name', villages],
+              ['No. of Summit', activePlan.summitNumbers || '—'], ['Session / Day', `Day ${activePlan.dayNumber || 1}`],
+              ['Planned Date', activePlan.date || '—'], ['Submitted By', activePlan.submittedBy || activePlan.createdBy || '—'], ['Submitted Date', activePlan.submittedAt ? new Date(activePlan.submittedAt).toLocaleDateString() : activePlan.lastUpdated || '—'],
+            ].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-200 bg-[#F8FAFD] p-3"><div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</div><div className="mt-1 text-sm font-semibold text-slate-800">{value}</div></div>)}
+          </section>
 
-          {/* Section 1: Overview */}
-          <div className="space-y-3">
-            <h3 className="text-base font-extrabold uppercase tracking-wide text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-800 pb-1.5">
-              An Overview:
-            </h3>
-            <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed text-justify whitespace-pre-line">
-              {activePlanDetail.overview || activePlanDetail.objective || 'No overview provided.'}
-            </p>
-          </div>
+          <DocumentSection title="Overview"><p className="whitespace-pre-line text-sm leading-7 text-slate-700">{activePlan.overview || activePlan.objective || '—'}</p></DocumentSection>
+          <DocumentSection title="Lesson Plan Content">{activePlan.gradeSegments?.length ? activePlan.gradeSegments.map((segment, index) => <div key={`${segment.grade}-${index}`} className="mb-3 last:mb-0"><div className="font-semibold text-slate-800">{segment.title || 'Summit content'}</div><p className="whitespace-pre-line text-sm leading-7 text-slate-700">{segment.description}</p></div>) : <p className="whitespace-pre-line text-sm leading-7 text-slate-700">{activePlan.description || '—'}</p>}</DocumentSection>
+          <DocumentSection title="Detailed View / Activities"><div className="overflow-x-auto"><table className="w-full min-w-[560px] border-collapse text-left text-sm"><thead className="bg-[#EFF5FC] text-xs uppercase text-slate-600"><tr><th className="border border-slate-200 p-2.5">S.No</th><th className="border border-slate-200 p-2.5">Activity / Task</th><th className="border border-slate-200 p-2.5">Description</th><th className="border border-slate-200 p-2.5">Time (mins)</th></tr></thead><tbody>{(activePlan.activitiesDetailed || []).map((activity, index) => <tr key={`${activity.activityNumber}-${index}`} className="break-inside-avoid"><td className="border border-slate-200 p-2.5">{index + 1}</td><td className="border border-slate-200 p-2.5 font-semibold">{activity.title || '—'}</td><td className="whitespace-pre-line border border-slate-200 p-2.5">{activity.description || '—'}</td><td className="border border-slate-200 p-2.5">{activity.duration || '—'}</td></tr>)}</tbody></table></div></DocumentSection>
+          <DocumentSection title="Expected Outcome"><ul className="list-disc space-y-1 pl-5 text-sm leading-6 text-slate-700">{outcomes.length ? outcomes.map((outcome, index) => <li key={index}>{outcome}</li>) : <li>—</li>}</ul></DocumentSection>
+          <DocumentSection title="Volunteers Involved"><div className="overflow-x-auto"><table className="w-full min-w-[420px] border-collapse text-left text-sm"><thead className="bg-[#EFF5FC] text-xs uppercase text-slate-600"><tr><th className="w-16 border border-slate-200 p-2.5">S.No</th><th className="border border-slate-200 p-2.5">Volunteer Name</th><th className="w-36 border border-slate-200 p-2.5">Contact</th><th className="w-24 border border-slate-200 p-2.5">Year</th></tr></thead><tbody>{roster.map((volunteer, index) => <tr key={`${volunteer.name}-${index}`} className="break-inside-avoid"><td className="border border-slate-200 p-2.5">{index + 1}</td><td className="border border-slate-200 p-2.5 font-medium">{volunteer.name}</td><td className="border border-slate-200 p-2.5">{volunteer.phone || '—'}</td><td className="border border-slate-200 p-2.5">{volunteer.year || '—'}</td></tr>)}</tbody></table></div></DocumentSection>
+          {activePlan.correctionReason && <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"><strong>Correction / edit feedback</strong><p className="mt-1 whitespace-pre-line">{activePlan.correctionReason}</p></div>}
+          {(activePlan.editRequestReason || activePlan.deleteRequestReason) && <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 text-sm text-orange-800"><strong>Request reason</strong><p className="mt-1 whitespace-pre-line">{activePlan.editRequestReason || activePlan.deleteRequestReason}</p></div>}
+          {canReview && <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-5"><button type="button" disabled={busy} onClick={() => setCorrectionOpen(true)} className="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-700 disabled:opacity-50">Send for Resubmission</button><button type="button" disabled={busy} onClick={() => void runReview('approve')} className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">Approve</button></div>}
+        </article>
 
-          {/* Section 2: Grade Modules */}
-          {activePlanDetail.gradeSegments && activePlanDetail.gradeSegments.length > 0 && (
-            <div className="space-y-6">
-              {activePlanDetail.gradeSegments.map((segment, idx) => (
-                <div key={idx} className="space-y-2">
-                  <h3 className="text-base font-extrabold uppercase tracking-wide text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-800 pb-1.5">
-                    {segment.grade}: {segment.title}
-                  </h3>
-                  <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed text-justify whitespace-pre-line">
-                    {segment.description}
-                  </p>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Section 3: Detailed Activities */}
-          {activePlanDetail.activitiesDetailed && activePlanDetail.activitiesDetailed.length > 0 && (
-            <div className="space-y-6">
-              <h3 className="text-base font-extrabold uppercase tracking-wide text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-800 pb-1.5">
-                Detailed View:
-              </h3>
-              <div className="space-y-5">
-                {activePlanDetail.activitiesDetailed.map((act, idx) => (
-                  <div key={idx} className="p-5 rounded-2xl bg-gray-50/70 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 space-y-2">
-                    <h4 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                      <span className="w-6 h-6 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center font-bold">
-                        {act.activityNumber || idx + 1}
-                      </span>
-                      <span>Event/Task/Activity – {act.activityNumber || idx + 1}: {act.title}</span>
-                    </h4>
-                    <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed text-justify whitespace-pre-line pl-8">
-                      {act.description}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Section 4: Expected Outcome */}
-          <div className="space-y-3">
-            <h3 className="text-base font-extrabold uppercase tracking-wide text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-800 pb-1.5">
-              Expected Outcome:
-            </h3>
-            <p className="text-sm sm:text-base text-gray-700 dark:text-gray-300 leading-relaxed text-justify whitespace-pre-line">
-              {activePlanDetail.expectedOutcome || 'No specific expected outcome recorded.'}
-            </p>
-          </div>
-
-          {/* Section 5: Volunteers List */}
-          <div className="space-y-3">
-            <h3 className="text-base font-extrabold uppercase tracking-wide text-gray-900 dark:text-white border-b border-gray-200 dark:border-gray-800 pb-1.5">
-              Volunteers Name who going take session:
-            </h3>
-            {activePlanDetail.assignedVolunteers && activePlanDetail.assignedVolunteers.length > 0 ? (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-1">
-                {activePlanDetail.assignedVolunteers.map((vol, i) => (
-                  <div key={i} className="flex items-center gap-2 p-2.5 rounded-xl bg-gray-50 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 text-sm font-semibold text-gray-800 dark:text-gray-200">
-                    <span className="w-2 h-2 rounded-full bg-brand-500"></span>
-                    <span className="truncate">{vol}</span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No volunteers listed.</p>
-            )}
-          </div>
-
-          {/* Review Feedback Alert if Correction Requested */}
-          {activePlanDetail.correctionReason && (
-            <div className="p-5 bg-amber-50 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/20 rounded-2xl space-y-1.5">
-              <div className="font-bold text-amber-900 dark:text-amber-300 text-sm flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-amber-600" />
-                <span>Correction Feedback from {activePlanDetail.correctionRequestedBy || 'Reviewer'}:</span>
-              </div>
-              <p className="text-sm text-amber-800 dark:text-amber-400 pl-7">&quot;{activePlanDetail.correctionReason}&quot;</p>
-            </div>
-          )}
-
-          {/* Super Admin Decision Footer inside Detail View */}
-          {currentUserRole === 'Super Admin' && (activePlanDetail.status === 'Submitted' || activePlanDetail.status === 'Resubmitted') && (
-            <div className="pt-6 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setIsCorrectionModalOpen(true)}
-                className="px-5 py-2.5 rounded-xl border border-amber-300 bg-amber-50 hover:bg-amber-100 text-amber-800 dark:bg-amber-500/10 dark:text-amber-300 text-sm font-semibold transition"
-              >
-                Request Correction
-              </button>
-              <button
-                type="button"
-                onClick={() => handleApprovePlan(activePlanDetail.id)}
-                className="px-6 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold shadow-theme-xs transition"
-              >
-                Approve Lesson Plan
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Correction Feedback Modal */}
-        {isCorrectionModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/60 backdrop-blur-sm p-4">
-            <div className="w-full max-w-md bg-white dark:bg-gray-900 rounded-3xl shadow-2xl p-6 border border-gray-200 dark:border-gray-800 space-y-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-gray-900 dark:text-white">Request Plan Revision</h3>
-                  <p className="text-xs text-gray-500">Provide actionable feedback to the cluster admin.</p>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                  Required Changes / Feedback
-                </label>
-                <textarea
-                  rows={4}
-                  value={correctionReasonInput}
-                  onChange={(e) => setCorrectionReasonInput(e.target.value)}
-                  placeholder="Enter revision points clearly..."
-                  className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCorrectionModalOpen(false)}
-                  className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={!correctionReasonInput.trim()}
-                  onClick={handleSubmitCorrection}
-                  className="px-5 py-2 text-sm font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-xl disabled:opacity-50"
-                >
-                  Send Feedback
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
+        {correctionOpen && <Modal title="Send Lesson Plan for Correction" onClose={() => setCorrectionOpen(false)}><label className="block text-sm font-semibold text-slate-700">Correction / Feedback <span className="text-red-600">*</span></label><textarea rows={5} value={correctionText} onChange={(event) => setCorrectionText(event.target.value)} placeholder="Please correct the village name and update the expected outcomes." className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none" /><ModalActions onCancel={() => setCorrectionOpen(false)} confirmLabel="Send for Resubmission" disabled={!correctionText.trim() || busy} onConfirm={() => { void runReview('correction', correctionText.trim()); setCorrectionText(''); }} /></Modal>}
+        {requestType && <Modal title={requestType === 'edit' ? 'Request Edit Access' : 'Request Lesson Plan Deletion'} onClose={() => setRequestType(null)}><label className="block text-sm font-semibold text-slate-700">Reason for {requestType === 'edit' ? 'edit' : 'deletion'} <span className="text-red-600">*</span></label><textarea rows={4} value={requestReason} onChange={(event) => setRequestReason(event.target.value)} placeholder={requestType === 'edit' ? 'Correction required in village name.' : 'Explain why this submitted lesson plan should be deleted.'} className="mt-2 w-full rounded-xl border border-slate-300 p-3 text-sm focus:border-blue-500 focus:outline-none" /><ModalActions onCancel={() => setRequestType(null)} confirmLabel="Send Request" disabled={!requestReason.trim() || busy} onConfirm={() => void submitRequest()} /></Modal>}
+        {deleteConfirmOpen && <Modal title="Delete Draft Lesson Plan?" onClose={() => setDeleteConfirmOpen(false)}><p className="text-sm leading-6 text-slate-600">This draft will be permanently deleted. Submitted and approved plans must go through Super Admin approval.</p><ModalActions onCancel={() => setDeleteConfirmOpen(false)} confirmLabel="Delete Draft" destructive disabled={busy} onConfirm={() => void deleteDraft()} /></Modal>}
+      </main>
     );
   }
 
-  // ==========================================
-  // VIEW 2: FULL-PAGE CREATE / EDIT FORM (No popup)
-  // ==========================================
   if (viewMode === 'create' || viewMode === 'edit') {
+    const teamName = activeCluster?.collegeName || activeCluster?.name || currentCluster || '—';
     return (
-      <div className="w-full max-w-5xl mx-auto space-y-6 pb-16">
-        {/* Top Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-gray-200 dark:border-gray-800">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className="p-2 rounded-xl border border-gray-200 dark:border-gray-800 hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-300 transition"
-              title="Cancel and return"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-                {viewMode === 'edit' ? 'Edit Summit Lesson Plan' : 'Create New Summit Lesson Plan'}
-              </h1>
-              <p className="text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-                Official TQI Student Holistic Development Program summit template. Fill out all sections below.
-              </p>
-            </div>
+      <main className="mx-auto w-full max-w-5xl space-y-5 pb-8">
+        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><button type="button" onClick={backToList} className="rounded-xl border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"><ArrowLeft className="h-5 w-5" /></button><div><h1 className="text-xl font-bold text-slate-900">{viewMode === 'edit' ? 'Edit Lesson Plan' : 'Create Lesson Plan'}</h1><p className="mt-1 text-sm text-slate-500">Official TQI Summit lesson-plan structure · {currentAcademicYear || 'Academic year'}</p></div></div></div>
+        {error && <div role="alert" className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center shadow-sm sm:p-7"><div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-xl bg-[#F0F6FF]"><img src="/logo.png" alt="TQI" className="max-h-10 max-w-10 object-contain" /></div><h2 className="text-sm font-extrabold tracking-wide text-slate-900">TALENT QUEST FOR INDIA</h2><p className="text-xs text-slate-500">Student Holistic Development Program</p><p className="mt-2 text-sm font-bold uppercase tracking-wide text-[#123C75]">Lesson Plan for the Summit</p><p className="mt-1 text-xs text-slate-500">Academic Year: {currentAcademicYear || '—'}</p></div>
+        <SectionCard title="Basic Information" description="Cluster, team, session date, and academic year are filled from your account and schedule.">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <ReadOnlyField label="Cluster" value={activeCluster?.name || currentCluster || '—'} />
+            <ReadOnlyField label="Team" value={teamName} />
+            <ReadOnlyField label="Session / Day" value={`Day ${form.dayNumber} · ${schedule?.name || 'Summit session'}`} />
+            <ReadOnlyField label="Planned Date" value={plannedDate || 'No date scheduled'} />
+            <ReadOnlyField label="Academic Year" value={currentAcademicYear || '—'} />
+            <MultiSelectField
+              label="Panchayat"
+              placeholder="Select panchayat(s)"
+              options={clusterPanchayats.map((panchayat) => ({ value: panchayat.id, label: panchayat.name }))}
+              selected={form.panchayatIds}
+              onChange={(selected) => setForm((current) => ({
+                ...current,
+                panchayatIds: selected,
+                villageIds: current.villageIds.filter((villageId) => clusterVillages.some((village) => village.id === villageId && selected.includes(village.panchayatId))),
+              }))}
+            />
+            <MultiSelectField
+              label="Village Name"
+              placeholder={form.panchayatIds.length ? 'Select village(s)' : 'Select panchayat first'}
+              options={selectableVillages.map((village) => ({ value: village.id, label: `${village.name} · ${village.panchayatName}` }))}
+              selected={form.villageIds}
+              disabled={!form.panchayatIds.length}
+              onChange={(selected) => setForm((current) => ({ ...current, villageIds: selected }))}
+            />
+            <MultiSelectField
+              label="No. of Summit"
+              placeholder="Select summit number(s)"
+              options={['I', 'II', 'III', 'IV'].map((value) => ({ value, label: `Summit ${value}` }))}
+              selected={form.summitNumbers}
+              onChange={(selected) => setForm((current) => ({ ...current, summitNumbers: selected }))}
+            />
+            <MultiSelectField
+              label="Grade"
+              placeholder="Select grade(s)"
+              options={['Grade 9', 'Grade 10', 'Grade 11', 'Grade 12'].map((value) => ({ value, label: value }))}
+              selected={form.grades}
+              onChange={(selected) => setForm((current) => ({ ...current, grades: selected }))}
+            />
           </div>
-
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className="px-4 py-2 text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 rounded-xl transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFormSubmit('Draft')}
-              className="px-4 py-2 text-sm font-semibold text-gray-800 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:text-white rounded-xl transition"
-            >
-              Save Draft
-            </button>
-            <button
-              type="button"
-              onClick={() => handleFormSubmit('Submitted')}
-              className="px-5 py-2 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-xl shadow-theme-xs transition"
-            >
-              Submit Plan
-            </button>
-          </div>
-        </div>
-
-        {/* The Full-Page Form Cards */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleFormSubmit('Submitted');
-          }}
-          className="space-y-6"
-        >
-          {/* Card 1: Logistics & Session Scheduling */}
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] space-y-5">
-            <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">1. Session Logistics &amp; Metadata</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Day number, summit ID, grades, dates, and village centers covered.</p>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-              {/* Day Number */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Day Number (1 – 8) <span className="text-red-500">*</span>
-                </label>
-                <Select
-                  value={String(formData.dayNumber)}
-                  onValueChange={(val) => setFormData({ ...formData, dayNumber: Number(val) })}
-                >
-                  <SelectTrigger className="w-full h-11 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                    <SelectValue placeholder="Select Day" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {[1, 2, 3, 4, 5, 6, 7, 8].map((d) => (
-                      <SelectItem key={d} value={String(d)}>
-                        Day {d}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Summit Numbers */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  No. of the Summit
-                </label>
-                <input
-                  type="text"
-                  value={formData.summitNumbers}
-                  onChange={(e) => setFormData({ ...formData, summitNumbers: e.target.value })}
-                  placeholder="e.g. I, III"
-                  className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-              </div>
-
-              {/* Grades */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Target Grades
-                </label>
-                <input
-                  type="text"
-                  value={formData.grades}
-                  onChange={(e) => setFormData({ ...formData, grades: e.target.value })}
-                  placeholder="e.g. IX, XI"
-                  className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-              </div>
-
-              {/* Planned Date */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Planned Session Date
-                </label>
-                <input
-                  type="date"
-                  value={formData.plannedDate}
-                  onChange={(e) => setFormData({ ...formData, plannedDate: e.target.value })}
-                  className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-2">
-              {/* College / Team Name */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Team / College Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formData.teamCollegeName}
-                  onChange={(e) => setFormData({ ...formData, teamCollegeName: e.target.value })}
-                  placeholder="e.g. Engineering College / Partner Institution"
-                  className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-                {formErrors.teamCollegeName && (
-                  <p className="text-xs text-red-500 mt-1">{formErrors.teamCollegeName}</p>
-                )}
-              </div>
-
-              {/* Cluster */}
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                  Cluster Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.cluster}
-                  onChange={(e) => setFormData({ ...formData, cluster: e.target.value })}
-                  placeholder="e.g. Cluster Name"
-                  className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-                />
-              </div>
-            </div>
-
-            {/* Villages Covered */}
-            <div className="pt-2">
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Villages Name (Comma Separated) <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.villagesText}
-                onChange={(e) => setFormData({ ...formData, villagesText: e.target.value })}
-                placeholder="e.g. Ammapettai, Bairanaickanpatti, Velanur, Sittling"
-                className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              <p className="text-xs text-gray-400 mt-1">Specify all villages that are coming together for this summit session.</p>
-              {formErrors.villagesText && (
-                <p className="text-xs text-red-500 mt-1">{formErrors.villagesText}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Card 2: Theme & An Overview */}
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] space-y-5">
-            <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">2. Topic &amp; Comprehensive Overview</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Main topic headline and integrated pedagogical overview of the day&apos;s holistic development goals.</p>
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Session Topic / Modules Headline <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                required
-                value={formData.topic}
-                onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
-                placeholder="e.g. Grammar is Fun & Basics of Constitution / Art of Influencing, RTE and RTI"
-                className="w-full h-11 px-3.5 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              {formErrors.topic && (
-                <p className="text-xs text-red-500 mt-1">{formErrors.topic}</p>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                An Overview <span className="text-red-500">*</span>
-              </label>
-              <textarea
-                rows={5}
-                required
-                value={formData.overview}
-                onChange={(e) => setFormData({ ...formData, overview: e.target.value })}
-                placeholder="Describe the session focus, interactive exercises, critical thinking, values, life skills, and civic awareness..."
-                className="w-full p-4 text-sm rounded-2xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-              {formErrors.overview && (
-                <p className="text-xs text-red-500 mt-1">{formErrors.overview}</p>
-              )}
-            </div>
-          </div>
-
-          {/* Card 3: Grade-Specific Curriculum Segments */}
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] space-y-6">
-            <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">3. Grade-Wise Curriculum Modules</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Detail the pedagogical activities and learning areas for each participating grade level.</p>
-            </div>
-
-            {/* Grade 9 Module */}
-            <div className="p-5 rounded-2xl bg-gray-50/70 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold text-xs rounded-lg">
-                  Grade IX Segment
-                </span>
-                <span className="text-xs text-gray-500">e.g. English Grammar &amp; Fundamental Rights</span>
-              </div>
-              <input
-                type="text"
-                value={formData.grade9Title}
-                onChange={(e) => setFormData({ ...formData, grade9Title: e.target.value })}
-                placeholder="Grade 9 Module Title (e.g. Grammar is Fun and Basics of Constitution)"
-                className="w-full h-10 px-3 text-sm font-semibold rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              <textarea
-                rows={3}
-                value={formData.grade9Description}
-                onChange={(e) => setFormData({ ...formData, grade9Description: e.target.value })}
-                placeholder="Describe Grade 9 objectives, language proficiency concepts, exercises, and discussions..."
-                className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-
-            {/* Grade 11 Module */}
-            <div className="p-5 rounded-2xl bg-gray-50/70 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="px-2.5 py-1 bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-bold text-xs rounded-lg">
-                  Grade XI Segment
-                </span>
-                <span className="text-xs text-gray-500">e.g. Leadership, Public Speaking &amp; RTI/RTE</span>
-              </div>
-              <input
-                type="text"
-                value={formData.grade11Title}
-                onChange={(e) => setFormData({ ...formData, grade11Title: e.target.value })}
-                placeholder="Grade 11 Module Title (e.g. Art of Influencing, RTE AND RTI)"
-                className="w-full h-10 px-3 text-sm font-semibold rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              <textarea
-                rows={3}
-                value={formData.grade11Description}
-                onChange={(e) => setFormData({ ...formData, grade11Description: e.target.value })}
-                placeholder="Describe Grade 11 objectives, leadership activities, public speaking drills, and citizen rights..."
-                className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Card 4: Detailed Classroom Activities */}
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] space-y-6">
-            <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">4. Detailed Activity Tasks</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Step-by-step participatory tasks, role plays, games, and group instructions.</p>
-            </div>
-
-            {/* Activity 1 */}
-            <div className="p-5 rounded-2xl bg-gray-50/70 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center font-bold">1</span>
-                <span className="text-sm font-bold text-gray-900 dark:text-white">Event / Task / Activity 1</span>
-              </div>
-              <input
-                type="text"
-                value={formData.activity1Title}
-                onChange={(e) => setFormData({ ...formData, activity1Title: e.target.value })}
-                placeholder="Activity Title (e.g. Be the School Leader)"
-                className="w-full h-10 px-3 text-sm font-semibold rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              <textarea
-                rows={3}
-                value={formData.activity1Description}
-                onChange={(e) => setFormData({ ...formData, activity1Description: e.target.value })}
-                placeholder="Activity instructions, small group division, brainstorm guidelines, and speech presentation rules..."
-                className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-
-            {/* Activity 2 */}
-            <div className="p-5 rounded-2xl bg-gray-50/70 dark:bg-white/[0.02] border border-gray-200 dark:border-gray-800 space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-brand-500 text-white text-xs flex items-center justify-center font-bold">2</span>
-                <span className="text-sm font-bold text-gray-900 dark:text-white">Event / Task / Activity 2</span>
-              </div>
-              <input
-                type="text"
-                value={formData.activity2Title}
-                onChange={(e) => setFormData({ ...formData, activity2Title: e.target.value })}
-                placeholder="Activity Title (e.g. Rights & Duties Matching Game)"
-                className="w-full h-10 px-3 text-sm font-semibold rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white focus:border-brand-500 focus:outline-none"
-              />
-              <textarea
-                rows={3}
-                value={formData.activity2Description}
-                onChange={(e) => setFormData({ ...formData, activity2Description: e.target.value })}
-                placeholder="Activity instructions, card sets (rights vs duties), reasoning, and discussion details..."
-                className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Card 5: Expected Outcomes & Volunteers Roster */}
-          <div className="rounded-3xl border border-gray-200 bg-white p-6 sm:p-8 shadow-sm dark:border-gray-800 dark:bg-white/[0.02] space-y-5">
-            <div className="border-b border-gray-100 dark:border-gray-800 pb-3">
-              <h2 className="text-base font-bold text-gray-900 dark:text-white">5. Expected Outcomes &amp; Volunteers Assignment</h2>
-              <p className="text-xs text-gray-500 dark:text-gray-400">Measurable impact on student capabilities and the list of student volunteers conducting the session.</p>
-            </div>
-
-            {/* Expected Outcome */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Expected Outcome
-              </label>
-              <textarea
-                rows={4}
-                value={formData.expectedOutcome}
-                onChange={(e) => setFormData({ ...formData, expectedOutcome: e.target.value })}
-                placeholder="Detail skills developed: memory, organization, communication, teamwork, digital literacy, and responsible citizenship..."
-                className="w-full p-3.5 text-sm rounded-2xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-            </div>
-
-            {/* Volunteers Names */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                Volunteers Name who going take session (Comma Separated)
-              </label>
-              <textarea
-                rows={2}
-                value={formData.volunteersText}
-                onChange={(e) => setFormData({ ...formData, volunteersText: e.target.value })}
-                placeholder="e.g. Mathan, Narendhar D, Manusha N, Deepak, Siva Sri, Bala Sankaran, Jeeva..."
-                className="w-full p-3 text-sm rounded-xl border border-gray-300 dark:border-gray-700 dark:bg-gray-800 dark:text-white leading-relaxed focus:border-brand-500 focus:outline-none"
-              />
-              <p className="text-xs text-gray-400 mt-1">Separate names with commas. These names appear on the official document roster.</p>
-            </div>
-          </div>
-
-          {/* Form Actions Footer */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-sm">
-            <button
-              type="button"
-              onClick={() => setViewMode('list')}
-              className="w-full sm:w-auto px-5 py-2.5 text-sm font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 rounded-xl transition"
-            >
-              Cancel &amp; Discard
-            </button>
-
-            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
-              <button
-                type="button"
-                onClick={() => handleFormSubmit('Draft')}
-                className="w-full sm:w-auto px-5 py-2.5 text-sm font-semibold text-gray-700 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-200 rounded-xl transition"
-              >
-                Save as Draft
-              </button>
-              <button
-                type="submit"
-                className="w-full sm:w-auto px-7 py-2.5 text-sm font-semibold text-white bg-brand-500 hover:bg-brand-600 rounded-xl shadow-theme-xs transition"
-              >
-                Submit Lesson Plan
-              </button>
-            </div>
-          </div>
-        </form>
-      </div>
+        </SectionCard>
+        <SectionCard title="Overview" description="Write a concise overview of the summit lesson and its holistic development focus."><textarea rows={5} value={form.overview} onChange={(event) => setForm((current) => ({ ...current, overview: event.target.value }))} placeholder="Enter the lesson plan overview…" className="w-full rounded-xl border border-slate-200 p-3 text-sm leading-6 outline-none focus:border-blue-500" /></SectionCard>
+        <SectionCard title="Lesson Plan Content" description="Describe the learning sequence and facilitation for this summit day."><textarea rows={5} value={form.lessonPlanContent} onChange={(event) => setForm((current) => ({ ...current, lessonPlanContent: event.target.value }))} placeholder="Describe the lesson content, learning sequence, and facilitation…" className="w-full rounded-xl border border-slate-200 p-3 text-sm leading-6 outline-none focus:border-blue-500" /></SectionCard>
+        <SectionCard title="Detailed View / Activities" description="Add session activities, their instructions, and allocated time."><div className="space-y-3">{form.activities.map((activity, index) => <div key={index} className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-4 md:grid-cols-[70px_1fr_130px_40px]"><div className="text-xs font-semibold text-slate-500">Activity {index + 1}</div><div className="space-y-2"><input value={activity.title} onChange={(event) => setForm((current) => ({ ...current, activities: current.activities.map((row, rowIndex) => rowIndex === index ? { ...row, title: event.target.value } : row) }))} placeholder="Activity / task" className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" /><textarea rows={2} value={activity.description} onChange={(event) => setForm((current) => ({ ...current, activities: current.activities.map((row, rowIndex) => rowIndex === index ? { ...row, description: event.target.value } : row) }))} placeholder="Description" className="w-full rounded-lg border border-slate-200 bg-white p-3 text-sm" /></div><label className="text-xs font-semibold text-slate-600">Time (mins)<input type="number" min="0" value={activity.duration || ''} onChange={(event) => setForm((current) => ({ ...current, activities: current.activities.map((row, rowIndex) => rowIndex === index ? { ...row, duration: Number(event.target.value) } : row) }))} className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" /></label><button type="button" disabled={form.activities.length === 1} onClick={() => setForm((current) => ({ ...current, activities: current.activities.filter((_, rowIndex) => rowIndex !== index) }))} className="self-center rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30" aria-label="Remove activity"><X className="h-4 w-4" /></button></div>)}</div><button type="button" onClick={() => setForm((current) => ({ ...current, activities: [...current.activities, { activityNumber: current.activities.length + 1, title: '', description: '', duration: 0 }] }))} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Plus className="h-4 w-4" /> Add activity</button></SectionCard>
+        <SectionCard title="Expected Outcome" description="Add measurable learning or development outcomes."><div className="space-y-2">{form.expectedOutcomes.map((outcome, index) => <div key={index} className="flex gap-2"><span className="mt-3 h-2 w-2 shrink-0 rounded-full bg-[#2D6BAF]" /><input value={outcome} onChange={(event) => setForm((current) => ({ ...current, expectedOutcomes: current.expectedOutcomes.map((value, rowIndex) => rowIndex === index ? event.target.value : value) }))} placeholder="Add an expected outcome" className="h-10 flex-1 rounded-lg border border-slate-200 px-3 text-sm" /><button type="button" disabled={form.expectedOutcomes.length === 1} onClick={() => setForm((current) => ({ ...current, expectedOutcomes: current.expectedOutcomes.filter((_, rowIndex) => rowIndex !== index) }))} className="rounded-lg p-2 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-30" aria-label="Remove outcome"><X className="h-4 w-4" /></button></div>)}</div><button type="button" onClick={() => setForm((current) => ({ ...current, expectedOutcomes: [...current.expectedOutcomes, ''] }))} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"><Plus className="h-4 w-4" /> Add outcome</button></SectionCard>
+        <SectionCard title="Volunteers Involved" description="Select volunteers assigned to your cluster; their roles are included automatically.">
+          <MultiSelectField
+            label="Select Volunteers"
+            placeholder="Choose volunteer(s)"
+            options={selectableVolunteers.map((volunteer) => ({ value: volunteer.id, label: `${volunteer.name} · ${volunteer.role || 'Volunteer'}` }))}
+            selected={form.volunteerIds}
+            onChange={(selected) => setForm((current) => ({ ...current, volunteerIds: selected }))}
+          />
+          {!selectableVolunteers.length && <p className="text-xs text-slate-500">No active volunteers are assigned to this cluster.</p>}
+        </SectionCard>
+        <div className="flex flex-col-reverse justify-end gap-2 border-t border-slate-200 pt-4 sm:flex-row"><button type="button" onClick={backToList} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600">Cancel</button><button type="button" disabled={busy} onClick={() => void savePlan('Draft')} className="rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 disabled:opacity-50">Save Draft</button><button type="button" disabled={busy} onClick={openSubmitConfirmation} className="rounded-xl bg-[#123C75] px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">{['Corrections Required', 'Correction Requested'].includes(String(form.status || '')) ? 'Resubmit for Approval' : 'Submit Lesson Plan'}</button></div>
+        {submitConfirmOpen && <Modal title="Confirm Lesson Plan Submission" onClose={() => setSubmitConfirmOpen(false)}><p className="text-sm leading-6 text-slate-600">Are you sure you want to submit this lesson plan?</p><p className="mt-2 text-sm leading-6 text-slate-600">Once submitted, direct editing and deletion will be disabled.</p><ModalActions onCancel={() => setSubmitConfirmOpen(false)} confirmLabel={['Corrections Required', 'Correction Requested'].includes(String(form.status || '')) ? 'Resubmit' : 'Submit'} disabled={busy} onConfirm={() => void confirmSubmit()} /></Modal>}
+      </main>
     );
   }
 
-  // ==========================================
-  // VIEW 3: LESSON PLANS DASHBOARD / LIST VIEW
-  // ==========================================
+  const planVillages = [...new Set(availablePlans.flatMap((plan) => plan.villagesList?.length ? plan.villagesList : [plan.villageName || '']).filter(Boolean))].sort();
+  const shownClusters = clusters.filter((cluster) => cluster.status !== 'Inactive');
+  const summary = [
+    { label: 'Total Plans', value: statusCounts.total, icon: <BookOpen className="h-5 w-5" />, tone: 'border-slate-200 bg-white text-slate-800' },
+    { label: 'Draft', value: statusCounts.draft, icon: <FileText className="h-5 w-5" />, tone: 'border-amber-200 bg-amber-50/60 text-amber-800' },
+    { label: 'Submitted', value: statusCounts.submitted, icon: <Clock className="h-5 w-5" />, tone: 'border-blue-200 bg-blue-50/60 text-blue-800' },
+    { label: 'Approved', value: statusCounts.approved, icon: <CheckCircle2 className="h-5 w-5" />, tone: 'border-emerald-200 bg-emerald-50/60 text-emerald-800' },
+    { label: 'Corrections Required', value: statusCounts.corrections, icon: <AlertTriangle className="h-5 w-5" />, tone: 'border-red-200 bg-red-50/60 text-red-800' },
+  ];
+  const dayNumbers = isSuperAdmin
+    ? [...new Set(filteredPlans.map((plan) => Number(plan.dayNumber || 1)))].sort((first, second) => first - second)
+    : dayFilter === 'all'
+      ? Array.from({ length: 8 }, (_, index) => index + 1)
+      : [Number(dayFilter)];
+
   return (
-    <div className="w-full space-y-6">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-gray-100 dark:border-gray-800">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 dark:text-white flex items-center gap-2.5">
-            <span>Summit Lesson Plans</span>
-            <span className="text-xs px-2.5 py-0.5 rounded-full font-medium bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400 border border-brand-200 dark:border-brand-500/20">
-              {currentAcademicYear}
-            </span>
-          </h1>
-          <p className="mt-1 text-xs sm:text-sm text-gray-500 dark:text-gray-400">
-            Official TQI Holistic Development summit lesson plans created by Cluster Admins and reviewed by Super Admins.
-          </p>
+    <main className="w-full space-y-6">
+      <header className="rounded-3xl border border-[#DDE9F8] bg-white p-5 shadow-sm sm:p-6"><div className="flex flex-wrap items-center gap-3"><h1 className="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Summit Lesson Plans</h1><span className="rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-800">{currentAcademicYear || 'Academic year'}</span></div><p className="mt-2 text-sm text-slate-600">Create and manage lesson plans for the 8-day summit.</p></header>
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{summary.map((card) => <div key={card.label} className={`rounded-2xl border p-4 shadow-sm ${card.tone}`}><div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">{card.label}</span><span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/80">{card.icon}</span></div><div className="mt-3 text-3xl font-bold tracking-tight">{card.value}</div></div>)}</section>
+      <section className="space-y-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6"><div className="relative xl:col-span-2"><Search className="absolute left-3 top-3 h-4 w-4 text-slate-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search lesson plans" className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm outline-none focus:border-blue-400" /></div>
+          <FilterSelect label="Cluster" value={clusterFilter} onChange={setClusterFilter} options={[['all', 'All Clusters'], ...shownClusters.map((cluster) => [cluster.id, cluster.name] as [string, string])]} />
+          <FilterSelect label="Village" value={villageFilter} onChange={setVillageFilter} options={[['all', 'All Villages'], ...planVillages.map((village) => [village, village] as [string, string])]} />
+          <FilterSelect label="Day" value={dayFilter} onChange={setDayFilter} options={[[ 'all', 'All Days'], ...Array.from({ length: 8 }, (_, index) => [String(index + 1), `Day ${index + 1}`] as [string, string])]} />
+          <FilterSelect label="Status" value={statusFilter} onChange={setStatusFilter} options={[[ 'all', 'All Statuses'], ['Draft', 'Draft'], ['Submitted', 'Submitted'], ['Corrections Required', 'Corrections Required'], ['Approved', 'Approved'], ['Edit Request Pending', 'Edit Request Pending'], ['Delete Request Pending', 'Delete Request Pending']]} />
         </div>
-
-        {(!isSuperAdminClusterOverview || selectedCluster) && <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => exportAllLessonPlansExcel(lessonPlansInScope, selectedCluster?.name || currentCluster)}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3.5 py-2.5 text-xs sm:text-sm font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-            title="Export all lesson plans to Excel"
-          >
-            <Download className="h-4 w-4 text-emerald-600" />
-            <span>Export Excel</span>
-          </button>
-          <button
-            type="button"
-            onClick={handleOpenCreateView}
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Create Lesson Plan</span>
-          </button>
-        </div>}
-      </div>
-
-      {isSuperAdminClusterOverview && !selectedCluster && (
-        <section className="space-y-4">
-          <div>
-            <h2 className="text-base font-bold text-gray-900 dark:text-white">Select a Cluster</h2>
-            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">Choose a cluster to view its lesson plans by day.</p>
-          </div>
-          {clusters.filter((cluster) => cluster.status !== 'Inactive').length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-              No clusters are available for this academic year.
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {clusters.filter((cluster) => cluster.status !== 'Inactive').map((cluster) => (
-                <button
-                  key={cluster.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedClusterId(cluster.id);
-                    setSelectedDayFilter('all');
-                    handleClearFilters();
-                  }}
-                  className="group rounded-2xl border border-gray-200 bg-white p-5 text-left shadow-theme-xs transition hover:border-brand-500/50 hover:shadow-theme-md dark:border-gray-800 dark:bg-white/[0.02]"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h3 className="text-sm font-bold text-gray-900 dark:text-white">{cluster.name}</h3>
-                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{cluster.district || 'District not set'}</p>
-                    </div>
-                    <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-bold text-brand-600 dark:bg-brand-500/10 dark:text-brand-400">
-                      {clusterPlanCount(cluster)} plans
-                    </span>
-                  </div>
-                  <div className="mt-4 border-t border-gray-100 pt-3 text-xs font-semibold text-brand-600 dark:border-gray-800 dark:text-brand-400">
-                    View lesson plan days →
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      )}
-
-      {(!isSuperAdminClusterOverview || selectedCluster) && <>
-      {isSuperAdminClusterOverview && selectedCluster && (
-        <button
-          type="button"
-          onClick={() => {
-            setSelectedClusterId(null);
-            setSelectedDayFilter('all');
-            handleClearFilters();
-          }}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          All Clusters · {selectedCluster.name}
-        </button>
-      )}
-
-      {/* Metric Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">Total Plans</div>
-          <div className="mt-1 text-2xl font-bold text-gray-900 dark:text-white">{totalCount}</div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Approved</div>
-          <div className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400">{approvedCount}</div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400">Under Review</div>
-          <div className="mt-1 text-2xl font-bold text-blue-600 dark:text-blue-400">{submittedCount}</div>
-        </div>
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 shadow-theme-xs dark:border-gray-800 dark:bg-white/[0.02]">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">Corrections</div>
-          <div className="mt-1 text-2xl font-bold text-amber-600 dark:text-amber-400">{correctionCount}</div>
-        </div>
-      </div>
-
-      {/* Day Filter Tabs & Search Bar */}
-      <div className="flex flex-col md:flex-row md:items-center gap-3">
-        {/* Scrollable Day Badges */}
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 md:pb-0 scrollbar-none shrink-0">
-          <button
-            type="button"
-            onClick={() => setSelectedDayFilter('all')}
-            className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-              selectedDayFilter === 'all'
-                ? 'bg-brand-500 text-white shadow-theme-xs'
-                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-            }`}
-          >
-            All Days
-          </button>
-          {[1, 2, 3, 4, 5, 6, 7, 8].map((dayNum) => (
-            <button
-              key={dayNum}
-              type="button"
-              onClick={() => setSelectedDayFilter(dayNum)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition ${
-                selectedDayFilter === dayNum
-                  ? 'bg-brand-500 text-white shadow-theme-xs'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700'
-              }`}
-            >
-              Day {dayNum}
-            </button>
-          ))}
-        </div>
-
-        {/* Search Input */}
-        <div className="relative flex-1">
-          <Search className="h-4 w-4 text-gray-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Search by topic, college, villages, or outcomes..."
-            className="w-full rounded-xl border border-gray-200 bg-white pl-10 pr-4 py-2 text-xs sm:text-sm text-gray-800 shadow-theme-xs placeholder:text-gray-400 focus:border-brand-500 focus:outline-none dark:border-gray-800 dark:bg-gray-900 dark:text-white"
-          />
-        </div>
-
-        {/* Status filter */}
-        <div className="w-full sm:w-44 shrink-0">
-          <Select value={selectedStatus} onValueChange={(val) => setSelectedStatus(val)}>
-            <SelectTrigger className="w-full text-xs h-9 rounded-xl border border-gray-200 dark:border-gray-800 dark:bg-gray-900 dark:text-white">
-              <SelectValue placeholder="All Statuses" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Statuses</SelectItem>
-              <SelectItem value="Draft">Draft</SelectItem>
-              <SelectItem value="Submitted">Submitted</SelectItem>
-              <SelectItem value="Approved">Approved</SelectItem>
-              <SelectItem value="Correction Requested">Correction Requested</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Lesson Plans Responsive Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredPlans.map((plan) => {
-          const isCorrectionReq = plan.status === 'Correction Requested' || (plan.status as string) === 'Rejected';
-          const villages = plan.villagesList && plan.villagesList.length > 0 
-            ? plan.villagesList 
-            : (plan.villageName ? [plan.villageName] : []);
-
+        <div className="flex items-center justify-between gap-3 border-t border-slate-100 pt-3"><p className="text-xs text-slate-500">Showing {filteredPlans.length} of {availablePlans.length} lesson plans</p><button type="button" onClick={resetFilters} className="text-xs font-semibold text-[#123C75] hover:underline">Reset filters</button></div>
+      </section>
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {dayNumbers.map((dayNumber) => {
+          const plan = filteredPlans.find((candidate) => Number(candidate.dayNumber || 1) === dayNumber);
+          const daySchedule = sessions.find((session) => Number(session.dayNumber) === dayNumber);
+          const dayDate = plan?.date || (daySchedule?.date ? String(daySchedule.date).slice(0, 10) : 'Date not set');
+          const villageNames = plan?.villagesList?.join(', ') || plan?.villageName || '';
+          const panchayatNames = plan?.panchayatNames?.join(', ') || plan?.panchayatName || '';
+          const location = [panchayatNames, villageNames].filter(Boolean).join(' · ');
+          const isCorrection = plan?.status === 'Corrections Required' || plan?.status === 'Correction Requested';
+          const statusTone = !plan
+            ? 'border-slate-200 bg-slate-50 text-slate-600'
+            : plan.status === 'Approved'
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : isCorrection
+                ? 'border-red-200 bg-red-50 text-red-700'
+                : plan.status === 'Submitted' || plan.status === 'Resubmitted'
+                  ? 'border-blue-200 bg-blue-50 text-blue-700'
+                  : plan.status === 'Edit Request Pending' || plan.status === 'Delete Request Pending'
+                    ? 'border-orange-200 bg-orange-50 text-orange-700'
+                    : 'border-amber-200 bg-amber-50 text-amber-800';
           return (
-            <div
-              key={plan.id}
-              className={`flex flex-col rounded-2xl border bg-white p-5 shadow-theme-xs transition hover:border-brand-500/50 dark:bg-white/[0.02] ${
-                isCorrectionReq
-                  ? 'border-amber-300 dark:border-amber-500/30'
-                  : 'border-gray-200 dark:border-gray-800'
-              }`}
-            >
-              {/* Card Top: Badges & Status */}
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-bold bg-brand-50 text-brand-600 dark:bg-brand-500/10 dark:text-brand-400 border border-brand-100 dark:border-brand-500/20">
-                    Day {plan.dayNumber || 1}
-                  </span>
-                  {plan.summitNumbers && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                      Summit {plan.summitNumbers}
-                    </span>
-                  )}
-                  {plan.grades && (
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-300">
-                      Grades {plan.grades}
-                    </span>
-                  )}
+            <article key={dayNumber} className="flex min-h-[245px] flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-blue-200 hover:shadow-md sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#EFF5FC] text-[#123C75]"><Clock className="h-5 w-5" /></span>
+                  <div><h2 className="text-lg font-bold text-slate-900">Day {dayNumber}</h2><p className="mt-0.5 text-xs text-slate-500">{dayDate}</p></div>
                 </div>
-                <div>{renderStatusBadge(plan.status)}</div>
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold ${statusTone}`}>{plan ? (isCorrection ? 'Corrections Required' : plan.status || 'Draft') : 'Not Created'}</span>
               </div>
-
-              {/* Title & Topic */}
-              <div className="space-y-1">
-                <h3 className="text-base font-bold text-gray-900 dark:text-white line-clamp-2">
-                  {plan.topic || plan.title || 'Summit Lesson Plan'}
-                </h3>
-                {plan.teamCollegeName && (
-                  <p className="text-xs font-medium text-brand-600 dark:text-brand-400 flex items-center gap-1">
-                    <span>🏛 {plan.teamCollegeName}</span>
-                  </p>
-                )}
-              </div>
-
-              {/* Villages List Tags */}
-              {villages.length > 0 && (
-                <div className="mt-3">
-                  <div className="text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1">
-                    Villages Covered ({villages.length})
+              {plan ? (
+                <>
+                  <div className="mt-4 grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
+                    <PlanMeta label="Cluster" value={getClusterDisplayName(plan)} />
+                    <PlanMeta label="Village" value={location || '—'} />
+                    <PlanMeta label="No. of Summit" value={plan.summitNumbers || '—'} />
+                    <PlanMeta label="Submitted by" value={plan.submittedBy || plan.createdByName || '—'} />
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {villages.map((v, i) => (
-                      <span
-                        key={i}
-                        className="px-2 py-0.5 text-[11px] rounded bg-gray-50 border border-gray-200 text-gray-600 dark:bg-gray-800/60 dark:border-gray-700 dark:text-gray-300"
-                      >
-                        {v}
-                      </span>
-                    ))}
+                  <p className="mt-3 line-clamp-2 flex-1 text-xs leading-5 text-slate-600">{plan.overview || plan.objective || 'No overview provided.'}</p>
+                  <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                    <button type="button" onClick={() => { setActivePlanId(plan.id); setViewMode('detail'); }} className="inline-flex items-center gap-1.5 rounded-lg border border-blue-200 px-3 py-2 text-xs font-semibold text-[#123C75] hover:bg-blue-50"><Eye className="h-3.5 w-3.5" /> View</button>
+                    <button type="button" onClick={() => exportLessonPlanPdf({ ...plan, cluster: getClusterDisplayName(plan) })} className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"><Download className="h-3.5 w-3.5" /> Export PDF</button>
+                    {!isSuperAdmin && (plan.status === 'Draft' || isCorrection) && <button type="button" onClick={() => openEdit(plan)} className="rounded-lg bg-[#123C75] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0D2F5D]">{isCorrection ? 'Resubmit' : 'Edit'}</button>}
                   </div>
+                </>
+              ) : (
+                <div className="flex flex-1 flex-col items-start justify-center py-5">
+                  <p className="text-sm font-semibold text-slate-700">No lesson plan for this day yet</p>
+                  <p className="mt-1 text-xs text-slate-500">Create a plan when this summit day is ready.</p>
+                  {!isSuperAdmin && <button type="button" onClick={() => openCreate(dayNumber)} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[#123C75] px-3 py-2 text-xs font-semibold text-white hover:bg-[#0D2F5D]"><Plus className="h-3.5 w-3.5" /> Create Lesson Plan</button>}
                 </div>
               )}
-
-              {/* Overview snippet */}
-              <p className="mt-3 text-xs text-gray-600 dark:text-gray-400 line-clamp-3 leading-relaxed flex-1">
-                {plan.overview || plan.objective || 'Session focuses on student holistic development, communication, leadership, and civics awareness.'}
-              </p>
-
-              {/* Volunteers Roster snippet */}
-              {plan.assignedVolunteers && plan.assignedVolunteers.length > 0 && (
-                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
-                  <span className="truncate">
-                    👥 {plan.assignedVolunteers.slice(0, 3).join(', ')}
-                    {plan.assignedVolunteers.length > 3 ? ` +${plan.assignedVolunteers.length - 3} more` : ''}
-                  </span>
-                  <span className="shrink-0 font-medium">{plan.date || 'Planned'}</span>
-                </div>
-              )}
-
-              {/* Card Footer Actions */}
-              <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenDetailView(plan)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700 transition"
-                >
-                  <Eye className="w-3.5 h-3.5 text-gray-500" />
-                  <span>View Document</span>
-                </button>
-
-                <div className="flex items-center gap-1">
-                  {/* Super Admin Quick Review Button */}
-                  {currentUserRole === 'Super Admin' && (plan.status === 'Submitted' || plan.status === 'Resubmitted') && (
-                    <button
-                      type="button"
-                      onClick={() => handleApprovePlan(plan.id)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-theme-xs transition"
-                    >
-                      Approve
-                    </button>
-                  )}
-
-                  {/* Edit button */}
-                  {(currentUserRole === 'Super Admin' || plan.status === 'Draft' || plan.status === 'Correction Requested' || (plan.status as string) === 'Rejected') && (
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditView(plan)}
-                      className="p-1.5 text-gray-400 hover:text-brand-500 hover:bg-brand-50 rounded-lg transition dark:hover:bg-gray-800"
-                      title="Edit Lesson Plan"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                  )}
-
-                  {onDeleteLessonPlan && (currentUserRole === 'Super Admin' || plan.status === 'Draft') && (
-                    <button
-                      type="button"
-                      onClick={() => onDeleteLessonPlan(plan.id)}
-                      className="p-1.5 text-gray-400 hover:text-error-500 hover:bg-error-50 rounded-lg transition dark:hover:bg-gray-800"
-                      title="Delete Lesson Plan"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+            </article>
           );
         })}
+        {isSuperAdmin && dayNumbers.length === 0 && <div className="col-span-full rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-6 py-14 text-center"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-white text-[#123C75] shadow-sm"><BookOpen className="h-6 w-6" /></div><h2 className="mt-3 text-base font-bold text-slate-800">No submitted lesson plans</h2><p className="mt-1 text-sm text-slate-500">Plans submitted by Cluster Admins will appear here for review.</p></div>}
+      </section>
+      {submitConfirmOpen && <Modal title="Confirm Lesson Plan Submission" onClose={() => setSubmitConfirmOpen(false)}><p className="text-sm leading-6 text-slate-600">Are you sure you want to submit this lesson plan?</p><p className="mt-2 text-sm leading-6 text-slate-600">Once submitted, direct editing and deletion will be disabled.</p><ModalActions onCancel={() => setSubmitConfirmOpen(false)} confirmLabel={['Corrections Required', 'Correction Requested'].includes(String(form.status || '')) ? 'Resubmit' : 'Submit'} disabled={busy} onConfirm={() => void confirmSubmit()} /></Modal>}
+    </main>
+  );
+};
 
-        {filteredPlans.length === 0 && (
-          <div className="col-span-full py-12 text-center text-sm text-gray-500 border border-dashed border-gray-200 rounded-2xl dark:border-gray-800">
-            <BookOpen className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-            <p className="font-semibold text-gray-700 dark:text-gray-300">No lesson plans found</p>
-            <p className="text-xs text-gray-400 mt-1">Try resetting your search or day filters, or create a new lesson plan.</p>
-            <button
-              onClick={handleClearFilters}
-              className="mt-3 px-3 py-1.5 text-xs font-semibold text-brand-500 bg-brand-50 dark:bg-brand-500/10 rounded-xl hover:bg-brand-100 transition"
-            >
-              Reset Filters
-            </button>
-          </div>
-        )}
+const DocumentSection: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => <section className="space-y-3"><h2 className="border-b border-slate-200 pb-2 text-sm font-bold uppercase tracking-wide text-[#123C75]">{title}</h2>{children}</section>;
+const SectionCard: React.FC<{ title: string; description?: string; children: React.ReactNode }> = ({ title, description, children }) => <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6"><header className="border-b border-slate-100 pb-3"><h2 className="text-base font-bold text-slate-900">{title}</h2>{description && <p className="mt-1 text-xs text-slate-500">{description}</p>}</header>{children}</section>;
+const ReadOnlyField: React.FC<{ label: string; value: string }> = ({ label, value }) => <div><div className="mb-1.5 text-xs font-semibold text-slate-700">{label}</div><div className="flex h-11 items-center rounded-xl border border-slate-200 bg-slate-50 px-3 text-sm text-slate-600">{value}</div></div>;
+const PlanMeta: React.FC<{ label: string; value: string }> = ({ label, value }) => <div className="min-w-0"><div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div><div className="truncate pt-0.5 font-medium text-slate-700" title={value}>{value}</div></div>;
+const FilterSelect: React.FC<{ label: string; value: string; onChange: (value: string) => void; options: [string, string][] }> = ({ label, value, onChange, options }) => <div><label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">{label}</label><Select value={value} onValueChange={onChange}><SelectTrigger className="h-10 rounded-xl border-slate-200 bg-slate-50 text-xs"><SelectValue /></SelectTrigger><SelectContent>{options.map(([optionValue, labelText]) => <SelectItem key={`${label}-${optionValue}`} value={optionValue}>{labelText}</SelectItem>)}</SelectContent></Select></div>;
+const MultiSelectField: React.FC<{
+  label: string;
+  placeholder: string;
+  options: Array<{ value: string; label: string }>;
+  selected: string[];
+  onChange: (selected: string[]) => void;
+  disabled?: boolean;
+}> = ({ label, placeholder, options, selected, onChange, disabled = false }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const selectedLabels = options.filter((option) => selected.includes(option.value)).map((option) => option.label);
+  const sortedOptions = [...options].sort((first, second) => Number(selected.includes(second.value)) - Number(selected.includes(first.value)));
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleOutsidePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && !fieldRef.current?.contains(event.target)) setIsOpen(false);
+    };
+    document.addEventListener('pointerdown', handleOutsidePointerDown);
+    return () => document.removeEventListener('pointerdown', handleOutsidePointerDown);
+  }, [isOpen]);
+
+  return (
+    <div ref={fieldRef} className="relative min-w-0">
+      <label className="mb-1.5 block text-xs font-semibold text-slate-700">{label} <span className="text-red-600">*</span></label>
+      <div
+        aria-expanded={isOpen}
+        className={`flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm shadow-sm outline-none transition focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 ${disabled ? 'cursor-not-allowed bg-slate-100 text-slate-400' : 'cursor-pointer'}`}
+      >
+        <button type="button" disabled={disabled} onClick={() => setIsOpen((open) => !open)} className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-left">
+          {selectedLabels.length ? selectedLabels.map((selectedLabel, index) => {
+            return <span key={`${selectedLabel}-${index}`} className="inline-flex max-w-full items-center gap-1 rounded-full border border-blue-100 bg-blue-50 px-2 py-1 text-[11px] font-medium text-[#123C75]"><span className="truncate">{selectedLabel}</span><span className="text-blue-400">✓</span></span>;
+          }) : <span className="text-slate-500">{placeholder}</span>}
+        </button>
+        <button type="button" disabled={disabled} aria-label={`Toggle ${label} options`} onClick={() => setIsOpen((open) => !open)} className="shrink-0 px-1 text-slate-400 disabled:cursor-not-allowed">{isOpen ? '⌃' : '⌄'}</button>
       </div>
-      </>}
+      {isOpen && !disabled && (
+        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-30 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
+          {selected.length > 0 && <div className="mb-1 border-b border-slate-100 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Selected · {selected.length}</div>}
+          {sortedOptions.length ? sortedOptions.map((option) => (
+            <label key={option.value} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2.5 py-2 text-sm hover:bg-blue-50 ${selected.includes(option.value) ? 'font-semibold text-[#123C75]' : 'text-slate-700'}`}>
+              <input
+                type="checkbox"
+                checked={selected.includes(option.value)}
+                onChange={(event) => {
+                  onChange(event.target.checked
+                    ? [...selected, option.value]
+                    : selected.filter((value) => value !== option.value));
+                }}
+                className="h-4 w-4 rounded border-slate-300 accent-[#123C75]"
+              />
+              <span>{option.label}</span>
+            </label>
+          )) : <p className="px-3 py-2 text-xs text-slate-500">No options available.</p>}
+        </div>
+      )}
     </div>
   );
 };
+const Modal: React.FC<{ title: string; onClose: () => void; children: React.ReactNode }> = ({ title, onClose, children }) => <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/50 p-4" role="presentation"><section role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-lg space-y-4 rounded-2xl bg-white p-5 shadow-2xl"><header className="flex items-center justify-between gap-3"><h2 className="text-base font-bold text-slate-900">{title}</h2><button type="button" onClick={onClose} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700" aria-label="Close"><X className="h-5 w-5" /></button></header>{children}</section></div>;
+const ModalActions: React.FC<{ onCancel: () => void; onConfirm: () => void; confirmLabel: string; disabled?: boolean; destructive?: boolean }> = ({ onCancel, onConfirm, confirmLabel, disabled, destructive }) => <div className="flex justify-end gap-2 border-t border-slate-100 pt-3"><button type="button" onClick={onCancel} className="rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-600">Cancel</button><button type="button" disabled={disabled} onClick={onConfirm} className={`rounded-xl px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-50 ${destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-[#123C75] hover:bg-[#0D2F5D]'}`}>{confirmLabel}</button></div>;

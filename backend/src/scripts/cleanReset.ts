@@ -5,6 +5,15 @@ import { pool, initializeDatabase } from '../db/connection.js';
 
 async function runCleanReset() {
   try {
+    if (process.env.NODE_ENV === 'production') {
+      const password = process.env.ADMIN_DEFAULT_PASSWORD?.trim() || '';
+      if (process.env.ALLOW_DESTRUCTIVE_DB_RESET !== 'true') {
+        throw new Error('Production database reset is blocked. Set ALLOW_DESTRUCTIVE_DB_RESET=true only for an intentional maintenance operation.');
+      }
+      if (password.length < 12 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+        throw new Error('Production reset requires a strong ADMIN_DEFAULT_PASSWORD before any database changes.');
+      }
+    }
     console.log('[CLEAN-RESET] Connecting to database...');
     await initializeDatabase();
 
@@ -153,7 +162,9 @@ async function runCleanReset() {
     console.log('------------------------------------------------------');
     console.log('All tables wiped and baseline entities seeded.');
     console.log(`Email    : admin@tqi.org`);
-    console.log(`Password : ${rawPassword}`);
+    console.log(process.env.NODE_ENV === 'production'
+      ? 'Password : supplied through ADMIN_DEFAULT_PASSWORD (not printed)'
+      : `Password : ${rawPassword}`);
     console.log('======================================================\n');
     process.exit(0);
   } catch (error: any) {
