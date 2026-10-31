@@ -136,6 +136,7 @@ export default function App() {
   const [maintenanceState, setMaintenanceState] = useState<{ enabled: boolean; title: string; message: string; expectedCompletion: string | null; showCountdown: boolean; autoDisable: boolean } | null>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceCheckedToken, setMaintenanceCheckedToken] = useState<string | null>(null);
+  const [authValidatedToken, setAuthValidatedToken] = useState<string | null>(null);
   const [openNewFinanceModal, setOpenNewFinanceModal] = useState<boolean>(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState<boolean>(false);
@@ -186,7 +187,11 @@ export default function App() {
   }, [currentUser]);
 
   useEffect(() => {
-    if (!currentUser?.token) return;
+    if (!currentUser?.token) {
+      setAuthValidatedToken(null);
+      return;
+    }
+    setAuthValidatedToken(null);
     if (isJwtExpired(currentUser.token)) {
       localStorage.removeItem('tqi_auth_session');
       setCurrentUser(null);
@@ -197,14 +202,18 @@ export default function App() {
         const response = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${currentUser.token}` }, cache: 'no-store' });
         if (response.status === 401) {
           localStorage.removeItem('tqi_auth_session');
+          setAuthValidatedToken(null);
           setCurrentUser(null);
           return;
         }
         const data = await response.json().catch(() => null);
         if (data?.user?.mustChangePassword) {
           localStorage.removeItem('tqi_auth_session');
+          setAuthValidatedToken(null);
           setCurrentUser(null);
+          return;
         }
+        if (response.ok && data?.user) setAuthValidatedToken(currentUser.token);
       } catch {
         // Brief network failures should not sign the user out.
       }
@@ -432,8 +441,18 @@ export default function App() {
       setMaintenanceCheckedToken(null);
       return;
     }
+    if (isJwtExpired(currentUser.token)) {
+      localStorage.removeItem('tqi_auth_session');
+      setCurrentUser(null);
+      return;
+    }
+    // Validate the saved JWT once before starting the maintenance poller. This
+    // prevents two simultaneous 401s when a previously saved session is stale.
+    if (authValidatedToken !== currentUser.token) return;
     const controller = new AbortController();
+    let authenticationRejected = false;
     const loadMaintenance = async () => {
+      if (authenticationRejected || controller.signal.aborted) return;
       if (maintenanceCheckedToken !== currentUser.token) setMaintenanceLoading(true);
       try {
         const response = await fetch(apiUrl('/api/system/maintenance'), {
@@ -442,7 +461,11 @@ export default function App() {
           signal: controller.signal,
         });
         if (response.status === 401) {
+          authenticationRejected = true;
+          controller.abort();
           localStorage.removeItem('tqi_auth_session');
+          setMaintenanceLoading(false);
+          setAuthValidatedToken(null);
           setCurrentUser(null);
           return;
         }
@@ -462,7 +485,7 @@ export default function App() {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [currentUser?.token, maintenanceCheckedToken]);
+  }, [currentUser?.token, maintenanceCheckedToken, authValidatedToken]);
 
   useEffect(() => {
     if (!currentUser?.token) return;

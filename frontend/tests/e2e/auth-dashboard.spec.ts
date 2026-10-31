@@ -20,6 +20,27 @@ test('expired saved token is cleared before calling auth/me', async ({ page }) =
   expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
 });
 
+test('maintenance polling waits until a saved token is validated', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('tqi_auth_session', JSON.stringify({
+      token: 'header.eyJleHAiOjk5OTk5OTk5OTl9.signature',
+      id: 'revoked-user',
+      role: 'Super Admin',
+    }));
+  });
+  await page.route('**/api/auth/me', (route) => route.fulfill({ status: 401, contentType: 'application/json', body: '{"success":false}' }));
+
+  const maintenanceRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/system/maintenance')) maintenanceRequests.push(request.url());
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await expect(page.locator('#login-email')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
+  expect(maintenanceRequests).toHaveLength(0);
+});
+
 test('dashboard loads academic setup using an authenticated request', async ({ page }) => {
   page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
   page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));
