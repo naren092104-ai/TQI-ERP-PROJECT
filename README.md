@@ -180,13 +180,20 @@ separate long-running Node service, not a static Vercel deployment.
 
 Connect the repository to Cloudflare Pages. `wrangler.toml` selects
 `frontend/dist`, and `frontend/public/_redirects` supplies the SPA fallback.
+The Pages Function at `functions/api/[[path]].js` proxies `/api/*` calls to the
+separate Express backend so login requests do not hit the static asset host.
 
 - Build command: `npm run build:frontend`
 - Output directory: `frontend/dist`
-- Required build environment variable: `VITE_API_URL=https://<your-api-domain>/api`
+- The Pages Function uses same-origin `/api/*` requests and proxies them to the
+	backend. `wrangler.toml` defaults `BACKEND_API_ORIGIN` to
+	`https://tqi.autorevives.com`; set the same variable in Cloudflare Pages
+	Production and Preview settings if deploying through the dashboard.
 
 Cloudflare Pages deploys only the frontend; do not put backend secrets in Pages
-variables. The Pages URL must also be included in the backend's `CORS_ORIGINS`.
+variables. Set `BACKEND_API_ORIGIN` as a non-secret Pages variable for
+Production (and Preview if used). The backend must still allow the Pages and
+custom frontend origins in its `CORS_ORIGINS` configuration.
 
 ### Separate backend and MySQL
 

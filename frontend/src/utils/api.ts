@@ -1,7 +1,10 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/$/, '');
 
-if (import.meta.env.PROD && !configuredApiUrl) {
+const usesCloudflarePagesApiProxy =
+  typeof window !== 'undefined' && window.location.hostname.endsWith('.pages.dev');
+
+if (import.meta.env.PROD && !configuredApiUrl && !usesCloudflarePagesApiProxy) {
   console.error('VITE_API_URL is not configured. Set it to the production API base URL before deploying the frontend.');
 }
 

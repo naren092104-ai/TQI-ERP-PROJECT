@@ -1,3 +1,6 @@
 name = "tqi-erp-frontend"
 pages_build_output_dir = "frontend/dist"
 compatibility_date = "2026-09-06"
+
+[vars]
+BACKEND_API_ORIGIN = "https://tqi.autorevives.com"
