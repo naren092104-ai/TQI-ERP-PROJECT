@@ -1,5 +1,25 @@
 import { test, expect } from '@playwright/test';
 
+test('expired saved token is cleared before calling auth/me', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('tqi_auth_session', JSON.stringify({
+      token: 'header.eyJleHAiOjF9.signature',
+      id: 'expired-user',
+      role: 'Super Admin',
+    }));
+  });
+
+  const authMeRequests: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/api/auth/me')) authMeRequests.push(request.url());
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await expect(page.locator('#login-email')).toBeVisible();
+  expect(authMeRequests).toHaveLength(0);
+  expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
+});
+
 test('dashboard loads academic setup using an authenticated request', async ({ page }) => {
   page.on('console', msg => console.log('BROWSER LOG:', msg.text()));
   page.on('pageerror', err => console.log('BROWSER ERROR:', err.message));

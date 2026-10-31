@@ -74,6 +74,19 @@ const normalizeUserRole = (role?: string): UserRole => {
   return 'Super Admin';
 };
 
+const isJwtExpired = (token?: string): boolean => {
+  if (!token) return false;
+  try {
+    const payloadPart = token.split('.')[1];
+    if (!payloadPart) return true;
+    const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(window.atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, '=')));
+    return typeof payload.exp !== 'number' || payload.exp * 1000 <= Date.now();
+  } catch {
+    return true;
+  }
+};
+
 export default function App() {
   // Session & Authentication State
   const [currentUser, setCurrentUser] = useState<AuthSession | null>(() => {
@@ -82,6 +95,10 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved) as Partial<AuthSession> | null;
         if (!parsed) return null;
+        if (isJwtExpired(parsed.token)) {
+          localStorage.removeItem('tqi_auth_session');
+          return null;
+        }
         return {
           ...parsed,
           role: normalizeUserRole(parsed.role),
@@ -170,6 +187,11 @@ export default function App() {
 
   useEffect(() => {
     if (!currentUser?.token) return;
+    if (isJwtExpired(currentUser.token)) {
+      localStorage.removeItem('tqi_auth_session');
+      setCurrentUser(null);
+      return;
+    }
     const verifyPasswordState = async () => {
       try {
         const response = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${currentUser.token}` }, cache: 'no-store' });
