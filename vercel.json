@@ -3,6 +3,14 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
+      "source": "/api/:path*",
+      "destination": "https://tqi.autorevives.com/api/:path*"
+    },
+    {
+      "source": "/storage/:path*",
+      "destination": "https://tqi.autorevives.com/storage/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

@@ -171,7 +171,11 @@ builds the Vite SPA and rewrites client-side routes to `index.html`.
 - Framework: **Vite**
 - Build command: `npm run build:frontend`
 - Output directory: `frontend/dist`
-- Required build environment variable: `VITE_API_URL=https://<your-api-domain>/api`
+- Build environment variable: `VITE_API_URL=/api`
+
+The Vercel rewrites proxy `/api/*` and `/storage/*` requests to the production
+backend at `https://tqi.autorevives.com`, so browser requests stay same-origin.
+Update those rewrite destinations if the backend host changes.
 
 Deploy only the frontend from this project. The Express/MySQL backend is a
 separate long-running Node service, not a static Vercel deployment.
