@@ -5,6 +5,7 @@ import { TqiLogo } from './TqiLogo';
 import { NewFinanceModal } from './NewFinanceModal';
 import { exportFinanceStatementAsPdf } from '../utils/pdf/exportStatement';
 import { checkImageClarity, extractRouteAndDetailsFromText } from '../utils/billParser';
+import { apiUrl } from '../utils/api';
 import {
   Select,
   SelectContent,
@@ -2204,7 +2205,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                 className="max-w-full"
               >
                 <img
-                  src={activeBillViewer.url}
+                  src={apiUrl(activeBillViewer.url)}
                   alt="Bill Receipt"
                   className="max-h-[50vh] object-contain rounded-md shadow-sm mx-auto"
                   referrerPolicy="no-referrer"
@@ -2237,7 +2238,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             <div className="p-4 bg-white border-t border-[#c4c6d3] flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <a
-                  href={activeBillViewer.url}
+                  href={apiUrl(activeBillViewer.url)}
                   download={activeBillViewer.fileName || 'TQI_Receipt.jpg'}
                   target="_blank"
                   rel="noreferrer"
@@ -2248,7 +2249,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                 </a>
 
                 <a
-                  href={activeBillViewer.url}
+                  href={apiUrl(activeBillViewer.url)}
                   target="_blank"
                   rel="noreferrer"
                   className="px-3 py-1.5 text-[#002869] text-[12px] font-bold hover:underline flex items-center gap-1"
@@ -2753,7 +2754,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
             {/* Gallery Image Display */}
             <div className="p-4 bg-[#1a1b21] flex-1 flex items-center justify-center min-h-[380px] max-h-[60vh] relative">
               <img
-                src={allAttachedBills[activeGalleryIndex].url}
+                src={apiUrl(allAttachedBills[activeGalleryIndex].url)}
                 alt="Bill"
                 className="max-h-[52vh] object-contain rounded-md shadow-sm"
                 referrerPolicy="no-referrer"
@@ -2799,7 +2800,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
                       : 'border-[#c4c6d3] opacity-60 hover:opacity-100'
                   }`}
                 >
-                  <img src={bill.url} alt="Thumb" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  <img src={apiUrl(bill.url)} alt="Thumb" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   <span className="absolute bottom-0 right-0 bg-black/70 text-white text-[9px] px-1 font-mono">
                     #{idx + 1}
                   </span>
@@ -2809,7 +2810,7 @@ export const FinanceStatementView: React.FC<FinanceStatementViewProps> = ({
 
             <div className="p-4 bg-white border-t border-[#c4c6d3] flex justify-between items-center">
               <a
-                href={allAttachedBills[activeGalleryIndex].url}
+                href={apiUrl(allAttachedBills[activeGalleryIndex].url)}
                 download={allAttachedBills[activeGalleryIndex].fileName}
                 target="_blank"
                 rel="noreferrer"

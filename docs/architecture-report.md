@@ -1,19 +1,18 @@
-# TQI architecture report
+# TQI production architecture
 
-## Final structure
+## Single Vercel deployment
 
-- [frontend/](../frontend): Standalone React application, Vite build configuration, and Cloudflare Pages deployment target (`dist/`).
-- [backend/](../backend): Standalone Express REST API (Port 5000), MySQL connection pool, database migrations runner, and email delivery service.
-- [database/migrations/](../database/migrations): Authoritative SQL migrations (201 to 232).
-- [backend/storage/uploads/](../backend/storage/uploads): Runtime upload storage through `UPLOADS_DIR`; existing database file paths are resolved from the legacy root storage location after migration.
-- [docs/](.): Architecture and developer documentation.
+- React/Vite frontend source remains in `frontend/`; `npm run build:vercel` copies the existing build into the Vercel static `public/` directory.
+- Root `server.ts` exports the existing Express application from `backend/src/server.ts` as a Vercel Node.js function.
+- Browser API requests use same-origin relative `/api/...` paths. No external API rewrite or secondary frontend platform is part of production routing.
+- The existing MySQL schema and data remain unchanged. Vercel requires a remotely reachable MySQL endpoint and private `DB_*` environment variables.
+- Production session verification uses the existing JWT flow and a single configured `JWT_SECRET` shared by all function instances.
+- Local development retains the existing Vite frontend and Express server commands.
 
-## Decoupled Architecture & Cloudflare Deployment
+## Deployment constraints
 
-The frontend and backend are completely decoupled:
-1. **Frontend**: Standalone Vite + React 19 SPA communicating with the backend over HTTP REST using the configured `VITE_API_URL` (`frontend/.env`). It builds directly into `frontend/dist/` for simple static deployment onto Cloudflare Pages / Workers or Vercel.
-2. **Backend**: Independent Express 4 REST API service running on Port 5000 with CORS middleware enabled to support cross-origin requests from the deployed frontend.
-3. **Database**: On boot, the backend verifies/creates the MySQL database (`TQI_ERP`) and automatically runs all migrations in `database/migrations/`.
-4. **Email & OTP**: Type-safe HTML/plain-text templates rendered in TypeScript (`backend/src/templates/otpEmailTemplate.ts`) and sent via Nodemailer with Gmail SMTP.
+Vercel Functions are stateless and their writable filesystem is ephemeral. Existing photo and module-resource uploads are stored on disk, so durable uploads/downloads require a persistent object-storage migration; a filesystem path or static route cannot make those files durable. Vercel also limits request bodies to 4.5 MB, below the current module-resource upload limit. The current Vercel preparation therefore supports the UI and existing API routes, but file-storage production readiness remains an explicit prerequisite.
+
+The serverless runtime initializes the MySQL connection pool per warm instance. It intentionally does not run schema migrations or database bootstrap during requests; the target MySQL database must already contain the existing schema and records.
 
 

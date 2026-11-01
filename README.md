@@ -6,10 +6,10 @@ A modern, enterprise-grade Enterprise Resource Planning (ERP) platform designed 
 
 ## 🌟 Architecture & Tech Stack
 
-The platform is engineered with a decoupled, high-performance architecture:
+The production deployment uses one Vercel domain for the React client and Express API:
 
 - **Frontend**: React 19 + TypeScript + Vite 6 + Tailwind CSS v4, styled using the modern **TailAdmin** design system with full dark/light theme support.
-- **Backend**: Express.js REST API with TypeScript, MySQL 8.x connection pooling, automated database migration engine, and JWT-based authentication with Role-Based Access Control (RBAC).
+- **Backend**: Existing Express.js REST API with TypeScript, MySQL 8.x connection pooling, and JWT-based authentication with Role-Based Access Control (RBAC), hosted as a Vercel Node.js function.
 - **OCR & Intelligence**: Tesseract.js / Google GenAI for automated receipt & expense verification.
 - **Reporting & Export**: jsPDF, html2canvas, and XLSX for automated PDF & Excel semester reporting.
 
@@ -48,6 +48,8 @@ The platform is engineered with a decoupled, high-performance architecture:
 │   └── project-documents/    # Preserved finance and lesson-plan references
 ├── frontend/tests/e2e/       # Full-system Playwright tests
 ├── frontend/scripts/         # Frontend data maintenance scripts
+├── server.ts                 # Root Express entrypoint detected by Vercel
+├── scripts/prepare-vercel-public.mjs # Copies built SPA assets to Vercel public/
 ├── package.json              # Monorepo root scripts
 └── README.md
 ```
@@ -96,13 +98,12 @@ SMTP_FROM=noreply@tqierp.org
 # Local development against backend:
 VITE_API_URL=http://localhost:5000/api
 
-# For both Vercel and Cloudflare Pages, set this at build time:
-# VITE_API_URL=https://api.yourdomain.org/api
+VITE_API_URL=/api
 ```
 
-Only `VITE_*` variables are included in the browser bundle. Never add database,
-JWT, SMTP, or AI provider secrets to `frontend/.env` or either static-host's
-environment settings.
+Production always forces same-origin `/api` requests. Only `VITE_*` variables
+are included in the browser bundle. Never put database, JWT, SMTP, or AI
+provider secrets in frontend variables.
 
 ---
 
@@ -149,6 +150,7 @@ npm run dev:frontend  # Vite React App at http://localhost:5173
 | `npm run dev` | Runs both backend and frontend concurrently in development mode |
 | `npm run build` | Compiles both frontend (`frontend/dist`) and backend (`backend/dist/server.cjs`) |
 | `npm run build:frontend` | Builds production frontend bundle |
+| `npm run build:vercel` | Builds the frontend and stages it in Vercel's `public/` directory |
 | `npm run build:backend` | Bundles Node.js backend using esbuild |
 | `npm run lint` | Runs TypeScript typechecks across both frontend and backend |
 | `npm run lint:frontend` | Typechecks frontend source code |
@@ -163,71 +165,39 @@ The standalone backend reset scripts also refuse to reset a production database
 unless `ALLOW_DESTRUCTIVE_DB_RESET=true` is explicitly supplied; production
 resets additionally require a strong `ADMIN_DEFAULT_PASSWORD`.
 
-### Vercel frontend
+### Single Vercel production deployment
 
-Create a Vercel project rooted at the repository root; the existing `vercel.json`
-builds the Vite SPA and rewrites client-side routes to `index.html`.
+Connect this repository to one Vercel project with the repository root as the
+Root Directory. `vercel.json` builds the existing Vite UI into Vercel's static
+`public/` directory; root `server.ts` exports the existing Express app as one
+Node.js function. Express owns `/api/*`; the browser always calls relative
+`/api/...` URLs on the current Vercel domain. Do not configure external API
+rewrites or a second Pages deployment.
 
-- Framework: **Vite**
-- Build command: `npm run build:frontend`
-- Output directory: `frontend/dist`
-- Build environment variable: `VITE_API_URL=/api`
+- Production URL: `https://tqi-academic-erp.vercel.app/`
+- Build command: `npm run build:vercel`
+- Frontend API variable: `VITE_API_URL=/api` (public build-time value)
+- Required private Vercel variables: `NODE_ENV=production`, `JWT_SECRET`,
+	`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and normally
+	`DB_CREATE_IF_MISSING=false`.
+- Set `FRONTEND_URL=https://tqi-academic-erp.vercel.app` (and `APP_URL` if used)
+	so password-reset links return to the production app.
+- Preserve the currently deployed JWT secret if existing tokens must remain
+	valid; all API instances must use the same secret.
+- Configure `DB_SSL=true` and `DB_SSL_CA` when required by the MySQL provider.
+- SMTP variables are optional unless OTP and workflow email delivery are used.
 
-The Vercel rewrites proxy `/api/*` and `/storage/*` requests to the production
-backend at `https://tqi.autorevives.com`, so browser requests stay same-origin.
-Update those rewrite destinations if the backend host changes.
+The MySQL server must be reachable over the network from Vercel. Vercel runtime
+does not run schema migrations or create production databases on request; deploy
+against the existing provisioned schema and data. A local-only MySQL instance
+cannot serve production traffic.
 
-Deploy only the frontend from this project. The Express/MySQL backend is a
-separate long-running Node service, not a static Vercel deployment.
-
-### Cloudflare Pages frontend
-
-Connect the repository to Cloudflare Pages. `wrangler.toml` selects
-`frontend/dist`, and `frontend/public/_redirects` supplies the SPA fallback.
-The Pages Function at `functions/api/[[path]].js` proxies `/api/*` calls to the
-separate Express backend so login requests do not hit the static asset host.
-It is mirrored under `frontend/functions/` for Cloudflare projects whose Root
-directory is set to `frontend`. `frontend/public/_routes.json` limits Function
-invocations to `/api/*`.
-
-- Repository-root layout: Root directory `/`, build command
-  `npm run build:frontend`, output directory `frontend/dist`.
-- Frontend-root layout: Root directory `frontend`, build command `npm run build`,
-  output directory `dist`.
-- The Pages Function uses same-origin `/api/*` requests and proxies them to the
-	backend. `wrangler.toml` defaults `BACKEND_API_ORIGIN` to
-	`https://tqi.autorevives.com`; set the same variable in Cloudflare Pages
-	Production and Preview settings if deploying through the dashboard.
-
-Cloudflare Pages deploys only the frontend; do not put backend secrets in Pages
-variables. Set `BACKEND_API_ORIGIN` as a non-secret Pages variable for
-Production (and Preview if used) to override the checked-in default. The backend must still allow the Pages and
-custom frontend origins in its `CORS_ORIGINS` configuration.
-
-### Separate backend and MySQL
-
-Deploy the Express API to a Node.js host that supports a persistent writable
-volume. Build with `npm run build:backend`, then run `npm start` (the root
-`prestart` hook builds the backend as well). Configure `PORT`, `DB_HOST`,
-`DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_SSL`, `DB_SSL_CA`,
-`DB_CREATE_IF_MISSING=false`, `JWT_SECRET`, `CORS_ORIGINS`, `UPLOADS_DIR`,
-`APP_URL`, `FRONTEND_URL`, and `NODE_ENV=production`. Set
-`ADMIN_DEFAULT_PASSWORD` if the production database is being bootstrapped for
-the first time. Add each exact production Vercel, Pages, and
-custom-domain origin to comma-separated `CORS_ORIGINS`; avoid `*`.
-
-Use a managed MySQL 8+ database reachable from the backend host. Use a dedicated
-least-privilege DB user, TLS (`DB_SSL=true`, with `DB_SSL_CA` when required),
-and provision the database before startup (`DB_CREATE_IF_MISSING=false`). The
-backend applies existing SQL migrations on startup. Mount persistent storage at
-`UPLOADS_DIR` or configure durable external storage before using an ephemeral
-backend host; uploaded photos and module PDFs/PPTs are stored on disk today.
-
-For production, set a unique `JWT_SECRET` of at least 32 characters. If the
-database has no users yet, set a strong `ADMIN_DEFAULT_PASSWORD`; it is never
-printed to logs. In local development only, an empty value retains the existing
-`admin@tqi.org` / `admin123` bootstrap behavior. Configure SMTP variables if
-OTP and workflow email delivery are required.
+**Storage limitation:** session photos and module files are currently written to
+local disk. Vercel Functions have ephemeral, non-shared storage and a 4.5 MB
+request-body limit. This migration keeps the endpoints and MySQL metadata, but
+does not make file uploads durable on Vercel. Before relying on production
+uploads/downloads, a durable object-storage target and upload flow must be
+selected; this cannot be solved by Vercel rewrites or MySQL connection settings.
 
 ---
 
@@ -237,7 +207,7 @@ OTP and workflow email delivery are required.
 - **JWT Authentication**: Secure stateless tokens with support for both Email OTP and password sign-in.
 - **CORS**: Local origins are enabled for development; production requires an explicit `CORS_ORIGINS` allowlist.
 - **Uploads**: Session photos are limited by count/size/type; module resources accept PDF/PPT/PPTX up to 50 MB. Persist `UPLOADS_DIR` in production.
-- **Data Protection**: Environment files, Cloudflare local vars, and platform metadata are excluded from version control via `.gitignore`.
+- **Data Protection**: Environment files, generated local JWT secrets, and Vercel platform metadata are excluded from version control via `.gitignore`.
 
 ---
 

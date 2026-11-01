@@ -1,16 +1,20 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/$/, '');
-
-const usesCloudflarePagesApiProxy =
-  typeof window !== 'undefined' && window.location.hostname.endsWith('.pages.dev');
-
-if (import.meta.env.PROD && !configuredApiUrl && !usesCloudflarePagesApiProxy) {
-  console.error('VITE_API_URL is not configured. Set it to the production API base URL before deploying the frontend.');
-}
+export const API_BASE_URL = import.meta.env.PROD
+  ? '/api'
+  : (configuredApiUrl || '/api').replace(/\/$/, '');
 
 export function apiUrl(path: string): string {
   if (!path) return API_BASE_URL;
-  if (path.startsWith('http://') || path.startsWith('https://')) return path;
+  if (path.startsWith('data:') || path.startsWith('blob:')) return path;
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    if (!import.meta.env.PROD) return path;
+    try {
+      const url = new URL(path);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch {
+      return path;
+    }
+  }
 
   let cleanPath = path.startsWith('/') ? path : `/${path}`;
   if (cleanPath.startsWith('/api/') && typeof window !== 'undefined') {
@@ -29,6 +33,9 @@ export function apiUrl(path: string): string {
   }
   if (cleanPath === '/api') {
     return API_BASE_URL;
+  }
+  if (cleanPath.startsWith('/storage/')) {
+    return cleanPath;
   }
   return `${API_BASE_URL}${cleanPath}`;
 }

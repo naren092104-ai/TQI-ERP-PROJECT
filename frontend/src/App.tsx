@@ -658,14 +658,15 @@ export default function App() {
       role: normalizeUserRole(session.role),
       clusterId: session.clusterId || 'all',
     };
+
     try {
       localStorage.setItem('tqi_auth_session', JSON.stringify(normalizedSession));
     } catch {
       // ignore
     }
     setCurrentUser(normalizedSession);
-    setAuthStatus('checking');
     setCurrentUserRole(normalizedSession.role);
+    setAuthStatus('checking');
     setCurrentUserClusterId(normalizedSession.clusterId);
     setCurrentTab('dashboard');
     if (session.role === 'Super Admin') {

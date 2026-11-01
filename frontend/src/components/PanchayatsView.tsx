@@ -288,16 +288,16 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
               Back to Clusters
             </button>
           )}
-          <button
+          {!isShowingClusterCards && <button
             type="button"
             onClick={openAdd}
-            disabled={!clusters.length || (isSuperAdmin && selectedCluster === 'all')}
+            disabled={!clusters.length}
             title={clusters.length ? 'Add a Panchayat to a cluster' : 'Create a cluster first'}
             className="inline-flex items-center gap-2 rounded-xl bg-brand-500 px-4 py-2.5 text-sm font-semibold text-white shadow-theme-xs hover:bg-brand-600 transition shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="h-4 w-4" />
             <span>Add Panchayat</span>
-          </button>
+          </button>}
         </div>
       </div>
       {/* 2. Compact Metric Cards (counts & status only) */}

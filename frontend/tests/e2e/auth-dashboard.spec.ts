@@ -54,6 +54,40 @@ test('expired saved token is checked once and cleared on 401', async ({ page }) 
   expect(await page.evaluate(() => localStorage.getItem('tqi_auth_session'))).toBeNull();
 });
 
+test('a temporary auth-service failure preserves the token without an automatic retry', async ({ page }) => {
+  const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
+  const token = `header.${payload}.signature`;
+  await page.addInitScript((savedToken) => {
+    localStorage.setItem('tqi_auth_session', JSON.stringify({ token: savedToken, id: 'valid-user', role: 'Super Admin' }));
+  }, token);
+  await page.route('**/api/**', async (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ success: true, data: [] }),
+  }));
+
+  let authMeRequests = 0;
+  await page.route('**/api/auth/me', async (route) => {
+    authMeRequests += 1;
+    if (authMeRequests === 1) {
+      await route.fulfill({ status: 503, contentType: 'application/json', body: '{"success":false}' });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ success: true, user: { id: 'valid-user', name: 'Test User', role: 'Super Admin', clusterId: 'all' } }),
+    });
+  });
+
+  await page.goto('http://127.0.0.1:5173');
+  await expect(page.getByRole('status')).toHaveText('Checking your session…');
+  expect(authMeRequests).toBe(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('tqi_auth_session') || '{}').token)).toBe(token);
+  await page.waitForTimeout(100);
+  expect(authMeRequests).toBe(1);
+});
+
 test('maintenance polling waits until a saved token is validated', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem('tqi_auth_session', JSON.stringify({

@@ -54,7 +54,9 @@ const normalizedUploadsDir = configuredUploadsDir?.replace(
   /^[.\\/]*storage[\\/]uploads(?=$|[\\/])/i,
   path.join('backend', 'storage', 'uploads'),
 );
-const UPLOADS_DIR = configuredUploadsDir
+const UPLOADS_DIR = process.env.VERCEL
+  ? path.join('/tmp', 'tqi-uploads')
+  : configuredUploadsDir
   ? path.resolve(PROJECT_ROOT, normalizedUploadsDir || configuredUploadsDir)
   : path.join(PROJECT_ROOT, 'backend', 'storage', 'uploads');
 const LEGACY_UPLOADS_DIR = path.join(PROJECT_ROOT, 'storage', 'uploads');
@@ -128,9 +130,6 @@ if (process.env.NODE_ENV !== 'production' && !isUsableJwtSecret(configuredJwtSec
   console.warn('[AUTH] JWT_SECRET is unset or a placeholder; using a stable local development secret.');
 }
 const configuredCorsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || [];
-if (process.env.NODE_ENV === 'production' && configuredCorsOrigins.length === 0) {
-  throw new Error('Production requires CORS_ORIGINS with the exact frontend origin(s).');
-}
 const allowedCorsOrigins = new Set(
   configuredCorsOrigins.length > 0
     ? configuredCorsOrigins
@@ -154,6 +153,17 @@ const academicSessionId = (clusterId: string, academicYearId: string, dayNumber:
 
 const app = express();
 
+let serverlessDatabaseInitialization: Promise<void> | null = null;
+const ensureServerlessDatabase = () => {
+  if (!serverlessDatabaseInitialization) {
+    serverlessDatabaseInitialization = initializeDatabase().catch((error) => {
+      serverlessDatabaseInitialization = null;
+      throw error;
+    });
+  }
+  return serverlessDatabaseInitialization;
+};
+
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin || allowedCorsOrigins.has(origin)) {
@@ -164,6 +174,20 @@ app.use(cors({
   },
   credentials: true,
 }));
+
+app.use(async (_req: Request, res: Response, next: NextFunction) => {
+  if (!process.env.VERCEL) {
+    next();
+    return;
+  }
+  try {
+    await ensureServerlessDatabase();
+    next();
+  } catch (error: any) {
+    console.error('[DB] Unable to initialize the serverless database connection:', error?.message || error);
+    res.status(503).json({ success: false, error: 'Database service is temporarily unavailable.' });
+  }
+});
 
 
 // DB historically stored a few legacy uppercase role aliases such as
@@ -8986,11 +9010,56 @@ app.get('/api/health', async (_req, res) => {
   });
 });
 
-app.use('/assets', express.static(path.join(PROJECT_ROOT, 'frontend', 'public', 'assets')));
+const FRONTEND_DIST = path.join(PROJECT_ROOT, 'frontend', 'dist');
+const FRONTEND_PUBLIC = path.join(PROJECT_ROOT, 'frontend', 'public');
+const DEPLOYED_FRONTEND_PUBLIC = path.join(PROJECT_ROOT, 'public');
+const SPA_INDEX_PATH = process.env.VERCEL
+  ? path.join(DEPLOYED_FRONTEND_PUBLIC, 'index.html')
+  : path.join(FRONTEND_DIST, 'index.html');
+const SAFE_CSP = "default-src 'self'; connect-src 'self' http://localhost:5173 http://127.0.0.1:5173; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';";
+
+app.get('/', (req, res) => {
+  if (fs.existsSync(SPA_INDEX_PATH)) {
+    res.setHeader('Content-Security-Policy', SAFE_CSP);
+    return res.sendFile(SPA_INDEX_PATH);
+  }
+
+  res.setHeader('Content-Security-Policy', SAFE_CSP);
+  return res.status(200).json({
+    name: 'TQI ERP API',
+    status: 'ok',
+    frontend: 'http://127.0.0.1:5173',
+    api: 'http://localhost:5000/api',
+    message: 'Use the Vite frontend at the port above for the application UI.',
+  });
+});
+
+app.use('/assets', express.static(path.join(FRONTEND_DIST, 'assets')));
+app.use(express.static(FRONTEND_DIST));
+app.use(express.static(FRONTEND_PUBLIC));
 app.use('/storage/uploads', express.static(UPLOADS_DIR));
 
 app.use('/api', (_req: Request, res: Response) => {
+  res.setHeader('Content-Security-Policy', SAFE_CSP);
   res.status(404).json({ success: false, error: 'API endpoint not found.' });
+});
+
+app.get('*', (req, res, next) => {
+  if (!req.accepts('html') || !fs.existsSync(SPA_INDEX_PATH)) {
+    next();
+    return;
+  }
+  res.setHeader('Content-Security-Policy', SAFE_CSP);
+  res.sendFile(SPA_INDEX_PATH);
+});
+
+app.use((req: Request, res: Response, _next: NextFunction) => {
+  res.setHeader('Content-Security-Policy', SAFE_CSP);
+  if (req.path.startsWith('/.well-known/')) {
+    res.status(404).type('text/plain').send('Not found');
+    return;
+  }
+  res.status(404).json({ success: false, error: 'Not found.' });
 });
 
 app.use((error: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -9075,5 +9144,7 @@ const startServer = async () => {
   }
 };
 
-startServer();
+if (!process.env.VERCEL) void startServer();
+
+export default app;
 

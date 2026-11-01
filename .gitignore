@@ -42,3 +42,4 @@ yarn-error.log*
 backend/storage/uploads/
 backend/storage/backups/
 backend/storage/.jwt-secret
+/public/
