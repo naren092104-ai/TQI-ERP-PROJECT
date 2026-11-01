@@ -86,6 +86,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const [setupDays, setSetupDays] = useState<{ dayNumber: number; sessionName: string }[]>([]);
   const isClusterAdmin = userRole === 'Cluster Admin';
+  const getSessionClusterName = (session: Session) =>
+    clusters.find((cluster) => cluster.id === session.clusterId)?.name || session.clusterName || session.clusterId || '—';
 
   const effectiveAuthToken = authToken || (() => {
     try {
@@ -437,7 +439,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <tbody className="divide-y divide-border/60">
                     {todaySessions.map((s) => (
                       <tr key={s.id} className="hover:bg-surface-hover transition-colors">
-                        <td className="py-2.5 font-medium text-foreground">{s.clusterId}</td>
+                        <td className="py-2.5 font-medium text-foreground">{getSessionClusterName(s)}</td>
                         <td className="py-2.5 text-muted-foreground">Day {s.dayNumber}</td>
                         <td className="py-2.5 text-foreground">{s.villageName}</td>
                         <td className="py-2.5 text-foreground">{s.module}</td>
@@ -503,7 +505,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     {upcomingSessions.map((s) => (
                       <tr key={s.id} className="hover:bg-surface-hover transition-colors">
                         <td className="py-2.5 font-medium text-foreground">{s.date}</td>
-                        <td className="py-2.5 text-muted-foreground">{s.clusterId}</td>
+                        <td className="py-2.5 text-muted-foreground">{getSessionClusterName(s)}</td>
                         <td className="py-2.5 text-foreground">Day {s.dayNumber}</td>
                         <td className="py-2.5 text-foreground">
                           {s.panchayatName} &middot; {s.villageName}

@@ -90,13 +90,43 @@ const resolveStoredUploadPath = (storedPath: unknown): string => {
 
 const PORT = Number(process.env.PORT || 5000);
 const configuredJwtSecret = process.env.JWT_SECRET?.trim();
+const isUsableJwtSecret = (secret?: string) => Boolean(
+  secret && secret.length >= 32 && !/^(replace|change|your[-_])/i.test(secret),
+);
 if (
   process.env.NODE_ENV === 'production' &&
-  (!configuredJwtSecret || configuredJwtSecret.length < 32 || /^(replace|change|your[-_])/i.test(configuredJwtSecret))
+  !isUsableJwtSecret(configuredJwtSecret)
 ) {
   throw new Error('Production requires a unique JWT_SECRET of at least 32 characters.');
 }
-const JWT_SECRET = configuredJwtSecret || randomBytes(32).toString('hex');
+const loadOrCreateLocalJwtSecret = () => {
+  const secretPath = path.join(PROJECT_ROOT, 'backend', 'storage', '.jwt-secret');
+  fs.mkdirSync(path.dirname(secretPath), { recursive: true });
+  try {
+    const savedSecret = fs.readFileSync(secretPath, 'utf8').trim();
+    if (isUsableJwtSecret(savedSecret)) return savedSecret;
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+
+  const generatedSecret = randomBytes(48).toString('hex');
+  try {
+    fs.writeFileSync(secretPath, generatedSecret, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+    return generatedSecret;
+  } catch (error: any) {
+    if (error?.code === 'EEXIST') {
+      const savedSecret = fs.readFileSync(secretPath, 'utf8').trim();
+      if (isUsableJwtSecret(savedSecret)) return savedSecret;
+    }
+    throw new Error(`Unable to persist the local JWT secret at ${secretPath}: ${error?.message || error}`);
+  }
+};
+const JWT_SECRET = isUsableJwtSecret(configuredJwtSecret)
+  ? configuredJwtSecret!
+  : loadOrCreateLocalJwtSecret();
+if (process.env.NODE_ENV !== 'production' && !isUsableJwtSecret(configuredJwtSecret)) {
+  console.warn('[AUTH] JWT_SECRET is unset or a placeholder; using a stable local development secret.');
+}
 const configuredCorsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || [];
 if (process.env.NODE_ENV === 'production' && configuredCorsOrigins.length === 0) {
   throw new Error('Production requires CORS_ORIGINS with the exact frontend origin(s).');
