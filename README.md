@@ -187,6 +187,13 @@ rewrites or a second Pages deployment.
 - Configure `DB_SSL=true` and `DB_SSL_CA` when required by the MySQL provider.
 - SMTP variables are optional unless OTP and workflow email delivery are used.
 
+If the frontend is deployed separately on Cloudflare Pages, Pages serves only
+the static UI; it does not run this Express API. Set the Pages build variable
+`VITE_API_URL=https://tqi-academic-erp.vercel.app/api` (or the URL of the
+deployed Express backend), then set the backend's `CORS_ORIGINS` to include
+`https://tqi-erp.pages.dev` and any custom frontend domain. Redeploy the Pages
+frontend after changing its build variable.
+
 The MySQL server must be reachable over the network from Vercel. Vercel runtime
 does not run schema migrations or create production databases on request; deploy
 against the existing provisioned schema and data. A local-only MySQL instance

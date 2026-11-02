@@ -1,13 +1,14 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-export const API_BASE_URL = import.meta.env.PROD
-  ? '/api'
-  : (configuredApiUrl || '/api').replace(/\/$/, '');
+export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/+$/, '');
+const externalApiOrigin = /^https?:\/\//i.test(API_BASE_URL)
+  ? new URL(API_BASE_URL).origin
+  : '';
 
 export function apiUrl(path: string): string {
   if (!path) return API_BASE_URL;
   if (path.startsWith('data:') || path.startsWith('blob:')) return path;
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    if (!import.meta.env.PROD) return path;
+    if (!import.meta.env.PROD || externalApiOrigin) return path;
     try {
       const url = new URL(path);
       return `${url.pathname}${url.search}${url.hash}`;
@@ -35,7 +36,7 @@ export function apiUrl(path: string): string {
     return API_BASE_URL;
   }
   if (cleanPath.startsWith('/storage/')) {
-    return cleanPath;
+    return externalApiOrigin ? `${externalApiOrigin}${cleanPath}` : cleanPath;
   }
   return `${API_BASE_URL}${cleanPath}`;
 }
