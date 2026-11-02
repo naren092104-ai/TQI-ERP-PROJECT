@@ -1,5 +1,10 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/+$/, '');
+const isCloudflarePages = typeof window !== 'undefined'
+  && window.location.hostname.endsWith('.pages.dev');
+const defaultApiUrl = import.meta.env.PROD && isCloudflarePages
+  ? 'https://tqi-academic-erp.vercel.app/api'
+  : '/api';
+export const API_BASE_URL = (configuredApiUrl || defaultApiUrl).replace(/\/+$/, '');
 const externalApiOrigin = /^https?:\/\//i.test(API_BASE_URL)
   ? new URL(API_BASE_URL).origin
   : '';
