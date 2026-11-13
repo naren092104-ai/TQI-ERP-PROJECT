@@ -9018,39 +9018,41 @@ const SPA_INDEX_PATH = process.env.VERCEL
   : path.join(FRONTEND_DIST, 'index.html');
 const SAFE_CSP = "default-src 'self'; connect-src 'self' http://localhost:5173 http://127.0.0.1:5173; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';";
 
-app.get('/', (req, res) => {
-  if (fs.existsSync(SPA_INDEX_PATH)) {
+if (!process.env.VERCEL) {
+  app.get('/', (_req, res) => {
+    if (fs.existsSync(SPA_INDEX_PATH)) {
+      res.setHeader('Content-Security-Policy', SAFE_CSP);
+      return res.sendFile(SPA_INDEX_PATH);
+    }
+
     res.setHeader('Content-Security-Policy', SAFE_CSP);
-    return res.sendFile(SPA_INDEX_PATH);
-  }
-
-  res.setHeader('Content-Security-Policy', SAFE_CSP);
-  return res.status(200).json({
-    name: 'TQI ERP API',
-    status: 'ok',
-    frontend: 'http://127.0.0.1:5173',
-    api: 'http://localhost:5000/api',
-    message: 'Use the Vite frontend at the port above for the application UI.',
+    return res.status(200).json({
+      name: 'TQI ERP API',
+      status: 'ok',
+      frontend: 'http://127.0.0.1:5173',
+      api: 'http://localhost:5000/api',
+      message: 'Use the Vite frontend at the port above for the application UI.',
+    });
   });
-});
 
-app.use('/assets', express.static(path.join(FRONTEND_DIST, 'assets')));
-app.use(express.static(FRONTEND_DIST));
-app.use(express.static(FRONTEND_PUBLIC));
+  app.use('/assets', express.static(path.join(FRONTEND_DIST, 'assets')));
+  app.use(express.static(FRONTEND_DIST));
+  app.use(express.static(FRONTEND_PUBLIC));
+  app.get('*', (req, res, next) => {
+    if (!req.accepts('html') || !fs.existsSync(SPA_INDEX_PATH)) {
+      next();
+      return;
+    }
+    res.setHeader('Content-Security-Policy', SAFE_CSP);
+    res.sendFile(SPA_INDEX_PATH);
+  });
+}
+
 app.use('/storage/uploads', express.static(UPLOADS_DIR));
 
 app.use('/api', (_req: Request, res: Response) => {
   res.setHeader('Content-Security-Policy', SAFE_CSP);
   res.status(404).json({ success: false, error: 'API endpoint not found.' });
-});
-
-app.get('*', (req, res, next) => {
-  if (!req.accepts('html') || !fs.existsSync(SPA_INDEX_PATH)) {
-    next();
-    return;
-  }
-  res.setHeader('Content-Security-Policy', SAFE_CSP);
-  res.sendFile(SPA_INDEX_PATH);
 });
 
 app.use((req: Request, res: Response, _next: NextFunction) => {

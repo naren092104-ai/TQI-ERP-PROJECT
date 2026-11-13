@@ -165,34 +165,37 @@ The standalone backend reset scripts also refuse to reset a production database
 unless `ALLOW_DESTRUCTIVE_DB_RESET=true` is explicitly supplied; production
 resets additionally require a strong `ADMIN_DEFAULT_PASSWORD`.
 
-### Single Vercel production deployment
+### Vercel multi-service deployment (Beta)
 
 Connect this repository to one Vercel project with the repository root as the
-Root Directory. `vercel.json` builds the existing Vite UI into Vercel's static
-`public/` directory; root `server.ts` exports the existing Express app as one
-Node.js function. Express owns `/api/*`; the browser always calls relative
-`/api/...` URLs on the current Vercel domain. Do not configure external API
-rewrites or a second Pages deployment.
+Root Directory. The root `vercel.json` defines two independently built
+services: `frontend` (Vite, rooted at `frontend/`) and `backend` (Express,
+rooted at `backend/`). The public route table sends `/api/*` to the backend
+and all other paths to the frontend. The frontend service rewrites deep links
+to its `index.html`. The legacy `/storage/uploads` static mount is not exposed
+as a public route because it bypasses API authorization.
 
-- Production URL: `https://tqi-academic-erp.vercel.app/`
-- Build command: `npm run build:vercel`
-- Frontend API variable: `VITE_API_URL=/api` (public build-time value)
+The frontend is a static Vite build, so it has no server-side runtime to call
+the backend with a service binding. Browser requests use same-origin relative
+`/api/...` URLs through the public Vercel rewrite; no internal service binding
+is currently needed. `VITE_API_URL=/api` is an optional public build-time
+override and should remain relative for Vercel previews and custom domains.
+
+- Frontend build command: `npm run build` in `frontend/`
+- Backend build command: `npm run build` in `backend/`
 - Required private Vercel variables: `NODE_ENV=production`, `JWT_SECRET`,
 	`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and normally
 	`DB_CREATE_IF_MISSING=false`.
-- Set `FRONTEND_URL=https://tqi-academic-erp.vercel.app` (and `APP_URL` if used)
-	so password-reset links return to the production app.
+- Set `FRONTEND_URL` to the actual production Vercel/custom domain (and `APP_URL`
+	if used) so password-reset links return to the production app.
 - Preserve the currently deployed JWT secret if existing tokens must remain
 	valid; all API instances must use the same secret.
 - Configure `DB_SSL=true` and `DB_SSL_CA` when required by the MySQL provider.
 - SMTP variables are optional unless OTP and workflow email delivery are used.
 
-If the frontend is deployed separately on Cloudflare Pages, Pages serves only
-the static UI; it does not run this Express API. Set the Pages build variable
-`VITE_API_URL=https://tqi-academic-erp.vercel.app/api` (or the URL of the
-deployed Express backend), then set the backend's `CORS_ORIGINS` to include
-`https://tqi-erp.pages.dev` and any custom frontend domain. Redeploy the Pages
-frontend after changing its build variable.
+If the frontend is instead deployed separately on Cloudflare Pages, set its
+build variable `VITE_API_URL` to the absolute `/api` URL of the backend's public
+domain and include the Pages/custom frontend origin in backend `CORS_ORIGINS`.
 
 The MySQL server must be reachable over the network from Vercel. Vercel runtime
 does not run schema migrations or create production databases on request; deploy
@@ -201,10 +204,9 @@ cannot serve production traffic.
 
 **Storage limitation:** session photos and module files are currently written to
 local disk. Vercel Functions have ephemeral, non-shared storage and a 4.5 MB
-request-body limit. This migration keeps the endpoints and MySQL metadata, but
-does not make file uploads durable on Vercel. Before relying on production
-uploads/downloads, a durable object-storage target and upload flow must be
-selected; this cannot be solved by Vercel rewrites or MySQL connection settings.
+request-body limit. The current multi-service configuration does not make file
+uploads durable; production uploads/downloads still require a durable object
+storage integration and a compatible upload flow.
 
 ---
 

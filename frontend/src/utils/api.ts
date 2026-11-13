@@ -1,19 +1,7 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const isCloudflarePages = typeof window !== 'undefined'
-  && window.location.hostname.endsWith('.pages.dev');
-const defaultApiUrl = import.meta.env.PROD && isCloudflarePages
-  ? 'https://tqi-academic-erp.vercel.app/api'
-  : '/api';
-const hasAbsoluteConfiguredApiUrl = /^https?:\/\//i.test(configuredApiUrl || '');
-// Cloudflare Pages only serves the static frontend; a relative `/api` URL
-// would point back to Pages, not to the Express API hosted on Vercel.
-const shouldUsePagesApiFallback = import.meta.env.PROD
-  && isCloudflarePages
-  && Boolean(configuredApiUrl)
-  && !hasAbsoluteConfiguredApiUrl;
-export const API_BASE_URL = (
-  shouldUsePagesApiFallback ? defaultApiUrl : configuredApiUrl || defaultApiUrl
-).replace(/\/+$/, '');
+// Vercel routes same-origin /api requests to the backend service. Keep the
+// URL relative so previews and custom domains use their own deployment.
+export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/+$/, '');
 const externalApiOrigin = /^https?:\/\//i.test(API_BASE_URL)
   ? new URL(API_BASE_URL).origin
   : '';
