@@ -362,9 +362,6 @@ export default function App() {
       fetch(apiUrl(url), { headers, signal })
         .then((response) => {
           if (response.status === 401) {
-            localStorage.removeItem('tqi_auth_session');
-            setAuthStatus('unauthenticated');
-            setCurrentUser(null);
             return null;
           }
           if (response.status === 403) {
@@ -531,13 +528,8 @@ export default function App() {
           signal: controller.signal,
         });
         if (response.status === 401) {
-          authenticationRejected = true;
-          controller.abort();
-          localStorage.removeItem('tqi_auth_session');
+          // Do not wipe session on maintenance poll - auth status is managed exclusively by /api/auth/me
           setMaintenanceLoading(false);
-          setAuthValidatedToken(null);
-          setAuthStatus('unauthenticated');
-          setCurrentUser(null);
           return;
         }
         const data = await response.json().catch(() => null);
