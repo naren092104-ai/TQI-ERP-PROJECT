@@ -5,10 +5,11 @@
 
 @theme {
   --font-*: initial;
-  --font-jakarta: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-outfit: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-display: "Instrument Serif", "Plus Jakarta Sans", ui-serif, Georgia, serif;
+  --font-jakarta: "Google Sans", "Google Sans Text", Roboto, "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-sans: "Google Sans", "Google Sans Text", Roboto, "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-outfit: "Google Sans", "Google Sans Text", Roboto, "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-display: "Google Sans", "Google Sans Text", Roboto, "Open Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Roboto Mono", SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
   --breakpoint-*: initial;
   --breakpoint-2xsm: 375px;
@@ -43,21 +44,21 @@
   --color-black: #101828;
 
   /* =========================================================
-     TQI BRAND — Navy (logo "q")
-     Light: #1717B8    Dark: #5B5BEF
+     TQI BRAND — Google Enterprise Blue
+     Light: #1A73E8    Dark: #8AB4F8
      ========================================================= */
-  --color-brand-25:  #F2F3FA;
-  --color-brand-50:  #E1E3F1;
-  --color-brand-100: #C5C9E2;
-  --color-brand-200: #9DA3CC;
-  --color-brand-300: #757BB6;
-  --color-brand-400: #5B5BEF;
-  --color-brand-500: #1717B8;
-  --color-brand-600: #1313A0;
-  --color-brand-700: #0F0F82;
-  --color-brand-800: #0C0C66;
-  --color-brand-900: #08084D;
-  --color-brand-950: #04042B;
+  --color-brand-25:  #F8FAFD;
+  --color-brand-50:  #E8F0FE;
+  --color-brand-100: #D2E3FC;
+  --color-brand-200: #AECBFA;
+  --color-brand-300: #8AB4F8;
+  --color-brand-400: #669DF6;
+  --color-brand-500: #1A73E8;
+  --color-brand-600: #1557B0;
+  --color-brand-700: #174EA6;
+  --color-brand-800: #185ABC;
+  --color-brand-900: #0D47A1;
+  --color-brand-950: #041E49;
 
   /* TQI Accent — Teal (logo ring): info / secondary */
   --color-teal-50:  #E6F5F5;
@@ -261,10 +262,10 @@
    ============================================================ */
 :root {
   /* ============================================================
-     OFFICIAL TQI DESIGN SYSTEM TOKENS
+     OFFICIAL TQI DESIGN SYSTEM TOKENS — Google Enterprise Blue
      ============================================================ */
-  --tqi-primary: #1717B8;
-  --tqi-primary-hover: #1313A0;
+  --tqi-primary: #1a73e8;
+  --tqi-primary-hover: #1557b0;
   --tqi-text: #0E1118;
   --tqi-muted: #5F6573;
   --tqi-background: #F8FAFC;
@@ -297,14 +298,14 @@
   --border-strong: #C8CCD3;
   --border-subtle: #EEF0F3;
 
-  /* Brand */
-  --primary: #1717B8;
+  /* Brand — Google Blue */
+  --primary: #1a73e8;
   --primary-foreground: #ffffff;
-  --brand: #1717B8;
-  --brand-dark: #1313A0;
-  --brand-light: #F2F3FA;
-  --brand-xlight: #E5E7F2;
-  --brand-ring: color-mix(in srgb, #1717B8 12%, transparent);
+  --brand: #1a73e8;
+  --brand-dark: #1557b0;
+  --brand-light: #e8f0fe;
+  --brand-xlight: #d2e3fc;
+  --brand-ring: color-mix(in srgb, #1a73e8 12%, transparent);
   --brand-teal: #008C8C;
   /* `--accent` is the generic name components reach for when they
      want "the second brand colour"; it must exist or any
@@ -2310,9 +2311,9 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   text-wrap: balance;
 }
 .tqi-auth-headline em {
-  font-style: italic;
-  font-weight: 400;
-  font-family: var(--font-display, "Instrument Serif", serif);
+  font-style: normal;
+  font-weight: 600;
+  font-family: var(--font-sans);
   color: color-mix(in srgb, #FFD7B5 100%, #fff 0%);
 }
 .tqi-auth-eyebrow {
@@ -2546,8 +2547,8 @@ kbd.tqi-kbd {
   position: absolute;
   bottom: -2.5rem;
   left: -1.5rem;
-  font-family: var(--font-display, "Instrument Serif", serif);
-  font-style: italic;
+  font-family: var(--font-sans);
+  font-style: normal;
   font-weight: 400;
   font-size: clamp(12rem, 28vw, 22rem);
   line-height: 0.8;
@@ -2705,7 +2706,7 @@ kbd.tqi-kbd {
 }
 
 .tqi-login-headline {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-weight: 800;
   letter-spacing: -0.04em;
   line-height: 0.95;
@@ -2839,7 +2840,7 @@ kbd.tqi-kbd {
   gap: 0.5rem;
 }
 .tqi-trust-pill {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.6875rem;
   font-weight: 700;
   letter-spacing: 0.18em;
@@ -2875,7 +2876,7 @@ kbd.tqi-kbd {
 }
 
 .tqi-login-h1 {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 1.75rem;
   font-weight: 800;
   letter-spacing: -0.035em;
@@ -2901,7 +2902,7 @@ kbd.tqi-kbd {
   border: 1px solid var(--login-border);
   border-radius: 10px;
   transition: border-color 180ms var(--ease-out-quart), box-shadow 180ms var(--ease-out-quart);
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
 }
 .tqi-login-input::placeholder { color: var(--login-muted); opacity: 0.7; }
 .tqi-login-input:focus {
@@ -2954,7 +2955,7 @@ kbd.tqi-kbd {
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.875rem;
   font-weight: 700;
   letter-spacing: -0.01em;
@@ -3177,7 +3178,7 @@ kbd.tqi-kbd {
 }
 .tqi-login-mobile-strip > * { position: relative; z-index: 1; }
 .tqi-login-mobile-strip-name {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -3228,7 +3229,7 @@ kbd.tqi-kbd {
   margin-bottom: 1.25rem;
 }
 .tqi-login-card-brand-name {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.9375rem;
   font-weight: 800;
   letter-spacing: -0.02em;
@@ -3852,7 +3853,7 @@ kbd.tqi-kbd {
 
 /* ---- Number ticker (for KPI hero numbers — animated counter) ---- */
 .tqi-num-hero {
-  font-family: "Bricolage Grotesque", "Plus Jakarta Sans", sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
   font-weight: 800;
   letter-spacing: -0.04em;

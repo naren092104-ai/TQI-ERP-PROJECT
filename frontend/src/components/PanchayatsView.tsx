@@ -523,30 +523,45 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
       )}
       </>}
 
-      {/* Add Panchayat Modal */}
+      {/* Add Panchayat Modal (Google Console Style Dialog) */}
       {showAdd && (
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-y-auto bg-gray-900/75 p-4 backdrop-blur-sm">
-          <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-200 bg-white p-6 shadow-theme-xl dark:border-gray-800 dark:bg-gray-900 animate-in fade-in-0 zoom-in-95">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-100 dark:border-gray-800">
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                Add New Panchayat
-              </h3>
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-slate-200/90 bg-white p-6 shadow-2xl dark:border-slate-800 dark:bg-slate-900 animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 dark:border-slate-800">
+              <div>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Add New Panchayat
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Register a Panchayat under the active academic year cycle.
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowAdd(false)}
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-white transition"
+                className="inline-flex h-8 w-8 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition"
               >
                 <X className="h-4 w-4" />
               </button>
             </div>
 
+            {/* Context Meta Strip */}
+            <div className="mt-4 flex items-center justify-between rounded-xl bg-slate-50 dark:bg-slate-800/60 px-3.5 py-2.5 text-xs text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-800">
+              <span className="truncate">
+                Cluster: <strong className="text-slate-900 dark:text-slate-100 font-semibold">{selectedClusterRecord?.name || selectedClusterRecord?.district || 'Select Cluster'}</strong>
+              </span>
+              <span className="shrink-0 text-slate-500">
+                Cycle: <strong className="text-slate-900 dark:text-slate-100 font-semibold">{selectedAcademicYearName || '2025-2026'}</strong>
+              </span>
+            </div>
+
             {selectedCluster === 'all' && (
-              <label className="mt-4 block text-xs font-semibold text-slate-700">
+              <label className="mt-4 block text-xs font-medium text-slate-700 dark:text-slate-300">
                 Cluster / District <span className="text-rose-600">*</span>
                 <select
                   value={selectedCluster}
                   onChange={(event) => { setSelectedCluster(event.target.value); setForm({ name: '' }); setFormError(''); }}
-                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-normal text-slate-700 outline-none focus:border-[#0B3D91] focus:ring-4 focus:ring-blue-100"
+                  className="mt-1.5 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3.5 py-2 text-xs font-normal text-slate-700 dark:text-slate-200 outline-none focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20"
                 >
                   <option value="all">Select a cluster</option>
                   {clusterOptions.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name} — {cluster.district || 'District not set'}</option>)}
@@ -554,26 +569,16 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
               </label>
             )}
 
-            <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-blue-50/60 px-3 py-2 text-[11px] text-[#0B3D91]">
-              {isLoadingDistrictDirectory
-                ? `Loading ${selectedClusterRecord?.district || 'district'} Panchayats…`
-                : districtDirectoryError
-                  ? districtDirectoryError
-                  : `${districtDirectoryNames.length} directory Panchayats available. Select one, or type a custom name to add it.`}
-            </div>
             {modalPanchayatError && <p role="alert" className="mt-2 text-xs text-rose-700">{modalPanchayatError} <button type="button" onClick={() => setReloadModalPanchayats((value) => value + 1)} className="font-semibold underline">Retry</button></p>}
 
-            <form onSubmit={(event) => void handleSave(event)} className="mt-5 space-y-5 text-sm">
-              {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
-              <div className="rounded-xl border border-blue-100 bg-blue-50/70 p-3.5">
-                <p className="text-xs font-semibold text-slate-500">Cluster / District</p>
-                <p className="mt-1 font-semibold text-slate-900">{selectedClusterRecord?.name || selectedClusterRecord?.district || 'Select a cluster first'}</p>
-                <p className="mt-1 text-[11px] text-slate-600">{selectedAcademicYearName ? `Academic year: ${selectedAcademicYearName}` : selectedAcademicYearId ? `Academic year: ${selectedAcademicYearId}` : 'No academic year selected'}</p>
-              </div>
+            <form onSubmit={(event) => void handleSave(event)} className="mt-4 space-y-4 text-sm">
+              {formError && <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700">{formError}</p>}
 
-              <label className="block text-xs font-semibold text-slate-700" htmlFor="pan-name">
-                PANCHAYAT NAME <span className="text-rose-600">*</span>
-                <span className="relative mt-1.5 block">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5" htmlFor="pan-name">
+                  Panchayat Name <span className="text-rose-600">*</span>
+                </label>
+                <div className="relative">
                   <input
                     id="pan-name"
                     type="text"
@@ -586,23 +591,66 @@ export const PanchayatsView: React.FC<PanchayatsViewProps> = ({
                     role="combobox"
                     aria-expanded={isPanchayatNameMenuOpen}
                     aria-controls="panchayat-name-options"
-                    placeholder="Search district Panchayats"
-                    className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-normal text-slate-800 outline-none placeholder:text-slate-400 focus:border-[#0B3D91] focus:ring-4 focus:ring-blue-100"
+                    placeholder="Search or enter district Panchayat name"
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3.5 py-2.5 text-xs text-slate-800 dark:text-slate-100 outline-none placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-600/20 transition-all"
                   />
-                  {isPanchayatNameMenuOpen && <div id="panchayat-name-options" role="listbox" aria-label="Panchayats in selected cluster" className="absolute z-[100001] mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-                    {isLoadingModalPanchayats || isLoadingDistrictDirectory ? <p className="px-3 py-3 text-xs text-slate-500">Loading district Panchayats for {selectedClusterLabel}…</p>
-                      : districtDirectoryError ? <div className="px-3 py-3 text-xs text-rose-700"><p>{districtDirectoryError}</p><button type="button" onClick={() => setReloadModalPanchayats((value) => value + 1)} className="mt-2 font-semibold text-[#0B3D91] underline">Retry</button></div>
-                        : matchingPanchayatOptions.length ? matchingPanchayatOptions.map((item) => <button key={normalizedPanchayatName(item.name)} type="button" role="option" aria-selected={normalizedPanchayatName(form.name) === normalizedPanchayatName(item.name)} disabled={item.alreadyAdded} onClick={() => { setForm({ name: item.name }); setIsPanchayatNameMenuOpen(false); setFormError(item.alreadyAdded ? 'This Panchayat is already added to this academic year.' : ''); }} className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:text-slate-400">{item.name}{item.alreadyAdded && <span className="ml-2 text-[10px]">Already added</span>}</button>)
-                          : districtDirectoryNames.length ? <p className="px-3 py-3 text-xs text-slate-500">No directory match. You can still save the name you typed.</p>
-                            : <p className="px-3 py-3 text-xs text-slate-500">Directory unavailable. You can type a Panchayat name and save it manually.</p>}
-                  </div>}
-                </span>
-              </label>
+                  {isPanchayatNameMenuOpen && (
+                    <div id="panchayat-name-options" role="listbox" aria-label="Panchayats in selected cluster" className="absolute z-[100001] mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-850 p-1 shadow-lg">
+                      {isLoadingModalPanchayats || isLoadingDistrictDirectory ? (
+                        <p className="px-3 py-2.5 text-xs text-slate-500">Loading district Panchayats for {selectedClusterLabel}…</p>
+                      ) : districtDirectoryError ? (
+                        <div className="px-3 py-2.5 text-xs text-rose-700">
+                          <p>{districtDirectoryError}</p>
+                          <button type="button" onClick={() => setReloadModalPanchayats((value) => value + 1)} className="mt-1 font-medium text-blue-600 underline">Retry</button>
+                        </div>
+                      ) : matchingPanchayatOptions.length ? (
+                        matchingPanchayatOptions.map((item) => (
+                          <button
+                            key={normalizedPanchayatName(item.name)}
+                            type="button"
+                            role="option"
+                            aria-selected={normalizedPanchayatName(form.name) === normalizedPanchayatName(item.name)}
+                            disabled={item.alreadyAdded}
+                            onClick={() => { setForm({ name: item.name }); setIsPanchayatNameMenuOpen(false); setFormError(item.alreadyAdded ? 'This Panchayat is already added to this academic year.' : ''); }}
+                            className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:cursor-not-allowed disabled:text-slate-400"
+                          >
+                            <span>{item.name}</span>
+                            {item.alreadyAdded && <span className="ml-2 rounded-full bg-slate-100 dark:bg-slate-800 px-2 py-0.5 text-[10px] text-slate-500 font-medium">Already added</span>}
+                          </button>
+                        ))
+                      ) : districtDirectoryNames.length ? (
+                        <p className="px-3 py-2.5 text-xs text-slate-500">No directory match. You can still save the name you typed.</p>
+                      ) : (
+                        <p className="px-3 py-2.5 text-xs text-slate-500">Directory unavailable. You can type a Panchayat name and save it manually.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-500">
+                  {isLoadingDistrictDirectory
+                    ? `Loading ${selectedClusterRecord?.district || 'district'} directory…`
+                    : districtDirectoryError
+                      ? 'Local entry enabled.'
+                      : `${districtDirectoryNames.length} directory Panchayats available. Select from list or type custom name.`}
+                </p>
+              </div>
 
-              <p className="rounded-xl bg-blue-50 px-3 py-2.5 text-xs text-[#0B3D91]">Panchayats are saved only under the selected cluster and academic year.</p>
-              <div className="flex justify-end gap-2.5 border-t border-gray-100 pt-4 dark:border-gray-800">
-                <button type="button" disabled={isSavingPanchayat} onClick={() => { setShowAdd(false); setForm({ name: '' }); setFormError(''); setIsPanchayatNameMenuOpen(false); }} className="rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-xs font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-60">Cancel</button>
-                <button type="submit" disabled={isSavingPanchayat || !selectedClusterRecord || isLoadingModalPanchayats} className="rounded-xl bg-[#0B3D91] px-4 py-2.5 text-xs font-semibold text-white shadow-theme-xs hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-60">{isSavingPanchayat ? 'Saving…' : 'Save Panchayat'}</button>
+              <div className="flex justify-end gap-2.5 border-t border-slate-100 pt-4 dark:border-slate-800">
+                <button
+                  type="button"
+                  disabled={isSavingPanchayat}
+                  onClick={() => { setShowAdd(false); setForm({ name: '' }); setFormError(''); setIsPanchayatNameMenuOpen(false); }}
+                  className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-750 transition-colors disabled:opacity-60"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingPanchayat || !selectedClusterRecord || isLoadingModalPanchayats}
+                  className="rounded-lg bg-blue-600 hover:bg-blue-700 px-4 py-2 text-xs font-medium text-white shadow-xs transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingPanchayat ? 'Saving…' : 'Save Panchayat'}
+                </button>
               </div>
             </form>
           </div>

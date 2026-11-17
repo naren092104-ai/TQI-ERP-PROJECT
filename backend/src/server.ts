@@ -2922,7 +2922,12 @@ app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedReque
     }
 
     if (!names.size) {
-      res.status(502).json({ success: false, error: `No Gram Panchayat list was found for ${district}.` });
+      res.json({
+        success: true,
+        district,
+        source: 'Manual Entry',
+        panchayats: [],
+      });
       return;
     }
 
@@ -2935,8 +2940,13 @@ app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedReque
       panchayats: [...names.values()].sort((left, right) => left.localeCompare(right)),
     });
   } catch (error: any) {
-    console.error('Failed to fetch district panchayat directory:', error);
-    res.status(502).json({ success: false, error: error?.name === 'TimeoutError' ? 'District directory request timed out.' : error?.message || 'Unable to fetch the district panchayat directory.' });
+    console.warn('Failed to fetch district panchayat directory (using graceful fallback):', error?.message || error);
+    res.json({
+      success: true,
+      district,
+      source: 'Manual Entry Fallback',
+      panchayats: [],
+    });
   }
 });
 
@@ -6412,7 +6422,14 @@ app.get('/api/villages/directory', requireAuth, async (req: AuthenticatedRequest
     }
 
     if (!villages.size) {
-      res.status(502).json({ success: false, error: `No village names were listed for ${panchayat.name}.` });
+      res.json({
+        success: true,
+        panchayatId,
+        panchayatName: panchayat.name,
+        district,
+        source: 'Manual Entry',
+        villages: [],
+      });
       return;
     }
 
@@ -6426,8 +6443,13 @@ app.get('/api/villages/directory', requireAuth, async (req: AuthenticatedRequest
       villages: [...villages.values()].sort((left, right) => left.localeCompare(right)),
     });
   } catch (error: any) {
-    console.error('Failed to fetch panchayat village directory:', error);
-    res.status(502).json({ success: false, error: error?.name === 'TimeoutError' ? 'Village directory request timed out.' : 'Unable to load this panchayat village list.' });
+    console.warn('Failed to fetch panchayat village directory (using graceful fallback):', error?.message || error);
+    res.json({
+      success: true,
+      panchayatId: String(req.query.panchayatId || ''),
+      villages: [],
+      fallback: true,
+    });
   }
 });
 

@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../utils/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface ResetScope { id: string; label: string }
 interface ResetModule { id: string; label: string; scopes: ResetScope[] }
@@ -148,22 +155,44 @@ export const DataResetModal: React.FC<DataResetModalProps> = ({ open, authToken,
               </div>
 
               {step === 0 && <div>
-                <label htmlFor="reset-module" className="mb-1.5 block text-xs font-bold text-gray-800 dark:text-gray-200">What page/module do you want to reset?</label>
-                <select id="reset-module" value={moduleId} disabled={loadingOptions} onChange={(event) => { setModuleId(event.target.value); setScopeId(''); }} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-red-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                  <option value="">Select a module…</option>
-                  {modules.map((module) => <option key={module.id} value={module.id}>{module.label}</option>)}
-                </select>
+                <label className="mb-1.5 block text-xs font-bold text-gray-800 dark:text-gray-200">What page/module do you want to reset?</label>
+                <Select
+                  value={moduleId}
+                  disabled={loadingOptions}
+                  onValueChange={(val) => {
+                    setModuleId(val);
+                    setScopeId('');
+                  }}
+                >
+                  <SelectTrigger className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                    <SelectValue placeholder="Select a module…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
+                    {modules.map((module) => (
+                      <SelectItem key={module.id} value={module.id}>{module.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 {suggestedModule && selectedModule && <p className="mt-1.5 text-[11px] text-blue-700 dark:text-blue-300">Suggested from the current page. You can change it.</p>}
                 <p className="mt-3 text-[11px] text-gray-500">System settings, authentication, role permissions, users, Super Admin accounts, and audit logs are not resettable here.</p>
               </div>}
 
               {step === 1 && <div>
                 <p className="mb-1.5 text-xs font-semibold text-gray-600 dark:text-gray-300">Module: <strong className="text-gray-900 dark:text-white">{selectedModule?.label}</strong></p>
-                <label htmlFor="reset-scope" className="mb-1.5 block text-xs font-bold text-gray-800 dark:text-gray-200">What data inside this module should be reset?</label>
-                <select id="reset-scope" value={scopeId} onChange={(event) => setScopeId(event.target.value)} className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 outline-none focus:border-red-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
-                  <option value="">Select an exact reset scope…</option>
-                  {selectedModule?.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.label}</option>)}
-                </select>
+                <label className="mb-1.5 block text-xs font-bold text-gray-800 dark:text-gray-200">What data inside this module should be reset?</label>
+                <Select
+                  value={scopeId}
+                  onValueChange={(val) => setScopeId(val)}
+                >
+                  <SelectTrigger className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white">
+                    <SelectValue placeholder="Select an exact reset scope…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-60 rounded-xl border border-gray-200 bg-white shadow-lg dark:border-gray-800 dark:bg-gray-900">
+                    {selectedModule?.scopes.map((scope) => (
+                      <SelectItem key={scope.id} value={scope.id}>{scope.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <p className="mt-2 text-[11px] text-gray-500">No reset scope is preselected. Only data entities present in this application are listed.</p>
               </div>}
 
