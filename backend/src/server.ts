@@ -752,6 +752,140 @@ const ensureEssentialTablesAndColumns = async () => {
       await pool.query(sql).catch(() => undefined); // ignore if index already exists
     }
 
+    // ── Self-heal volunteer columns (migration 225, 226, 227) ──
+    const volunteerCols = [
+      `ALTER TABLE volunteers ADD COLUMN college_name VARCHAR(255) NULL`,
+      `ALTER TABLE volunteers ADD COLUMN study_year VARCHAR(32) NULL`,
+      `ALTER TABLE volunteers ADD COLUMN gender ENUM('male', 'female', 'other') NULL AFTER name`,
+    ];
+    for (const sql of volunteerCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+      });
+    }
+
+    // ── Self-heal attendance_sessions columns (migration 224) ──
+    await pool.query(
+      `ALTER TABLE attendance_sessions ADD COLUMN attendance_type ENUM('students', 'volunteers') NOT NULL DEFAULT 'students' AFTER academic_year_id`
+    ).catch((err: any) => {
+      if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+    });
+
+    // ── Self-heal sessions columns (migration 228) ──
+    await pool.query(
+      `ALTER TABLE sessions ADD COLUMN target_locations_json JSON NULL AFTER village_id`
+    ).catch((err: any) => {
+      if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+    });
+    await pool.query(
+      `ALTER TABLE sessions ADD COLUMN session_date_fixed BOOLEAN NOT NULL DEFAULT FALSE`
+    ).catch((err: any) => {
+      if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+    });
+
+    // ── Self-heal lesson_plans columns & workflow (migration 237) ──
+    const lessonPlanCols = [
+      `ALTER TABLE lesson_plans MODIFY COLUMN status VARCHAR(40) NOT NULL DEFAULT 'Draft'`,
+      `ALTER TABLE lesson_plans ADD COLUMN submitted_by VARCHAR(64) NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN submitted_at DATETIME NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN approved_by VARCHAR(64) NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN approved_at DATETIME NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN correction_reason TEXT NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN edit_request_reason TEXT NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN delete_request_reason TEXT NULL`,
+      `ALTER TABLE lesson_plans ADD COLUMN village_id VARCHAR(64) NULL AFTER panchayat_id`,
+    ];
+    for (const sql of lessonPlanCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+      });
+    }
+
+    // ── Self-heal session_reports columns & workflow (migration 238, 239) ──
+    const sessionReportCols = [
+      `ALTER TABLE session_reports MODIFY COLUMN status ENUM('Draft','Submitted','Approved','Rejected','Corrections Required','Edit Request Pending','Delete Request Pending') NOT NULL DEFAULT 'Draft'`,
+      `ALTER TABLE session_reports ADD COLUMN village_ids TEXT NULL AFTER day_number`,
+      `ALTER TABLE session_reports ADD COLUMN summit_number VARCHAR(100) NULL AFTER village_ids`,
+      `ALTER TABLE session_reports ADD COLUMN grade VARCHAR(100) NULL AFTER summit_number`,
+      `ALTER TABLE session_reports ADD COLUMN volunteer_names TEXT NULL AFTER outcome`,
+      `ALTER TABLE session_reports ADD COLUMN submitted_by VARCHAR(64) NULL AFTER created_by`,
+      `ALTER TABLE session_reports ADD COLUMN submitted_at TIMESTAMP NULL AFTER submitted_by`,
+      `ALTER TABLE session_reports ADD COLUMN approved_by VARCHAR(64) NULL AFTER submitted_at`,
+      `ALTER TABLE session_reports ADD COLUMN approved_at TIMESTAMP NULL AFTER approved_by`,
+      `ALTER TABLE session_reports ADD COLUMN correction_reason TEXT NULL AFTER approved_at`,
+      `ALTER TABLE session_reports ADD COLUMN edit_request_reason TEXT NULL AFTER correction_reason`,
+      `ALTER TABLE session_reports ADD COLUMN delete_request_reason TEXT NULL AFTER edit_request_reason`,
+      `ALTER TABLE session_reports ADD COLUMN workflow_previous_status VARCHAR(40) NULL AFTER delete_request_reason`,
+      `ALTER TABLE session_reports ADD COLUMN observations TEXT NULL`,
+    ];
+    for (const sql of sessionReportCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+      });
+    }
+
+    // ── Self-heal finance_entries and finance_reports (migration 233, 234) ──
+    const financeEntriesCols = [
+      `ALTER TABLE finance_entries ADD COLUMN bill_url LONGTEXT NULL AFTER bill_reference`,
+      `ALTER TABLE finance_entries ADD COLUMN count INT NULL AFTER bill_url`,
+      `ALTER TABLE finance_entries ADD COLUMN count_amount VARCHAR(64) NULL AFTER count`,
+      `ALTER TABLE finance_entries ADD COLUMN remarks TEXT NULL AFTER count_amount`,
+      `ALTER TABLE finance_entries ADD COLUMN submission_group_id VARCHAR(64) NULL`,
+    ];
+    for (const sql of financeEntriesCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+      });
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS finance_reports (
+        id VARCHAR(64) NOT NULL,
+        cluster_id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        session_id VARCHAR(64) NULL,
+        report_status ENUM('DRAFT','SUBMITTED','PENDING_APPROVAL','APPROVED','REJECTED') NOT NULL DEFAULT 'DRAFT',
+        report_data JSON NOT NULL,
+        edit_request_status ENUM('NONE','PENDING','APPROVED','REJECTED') NOT NULL DEFAULT 'NONE',
+        edit_request_reason TEXT NULL,
+        edit_requested_by VARCHAR(64) NULL,
+        edit_requested_at DATETIME NULL,
+        edit_approved_by VARCHAR(64) NULL,
+        edit_approved_at DATETIME NULL,
+        edit_rejected_by VARCHAR(64) NULL,
+        edit_rejected_at DATETIME NULL,
+        edit_rejection_reason TEXT NULL,
+        edit_permission BOOLEAN NOT NULL DEFAULT FALSE,
+        last_submitted_at DATETIME NULL,
+        last_submitted_by VARCHAR(64) NULL,
+        created_by VARCHAR(64) NULL,
+        updated_by VARCHAR(64) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id, academic_year_id),
+        INDEX idx_finance_reports_cluster (cluster_id, academic_year_id),
+        INDEX idx_finance_reports_status (report_status, edit_request_status)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch((err: any) => {
+      console.warn('[DB] Self-heal finance_reports notice:', err?.message || err);
+    });
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS finance_report_history (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        report_id VARCHAR(64) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        event VARCHAR(128) NOT NULL,
+        details TEXT NULL,
+        user_id VARCHAR(64) NULL,
+        user_name VARCHAR(255) NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_finance_history_report (report_id, academic_year_id, created_at)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch((err: any) => {
+      console.warn('[DB] Self-heal finance_report_history notice:', err?.message || err);
+    });
+
   } catch (err: any) {
     console.warn('[DB] Error during ensureEssentialTablesAndColumns:', err?.message || err);
   }
