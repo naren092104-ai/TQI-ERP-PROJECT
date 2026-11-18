@@ -1,19 +1,41 @@
-const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-const isCloudflarePages = typeof window !== 'undefined'
-  && window.location.hostname.endsWith('.pages.dev');
-const defaultApiUrl = import.meta.env.PROD && isCloudflarePages
-  ? 'https://tqi-academic-erp.vercel.app/api'
-  : '/api';
-const hasAbsoluteConfiguredApiUrl = /^https?:\/\//i.test(configuredApiUrl || '');
-// Cloudflare Pages only serves the static frontend; a relative `/api` URL
-// would point back to Pages, not to the Express API hosted on Vercel.
-const shouldUsePagesApiFallback = import.meta.env.PROD
-  && isCloudflarePages
-  && Boolean(configuredApiUrl)
-  && !hasAbsoluteConfiguredApiUrl;
-export const API_BASE_URL = (
-  shouldUsePagesApiFallback ? defaultApiUrl : configuredApiUrl || defaultApiUrl
-).replace(/\/+$/, '');
+/**
+ * API URL Configuration
+ *
+ * Architecture:
+ *   Frontend  →  Cloudflare Pages  (https://tqi-erp.pages.dev)
+ *   Backend   →  Windows VPS       (https://tqi.autorevives.com)
+ *
+ * In Cloudflare Pages, set the build environment variable:
+ *   VITE_API_URL = https://tqi.autorevives.com/api
+ *
+ * For local development the Vite dev server proxies /api to localhost:5000,
+ * so the default relative '/api' works out of the box.
+ */
+
+const configuredApiUrl = (import.meta.env.VITE_API_URL || '').trim();
+
+// In production on Cloudflare Pages the frontend and backend are on different
+// domains, so VITE_API_URL must be an absolute URL like
+// "https://tqi.autorevives.com/api". If it was not set (or is still the
+// relative "/api" placeholder), fall back to the known production backend.
+const isProduction = import.meta.env.PROD;
+const isAbsoluteUrl = /^https?:\/\//i.test(configuredApiUrl);
+
+const resolvedApiUrl = (() => {
+  // 1. Explicit absolute URL set at build time — use it as-is.
+  if (configuredApiUrl && isAbsoluteUrl) return configuredApiUrl;
+
+  // 2. Production but no absolute URL configured — use the known backend.
+  if (isProduction && (!configuredApiUrl || configuredApiUrl === '/api')) {
+    return 'https://tqi.autorevives.com/api';
+  }
+
+  // 3. Local development — relative "/api" is proxied by Vite dev server.
+  return configuredApiUrl || '/api';
+})();
+
+export const API_BASE_URL = resolvedApiUrl.replace(/\/+$/, '');
+
 const externalApiOrigin = /^https?:\/\//i.test(API_BASE_URL)
   ? new URL(API_BASE_URL).origin
   : '';
@@ -22,7 +44,7 @@ export function apiUrl(path: string): string {
   if (!path) return API_BASE_URL;
   if (path.startsWith('data:') || path.startsWith('blob:')) return path;
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    if (!import.meta.env.PROD || externalApiOrigin) return path;
+    if (!isProduction || externalApiOrigin) return path;
     try {
       const url = new URL(path);
       return `${url.pathname}${url.search}${url.hash}`;

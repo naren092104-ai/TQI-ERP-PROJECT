@@ -1,0 +1,22 @@
+# ──────────────────────────────────────────────────
+# Cloudflare Pages — wrangler.toml
+# ──────────────────────────────────────────────────
+# Frontend static site. The backend API runs on a separate Windows VPS.
+#
+# Cloudflare Pages build settings (also set in dashboard):
+#   Build command :  npm run build:frontend
+#   Build output  :  frontend/dist
+#   Root directory:  /                    (project root)
+#
+# IMPORTANT: Vite only exposes environment variables whose name starts
+# with VITE_ to the browser bundle. Any variable without that prefix
+# (e.g. API_URL, BACKEND_URL) will be silently ignored by Vite.
+# ──────────────────────────────────────────────────
+
+name = "tqi-erp"
+compatibility_date = "2024-09-23"
+
+# ── Build-time environment variables ──
+# These are injected into the Vite build by import.meta.env.*
+[vars]
+VITE_API_URL = "https://tqi.autorevives.com/api"

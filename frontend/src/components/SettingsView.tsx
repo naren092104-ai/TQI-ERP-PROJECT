@@ -658,6 +658,101 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </div>
                 </div>
               </section>
+
+              {/* Google-Style Security Checkup Card */}
+              <section className="pt-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                      Security Checkup
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Complete these steps to protect and be able to recover your account
+                    </p>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="mt-4 space-y-1.5">
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-[#1a73e8] h-full rounded-full transition-all duration-300 w-1/4" />
+                    </div>
+                    <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                      1 of 4 completed
+                    </p>
+                  </div>
+
+                  {/* Accordion / List of Security Items */}
+                  <div className="mt-5 divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                    {/* Item 1: Multi-Factor Authentication */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-slate-700 dark:border-slate-300">
+                          <div className="h-2 w-2 rounded-full bg-slate-800 dark:bg-slate-200" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Set Up Multi-Factor Authentication
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Use authenticator app or SMS verification code for elevated portal security.
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+
+                    {/* Item 2: Add Recovery Email */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Add Recovery Email
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Alternative email to restore credentials if you lose primary mailbox access.
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+
+                    {/* Item 3: Set Up Passkey */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Set Up Passkey
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            FIDO2 passkey for passwordless biometrics.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">∧</span>
+                    </div>
+
+                    {/* Item 4: Email Verified */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-4 w-4 items-center justify-center text-emerald-600 dark:text-emerald-400">
+                          <Check size={14} weight="bold" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Email Verified
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+                            {profile.email}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
             </div>
           )}
 

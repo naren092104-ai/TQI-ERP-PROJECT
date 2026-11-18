@@ -130,11 +130,15 @@ if (!isUsableJwtSecret(configuredJwtSecret)) {
 }
 
 const configuredCorsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || [];
-const allowedCorsOrigins = new Set(
-  configuredCorsOrigins.length > 0
-    ? configuredCorsOrigins
-    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://tqi-erp.pages.dev', 'https://tqi-academic-erp.vercel.app'],
-);
+const allowedCorsOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:3000',
+  'http://localhost:3002',
+  'https://tqi-erp.pages.dev',
+  'https://tqi.autorevives.com',
+  ...configuredCorsOrigins,
+]);
 const DEFAULT_ACADEMIC_SESSION_NAMES = [
   'Parents Meet',
   'Know Your Locality',
@@ -172,17 +176,25 @@ app.use(cors({
     if (
       !origin ||
       allowedCorsOrigins.has(origin) ||
-      origin.endsWith('.vercel.app') ||
       origin.endsWith('.pages.dev') ||
-      origin === 'https://tqi-academic-erp.vercel.app'
+      origin === 'https://tqi-erp.pages.dev' ||
+      origin === 'https://tqi.autorevives.com'
     ) {
+      callback(null, true);
+      return;
+    }
+    if (process.env.NODE_ENV !== 'production') {
       callback(null, true);
       return;
     }
     callback(null, false);
   },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-auth-token', 'x-user-role', 'x-user-cluster-id', 'Cache-Control', 'Pragma'],
 }));
+
+app.options('*', cors());
 
 app.use(async (_req: Request, res: Response, next: NextFunction) => {
   if (!process.env.VERCEL) {
@@ -637,6 +649,109 @@ const ensureEssentialTablesAndColumns = async () => {
       INSERT IGNORE INTO maintenance_settings (id, enabled, title)
       VALUES ('website_maintenance', FALSE, 'Website Under Maintenance')
     `).catch(() => undefined);
+
+    // ── Self-heal academic_years columns (migration 213) ──
+    const academicYearCols = [
+      `ALTER TABLE academic_years ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'DRAFT'`,
+      `ALTER TABLE academic_years ADD COLUMN archived_at DATETIME NULL`,
+      `ALTER TABLE academic_years ADD COLUMN created_by VARCHAR(64) NULL`,
+    ];
+    for (const sql of academicYearCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore duplicate column */ }
+      });
+    }
+    // Backfill status from is_active flag
+    await pool.query(`
+      UPDATE academic_years SET status = CASE WHEN is_active = 1 THEN 'ACTIVE' ELSE 'DRAFT' END
+      WHERE status = 'DRAFT' AND is_active = 1
+    `).catch(() => undefined);
+
+    // ── Self-heal academic_year_id columns on core tables (migration 213) ──
+    const yearIdAlters = [
+      `ALTER TABLE clusters ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE clusters ADD COLUMN source_cluster_id VARCHAR(64) NULL`,
+      `ALTER TABLE panchayats ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE villages ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE students ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE students ADD COLUMN school_name VARCHAR(255) NULL`,
+      `ALTER TABLE volunteers ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE sessions ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE modules ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+      `ALTER TABLE academic_setup ADD COLUMN academic_year_id VARCHAR(64) NULL`,
+    ];
+    for (const sql of yearIdAlters) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore duplicate column */ }
+      });
+    }
+
+    // ── Backfill academic_year_id on tables that have NULL ──
+    const backfillTables = [
+      'clusters', 'panchayats', 'villages', 'students', 'volunteers', 'sessions', 'modules', 'academic_setup',
+      'attendance_sessions', 'lesson_plans', 'session_photos', 'session_reports',
+      'finance_entries', 'approvals', 'date_change_requests', 'session_submissions',
+    ];
+    for (const tbl of backfillTables) {
+      await pool.query(`
+        UPDATE ${tbl} SET academic_year_id = (
+          SELECT ay.id FROM (SELECT id FROM academic_years WHERE is_active = 1 ORDER BY start_date DESC LIMIT 1) ay
+        ) WHERE academic_year_id IS NULL
+      `).catch(() => undefined);
+    }
+
+    // ── Ensure schools table (migration 213) ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schools (
+        id VARCHAR(64) NOT NULL,
+        name VARCHAR(255) NOT NULL,
+        academic_year_id VARCHAR(64) NOT NULL,
+        cluster_id VARCHAR(64) NOT NULL,
+        panchayat_id VARCHAR(64) NULL,
+        village_id VARCHAR(64) NULL,
+        status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        INDEX idx_schools_year (academic_year_id),
+        INDEX idx_schools_village (village_id),
+        INDEX idx_schools_cluster (cluster_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch((err: any) => {
+      console.warn('[DB] Self-heal schools notice:', err?.message || err);
+    });
+
+    // ── Ensure tqi_settings table (migration 232) ──
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS tqi_settings (
+        setting_key VARCHAR(100) NOT NULL,
+        setting_value TEXT NULL,
+        updated_by VARCHAR(64) NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (setting_key)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `).catch((err: any) => {
+      console.warn('[DB] Self-heal tqi_settings notice:', err?.message || err);
+    });
+    await pool.query(`
+      INSERT IGNORE INTO tqi_settings (setting_key, setting_value)
+      VALUES ('finance_officer_name', 'TQI Finance Team')
+    `).catch(() => undefined);
+
+    // ── Add indexes silently (migration 213 tail) ──
+    const indexStatements = [
+      `ALTER TABLE clusters ADD INDEX idx_clusters_academic_year (academic_year_id)`,
+      `ALTER TABLE panchayats ADD INDEX idx_panchayats_academic_year (academic_year_id)`,
+      `ALTER TABLE villages ADD INDEX idx_villages_academic_year (academic_year_id)`,
+      `ALTER TABLE students ADD INDEX idx_students_academic_year (academic_year_id)`,
+      `ALTER TABLE volunteers ADD INDEX idx_volunteers_academic_year (academic_year_id)`,
+      `ALTER TABLE sessions ADD INDEX idx_sessions_academic_year (academic_year_id)`,
+      `ALTER TABLE modules ADD INDEX idx_modules_academic_year_id (academic_year_id)`,
+    ];
+    for (const sql of indexStatements) {
+      await pool.query(sql).catch(() => undefined); // ignore if index already exists
+    }
+
   } catch (err: any) {
     console.warn('[DB] Error during ensureEssentialTablesAndColumns:', err?.message || err);
   }
@@ -2522,11 +2637,20 @@ let tamilNaduCollegesCache: any[] | null = null;
 app.get('/api/colleges', requireAuth, (_req: AuthenticatedRequest, res: Response) => {
   try {
     if (!tamilNaduCollegesCache) {
-      const directoryPath = path.join(PROJECT_ROOT, 'frontend', 'src', 'data', 'tamilNaduColleges.json');
-      const sourceRows = JSON.parse(fs.readFileSync(directoryPath, 'utf8')) as any[];
-      // The local source JSON is pre-cleaned in place. Preserve its canonical
-      // spellings, stable IDs, districts, affiliations, and original casing.
-      tamilNaduCollegesCache = sourceRows;
+      const candidatePaths = [
+        path.join(PROJECT_ROOT, 'frontend', 'src', 'data', 'tamilNaduColleges.json'),
+        path.join(process.cwd(), 'frontend', 'src', 'data', 'tamilNaduColleges.json'),
+        path.join(process.cwd(), '..', 'frontend', 'src', 'data', 'tamilNaduColleges.json'),
+        path.join(PROJECT_ROOT, 'src', 'data', 'tamilNaduColleges.json'),
+        path.join(__dirname, '..', 'frontend', 'src', 'data', 'tamilNaduColleges.json'),
+      ];
+      const validPath = candidatePaths.find((p) => fs.existsSync(p));
+      if (validPath) {
+        const sourceRows = JSON.parse(fs.readFileSync(validPath, 'utf8')) as any[];
+        tamilNaduCollegesCache = sourceRows;
+      } else {
+        tamilNaduCollegesCache = [];
+      }
     }
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.json({ success: true, colleges: tamilNaduCollegesCache });
@@ -9153,7 +9277,7 @@ const DEPLOYED_FRONTEND_PUBLIC = path.join(PROJECT_ROOT, 'public');
 const SPA_INDEX_PATH = process.env.VERCEL
   ? path.join(DEPLOYED_FRONTEND_PUBLIC, 'index.html')
   : path.join(FRONTEND_DIST, 'index.html');
-const SAFE_CSP = "default-src 'self'; connect-src 'self' http://localhost:5173 http://127.0.0.1:5173; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';";
+const SAFE_CSP = "default-src 'self' https://tqi-erp.pages.dev https://tqi.autorevives.com; connect-src 'self' https://tqi.autorevives.com https://tqi-erp.pages.dev http://localhost:5173 http://127.0.0.1:5173 http://localhost:3002 http://localhost:5000 https:; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; font-src 'self' data: https:; script-src 'self' 'unsafe-inline' https:; object-src 'none'; base-uri 'self'; frame-ancestors 'none';";
 
 app.get('/', (req, res) => {
   if (fs.existsSync(SPA_INDEX_PATH)) {
@@ -9161,13 +9285,17 @@ app.get('/', (req, res) => {
     return res.sendFile(SPA_INDEX_PATH);
   }
 
+  const frontendUrl = process.env.APP_URL || process.env.FRONTEND_URL || 'https://tqi-erp.pages.dev';
+  const protocol = req.protocol || 'http';
+  const host = req.get('host') || 'localhost:3002';
+
   res.setHeader('Content-Security-Policy', SAFE_CSP);
   return res.status(200).json({
     name: 'TQI ERP API',
     status: 'ok',
-    frontend: 'http://127.0.0.1:5173',
-    api: 'http://localhost:5000/api',
-    message: 'Use the Vite frontend at the port above for the application UI.',
+    frontend: frontendUrl,
+    api: `${protocol}://${host}/api`,
+    message: `Use the Cloudflare Pages frontend at ${frontendUrl} for the application UI.`,
   });
 });
 
