@@ -266,7 +266,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
           </TableHeader>
           <TableBody>
             {filteredUsers.map((u) => (
-              <TableRow key={u.id} className="hover:bg-gray-50/80 dark:hover:bg-white/[0.02] transition-colors">
+              <TableRow key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors duration-150 cursor-pointer">
                 <TableCell>
                   <div>
                     <p className="font-semibold text-gray-900 dark:text-white text-xs">{u.name}</p>
@@ -275,13 +275,14 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </TableCell>
                 <TableCell>
                   <span
-                    className={`inline-block px-2.5 py-1 rounded-md text-[11px] font-bold ${
+                    className={`inline-flex flex-col items-center justify-center px-3.5 py-1.5 rounded-xl text-xs font-semibold leading-tight tracking-tight shadow-xs transition-transform duration-150 hover:scale-105 ${
                       u.role === "Super Admin"
-                        ? "bg-purple-100 text-purple-900 border border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800"
-                        : "bg-blue-100 text-blue-900 border border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800"
+                        ? "bg-purple-100 text-purple-800 border border-purple-200/80 dark:bg-purple-950/70 dark:text-purple-200 dark:border-purple-800/80"
+                        : "bg-blue-100 text-blue-800 border border-blue-200/80 dark:bg-blue-950/70 dark:text-blue-200 dark:border-blue-800/80"
                     }`}
                   >
-                    {u.role}
+                    <span>{u.role.split(' ')[0]}</span>
+                    <span>{u.role.split(' ')[1] || ''}</span>
                   </span>
                 </TableCell>
                 <TableCell className="font-medium text-gray-700 dark:text-gray-300 text-xs">
@@ -291,8 +292,13 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                   {u.phone || "+91 90000 00000"}
                 </TableCell>
                 <TableCell>
-                  <span className={`inline-block rounded-full px-2 py-1 text-[10px] font-bold ${u.mustChangePassword || u.passwordStatus === 'TEMPORARY' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'}`}>
-                    {u.mustChangePassword || u.passwordStatus === 'TEMPORARY' ? 'Temporary Password' : 'Password Set'}
+                  <span className={`inline-flex flex-col items-center justify-center px-3 py-1 rounded-full text-[11px] font-bold leading-tight ${
+                    u.mustChangePassword || u.passwordStatus === 'TEMPORARY'
+                      ? 'bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-950/70 dark:text-amber-200'
+                      : 'bg-[#d1fae5] text-[#065f46] border border-[#a7f3d0] dark:bg-emerald-950/70 dark:text-emerald-200'
+                  }`}>
+                    <span>Password</span>
+                    <span>{u.mustChangePassword || u.passwordStatus === 'TEMPORARY' ? 'Temporary' : 'Set'}</span>
                   </span>
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-[11px] text-gray-600 dark:text-gray-300">
@@ -300,11 +306,11 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="inline-block px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300">
                       {u.status}
                     </span>
                     {u.mustChangePassword && (
-                      <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/60 dark:text-amber-300">
                         Pending Onboarding
                       </span>
                     )}

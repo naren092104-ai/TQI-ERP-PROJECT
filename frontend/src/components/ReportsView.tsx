@@ -7,7 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
-import { Download } from './ui/icons';
+import { Download, Calendar, BookOpen, Users, UserCircleCheck, FileText } from './ui/icons';
 import {
   exportSuperAdminConsolidatedExcel,
   exportSuperAdminConsolidatedPdf,
@@ -311,9 +311,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
 
         {/* Super Admin Universal Cluster Export Toolbar */}
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
-          <div className="w-40 sm:w-48">
+          <div className="w-48 sm:w-56">
             <Select value={selectedClusterExport} onValueChange={(v) => setSelectedClusterExport(v)}>
-              <SelectTrigger className="h-9 text-xs">
+              <SelectTrigger className="h-9 text-xs rounded-xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-800">
                 <SelectValue placeholder="Select Cluster" />
               </SelectTrigger>
               <SelectContent>
@@ -333,85 +333,61 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </Select>
           </div>
 
-          <button
-            type="button"
-            onClick={handleExportSuperAdminExcel}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-theme-xs hover:bg-emerald-50 dark:border-gray-800 dark:bg-gray-800 dark:text-emerald-400 transition"
-            title="Download full cluster data as Excel (.xlsx)"
-          >
-            <Download className="h-4 w-4 text-emerald-600" />
-            <span>Excel</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportSuperAdminExcel}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-emerald-700 shadow-theme-xs hover:bg-emerald-50 dark:border-gray-800 dark:bg-gray-800 dark:text-emerald-400 transition"
+              title="Download full cluster data as Excel (.xlsx)"
+            >
+              <Download className="h-4 w-4 text-emerald-600" />
+              <span>Excel</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={handleExportSuperAdminPdf}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-            title="Download full cluster data as PDF document"
-          >
-            <Download className="h-4 w-4 text-brand-500" />
-            <span>PDF</span>
-          </button>
+            <button
+              type="button"
+              onClick={handleExportSuperAdminPdf}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+              title="Download full cluster data as PDF document"
+            >
+              <Download className="h-4 w-4 text-brand-500" />
+              <span>PDF</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={handlePrintReport}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
-          >
-            <span>Print</span>
-          </button>
+            <button
+              type="button"
+              onClick={handlePrintReport}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-theme-xs hover:bg-gray-50 dark:border-gray-800 dark:bg-gray-800 dark:text-gray-300 transition"
+              title="Print report"
+            >
+              <FileText className="h-4 w-4 text-gray-500" />
+              <span>Print</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* REPORT TYPE SELECTOR (Clean Tabs) */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-1.5 shadow-theme-xs flex flex-wrap gap-1.5">
-        <button
-          onClick={() => setReportType('session')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
-            reportType === 'session'
-              ? 'bg-brand-500 text-white shadow-theme-xs'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">event_note</span>
-          Session Reports
-        </button>
-
-        <button
-          onClick={() => setReportType('lesson-plan')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
-            reportType === 'lesson-plan'
-              ? 'bg-brand-500 text-white shadow-theme-xs'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">menu_book</span>
-          Lesson Plan Reports
-        </button>
-
-        <button
-          onClick={() => setReportType('student-attendance')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
-            reportType === 'student-attendance'
-              ? 'bg-brand-500 text-white shadow-theme-xs'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">groups</span>
-          Student Attendance
-        </button>
-
-        <button
-          onClick={() => setReportType('volunteer-attendance')}
-          className={`flex-1 min-w-[140px] px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer ${
-            reportType === 'volunteer-attendance'
-              ? 'bg-brand-500 text-white shadow-theme-xs'
-              : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-white'
-          }`}
-        >
-          <span className="material-symbols-outlined text-[18px]">badge</span>
-          Volunteer Attendance
-        </button>
+      {/* Google Console Tab Bar (Clean, Underlined, No Unwanted Icons) */}
+      <div className="flex border-b border-slate-200 dark:border-slate-800 gap-8 overflow-x-auto">
+        {[
+          { id: 'session', label: 'Session Reports' },
+          { id: 'lesson-plan', label: 'Lesson Plan Reports' },
+          { id: 'student-attendance', label: 'Student Attendance' },
+          { id: 'volunteer-attendance', label: 'Volunteer Attendance' },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setReportType(tab.id as ReportType)}
+            className={`pb-3.5 text-sm transition-colors border-b-2 whitespace-nowrap cursor-pointer ${
+              reportType === tab.id
+                ? 'border-blue-600 text-blue-600 dark:border-blue-400 dark:text-blue-400 font-medium'
+                : 'border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* FILTER & DATE CONTROLS */}

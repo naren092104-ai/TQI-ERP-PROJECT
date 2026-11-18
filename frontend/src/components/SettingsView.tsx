@@ -8,6 +8,15 @@ import {
   Phone,
   MapPin,
   ShieldCheck,
+  UserCircle,
+  Gear,
+  Database,
+  Receipt,
+  Warning,
+  Clock,
+  DownloadSimple,
+  RefreshCw,
+  Info,
 } from "./ui/icons";
 import { InputField, TextAreaField } from "./ui/Field";
 import { apiUrl } from "../utils/api";
@@ -42,16 +51,6 @@ const toLocalDateTimeInputValue = (value: string | null): string => {
   return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 };
 
-/**
- * Personal Information — Profile settings view.
- *
- * Layout:
- *   - Page hero (eyebrow + h1 + sub)
- *   - Three .tqi-card sections: Basic, Contact, Addresses
- *   - Each field rendered as a label/value pair using .tqi-field-label
- *     (theme-aware contrast: var(--text-secondary) in light, #C8CCD3 in dark)
- *   - Edit states swap label/value for the Field component
- */
 export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   onUpdateProfile,
@@ -86,7 +85,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     };
   });
 
+  const [activeCategory, setActiveCategory] = useState<'personal' | 'maintenance' | 'backups' | 'finance' | 'reset' | 'history'>('personal');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Edit states for in-place Tesla-style editing
   const [isEditingBasic, setIsEditingBasic] = useState(false);
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [isEditingPhone, setIsEditingPhone] = useState(false);
@@ -195,7 +197,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to restore backup.');
-      setBackupMessage(`Backup ${restoreTarget.id} restored. A safety backup (${data.safetyBackupId}) was created first. Protected users, settings, and audit logs were preserved.`);
+      setBackupMessage(`Backup ${restoreTarget.id} restored. A safety backup (${data.safetyBackupId}) was created first.`);
       setRestoreTarget(null); setRestoreConfirmation(''); onBackupRestored?.(); await loadBackups();
     } catch (error) { setBackupError(error instanceof Error ? error.message : 'Unable to restore backup.'); }
     finally { setBackupBusy(false); }
@@ -222,11 +224,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (mode !== 'disable') {
       const endTime = new Date(maintenanceForm.expectedCompletion).getTime();
       if (!maintenanceForm.expectedCompletion || !Number.isFinite(endTime) || endTime <= Date.now()) {
-        showToast('Set a future maintenance end date and time to show the countdown.');
-        return;
-      }
-      if (!maintenanceForm.showCountdown) {
-        showToast('Enable the countdown timer so users can see when maintenance is expected to finish.');
+        showToast('Set a future maintenance end date and time.');
         return;
       }
     }
@@ -247,7 +245,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to update maintenance settings.');
       onMaintenanceRefresh?.();
-      showToast(data.message || 'Maintenance settings updated successfully.');
+      showToast(data.message || 'Maintenance settings updated.');
       setMaintenanceDialogOpen(false);
       setMaintenanceDraftOpen(false);
     } catch (error) {
@@ -266,7 +264,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       language: basicForm.language.trim() || profile.language,
     });
     setIsEditingBasic(false);
-    showToast("Basic information saved successfully");
+    showToast("Basic information updated");
   };
 
   const handleSaveEmail = (e: React.FormEvent) => {
@@ -274,7 +272,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (!emailForm.trim()) return;
     saveProfile({ ...profile, email: emailForm.trim(), emailVerified: true });
     setIsEditingEmail(false);
-    showToast("Primary email updated");
+    showToast("Email address updated");
   };
 
   const handleSavePhone = (e: React.FormEvent) => {
@@ -288,9 +286,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     e.preventDefault();
     saveProfile({ ...profile, mailingAddress: addressForm.trim() });
     setIsEditingAddress(false);
-    showToast(
-      addressForm.trim() ? "Mailing address saved" : "Mailing address removed",
-    );
+    showToast(addressForm.trim() ? "Mailing address saved" : "Mailing address removed");
   };
 
   const handleSaveFinanceOfficer = async (e: React.FormEvent) => {
@@ -300,7 +296,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setIsSavingFinanceOfficer(true);
     try {
       await onSaveFinanceOfficerName(value);
-      showToast("Finance officer name saved and will autofill finance statements");
+      showToast("Finance officer name updated");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Unable to save finance settings");
     } finally {
@@ -308,767 +304,1019 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   };
 
-  // Inline edit link — pencil + label, brand-tinted on hover
-  const EditLink: React.FC<{
-    onClick: () => void;
-    label: string;
-  }> = ({ onClick, label }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className="tqi-btn-ghost group inline-flex items-center gap-1.5 text-[13px] font-semibold"
-      style={{ color: "var(--text-secondary)" }}
-    >
-      <Pencil
-        size={14}
-        weight="light"
-        style={{ color: "var(--text-muted)" }}
-      />
-      <span className="group-hover:underline group-hover:underline-offset-4 group-hover:decoration-2 transition-colors" style={{ textUnderlineOffset: 4 }}>
-        {label}
-      </span>
-    </button>
-  );
-
-  const CancelLink: React.FC<{ onClick: () => void }> = ({ onClick }) => (
-    <button
-      type="button"
-      onClick={onClick}
-      className="tqi-btn-ghost text-[13px] font-semibold"
-      style={{ color: "var(--text-muted)" }}
-    >
-      Cancel
-    </button>
-  );
-
-  // ReadField removed in favor of SettingsRow (label-left / value-right pattern).
-
-  /**
-   * SettingsRow — horizontal settings pattern (label-left / value-right).
-   * Matches Linear / Notion / Stripe Dashboard. Labels align in a fixed
-   * left column, values fill the right; the row stack lives inside a
-   * vertical list. Edit action sits at the row's right edge.
-   */
-  const SettingsRow: React.FC<{
-    label: string;
-    hint?: string;
-    children: React.ReactNode;
-    action?: React.ReactNode;
-    divider?: boolean;
-  }> = ({ label, hint, children, action, divider = true }) => (
-    <div
-      className="grid grid-cols-1 sm:grid-cols-[180px_1fr_auto] gap-3 sm:gap-6 items-start"
-      style={{
-        padding: "1.1rem 0",
-        borderBottom: divider ? "1px solid var(--border-subtle)" : "none",
-      }}
-    >
-      <div className="sm:pt-0.5">
-        <div
-          style={{
-            fontSize: "0.8125rem",
-            fontWeight: 600,
-            color: "var(--text-secondary)",
-            letterSpacing: "-0.005em",
-          }}
-        >
-          {label}
-        </div>
-        {hint && (
-          <div
-            style={{
-              fontSize: "0.75rem",
-              color: "var(--text-muted)",
-              marginTop: 2,
-              lineHeight: 1.45,
-            }}
-          >
-            {hint}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0">{children}</div>
-      {action && <div className="sm:pt-0.5 sm:justify-self-end">{action}</div>}
-    </div>
-  );
+  // ERP Settings Domains with Lottie/Duotone styling
+  const navItems = [
+    { id: 'personal' as const, label: 'Personal Information', icon: UserCircle },
+    ...(canResetData ? [
+      { id: 'maintenance' as const, label: 'Website Maintenance', icon: Gear },
+      { id: 'backups' as const, label: 'Backups & Snapshots', icon: Database },
+    ] : []),
+    ...(canManageFinanceSettings ? [
+      { id: 'finance' as const, label: 'Finance Setup', icon: Receipt },
+    ] : []),
+    ...(canResetData ? [
+      { id: 'reset' as const, label: 'Data Management', icon: Warning },
+      { id: 'history' as const, label: 'Reset Audit History', icon: Clock },
+    ] : []),
+  ];
 
   return (
-    <div className="w-full max-w-5xl py-2 px-1 sm:px-4">
-      {/* Toast */}
+    <div className="w-full min-h-screen bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 py-6 px-4 sm:px-8 max-w-6xl mx-auto font-sans animate-in fade-in-0 duration-150">
+      {/* Toast Alert */}
       {toastMessage && (
-        <div
-          className="fixed bottom-6 right-6 z-[99999] flex items-center gap-2 rounded-xl px-4 py-3 text-xs font-semibold shadow-theme-lg animate-in fade-in-0 slide-in-from-bottom-5"
-          style={{ background: "var(--text)", color: "var(--card)" }}
-        >
-          <ShieldCheck size={16} weight="light" style={{ color: "var(--success)" }} />
+        <div className="fixed bottom-6 right-6 z-[99999] flex items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-900 text-white px-4 py-3 text-xs font-medium shadow-xl dark:border-slate-800 dark:bg-white dark:text-slate-900">
+          <ShieldCheck size={16} weight="duotone" className="text-emerald-400 shrink-0" />
           <span>{toastMessage}</span>
-          <button
-            type="button"
-            onClick={() => setToastMessage(null)}
-            className="ml-2 cursor-pointer opacity-70 hover:opacity-100 transition-opacity"
-          >
-            <X size={14} weight="light" />
+          <button type="button" onClick={() => setToastMessage(null)} className="ml-2 opacity-60 hover:opacity-100">
+            <X size={14} />
           </button>
         </div>
       )}
 
-      {/* Header */}
-      <div className="tqi-page-hero mb-10" style={{ padding: "1.75rem 1.75rem" }}>
-        <div
-          className="tqi-section-eyebrow"
-          style={{
-            fontSize: "0.6875rem",
-            fontWeight: 600,
-            letterSpacing: "0.14em",
-            textTransform: "uppercase",
-            color: "var(--brand)",
-            marginBottom: 8,
-          }}
-        >
-          Account & Profile
-        </div>
-        <h1
-          className="font-bold tracking-tight"
-          style={{
-            fontSize: "1.75rem",
-            lineHeight: 1.15,
-            color: "var(--text)",
-            letterSpacing: "-0.02em",
-          }}
-        >
-          Personal Information
-        </h1>
-        <p
-          className="mt-2 text-sm"
-          style={{ color: "var(--text-muted)", maxWidth: "44ch" }}
-        >
-          Manage your basic information, contact methods, and addresses.
-          Changes are saved to this device.
-        </p>
-      </div>
-
-      <div className="space-y-6">
-        {canResetData && (
-          <section className="tqi-card border border-red-200 dark:border-red-900/70" style={{ padding: "1.5rem 1.75rem" }}>
-            <div className="mb-4 flex flex-col gap-4 border-b pb-4" style={{ borderColor: "var(--border-subtle)" }}>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#0B3D91]">System Settings</div>
-                  <h2 className="mt-1 text-lg font-black text-[#0B3D91]">Website Maintenance Mode</h2>
-                </div>
-                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] ${maintenance?.enabled ? 'bg-red-100 text-red-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                  <span className={`h-2.5 w-2.5 rounded-full ${maintenance?.enabled ? 'bg-red-600' : 'bg-emerald-600'}`} />
-                  {maintenance?.enabled ? 'Maintenance mode active' : 'Website is live'}
-                </span>
-              </div>
-              <p className="text-sm text-slate-600">Temporarily disable access to the TQI application while system maintenance, updates, bug fixes or deployments are in progress.</p>
-            </div>
-
-            {maintenance?.enabled ? (
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-red-200 bg-red-50 p-4">
-                  <div className="flex items-center gap-2 text-sm font-black text-red-800"><span className="text-lg">🔴</span> MAINTENANCE MODE ACTIVE</div>
-                  <p className="mt-2 text-sm text-red-700">Normal users are currently blocked from accessing the application.</p>
-                </div>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Maintenance until</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{maintenance.expectedCompletion ? new Date(maintenance.expectedCompletion).toLocaleString() : 'End time not set — edit settings to add a countdown'}</div>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">Auto disable</div>
-                    <div className="mt-2 text-sm font-semibold text-slate-900">{maintenance.autoDisable ? 'Enabled' : 'Disabled'}</div>
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" onClick={() => void handleMaintenanceAction('disable')} disabled={maintenanceBusy} className="rounded-lg bg-red-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-red-800 disabled:opacity-60">{maintenanceBusy ? 'Updating…' : 'Disable Maintenance Mode'}</button>
-                  <button type="button" onClick={() => setMaintenanceDraftOpen(true)} className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50">Edit Settings</button>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                  <div className="flex items-center gap-2 text-sm font-black text-emerald-800"><span className="text-lg">🟢</span> WEBSITE IS LIVE</div>
-                  <p className="mt-2 text-sm text-emerald-700">All users can currently access the application.</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
-                  Super Admin will continue to have full access to the application even when maintenance mode is enabled.
-                </div>
-                <button type="button" onClick={() => setMaintenanceDialogOpen(true)} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white hover:bg-[#092d67]">Enable Maintenance Mode</button>
-              </div>
-            )}
-          </section>
-        )}
-
-        {canResetData && <section className="tqi-card border border-blue-200 dark:border-blue-900/70" style={{ padding: "1.5rem 1.75rem" }}>
-          <div className="mb-4 flex flex-col gap-3 border-b pb-3 sm:flex-row sm:items-center sm:justify-between" style={{ borderColor: "var(--border-subtle)" }}>
-            <div><h2 className="font-bold tracking-tight text-blue-900 dark:text-blue-200" style={{ fontSize: "1.0625rem" }}>Operational Backup &amp; Restore</h2><p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>Automatic daily backups are stored on the backend. Snapshots preserve operational tables and uploads; accounts, passwords, settings, academic setup, and audit logs are excluded.</p></div>
-            <button type="button" onClick={() => void createBackupNow()} disabled={backupBusy} className="shrink-0 rounded-lg bg-blue-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-blue-800 disabled:opacity-50">{backupBusy ? 'Working…' : 'Create Backup Now'}</button>
-          </div>
-          {backupMessage && <p role="status" className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-800">{backupMessage}</p>}
-          {backupError && <p role="alert" className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">{backupError}</p>}
-          {backups.length === 0 ? <p className="py-4 text-center text-xs" style={{ color: "var(--text-muted)" }}>No backups available yet. The first automatic snapshot is created when the backend starts.</p> : <div className="overflow-x-auto">
-            <table className="w-full min-w-[700px] text-left text-xs"><thead><tr className="border-b text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}><th className="py-2 pr-3">Created</th><th className="py-2 pr-3">Type</th><th className="py-2 pr-3">Snapshot Size</th><th className="py-2 pr-3">Upload Files</th><th className="py-2">Actions</th></tr></thead><tbody>{backups.map((backup) => <tr key={backup.id} className="border-b last:border-0" style={{ borderColor: "var(--border-subtle)" }}><td className="py-3 pr-3">{new Date(backup.createdAt).toLocaleString()}</td><td className="py-3 pr-3 capitalize">{backup.kind}</td><td className="py-3 pr-3">{(Number(backup.bytes || 0) / 1024 / 1024).toFixed(2)} MB</td><td className="py-3 pr-3">{backup.includesUploads ? 'Included' : 'No uploads'}</td><td className="py-3"><div className="flex gap-2"><button type="button" onClick={() => void downloadBackup(backup)} className="rounded-md border border-gray-300 px-2.5 py-1.5 text-[11px] font-semibold dark:border-gray-700">Download</button><button type="button" onClick={() => { setRestoreTarget(backup); setRestoreConfirmation(''); setBackupError(''); }} className="rounded-md border border-amber-300 px-2.5 py-1.5 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:text-amber-200">Restore</button></div></td></tr>)}</tbody></table>
-          </div>}
-        </section>}
-
-        {canResetData && <section className="tqi-card border border-red-200 dark:border-red-900/70" style={{ padding: "1.5rem 1.75rem" }}>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="font-bold tracking-tight text-red-800 dark:text-red-300" style={{ fontSize: "1.0625rem" }}>Administration &amp; Data Reset</h2>
-              <p className="mt-1 max-w-2xl text-xs" style={{ color: "var(--text-muted)" }}>Reset only a selected operational module and scope. The Super Admin account, authentication, settings, role permissions, and audit logs are protected.</p>
-            </div>
-            <button type="button" onClick={onOpenResetData} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-lg border border-red-300 bg-red-700 px-4 py-2.5 text-xs font-bold text-white shadow-sm transition hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2">
-              <span aria-hidden="true">⚠</span> Reset Data
-            </button>
-          </div>
-        </section>}
-
-        {canManageFinanceSettings && <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
-          <div className="mb-4 border-b pb-3" style={{ borderColor: "var(--border-subtle)" }}>
-            <h2 className="font-bold tracking-tight" style={{ fontSize: "1.0625rem", color: "var(--text)" }}>Finance statement setup</h2>
-            <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>This finance officer name is autofilled on finance forms and downloaded statements.</p>
-          </div>
-          <form onSubmit={(event) => void handleSaveFinanceOfficer(event)} className="flex max-w-xl flex-col gap-3 sm:flex-row sm:items-end">
-            <label className="flex-1 text-xs font-semibold" style={{ color: "var(--text-secondary)" }}>Finance officer name
-              <input required value={financeOfficerForm} onChange={(event) => setFinanceOfficerForm(event.target.value)} className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-gray-700 dark:bg-gray-900 dark:text-white" placeholder="Finance officer name" />
-            </label>
-            <button type="submit" disabled={isSavingFinanceOfficer || !financeOfficerForm.trim()} className="tqi-btn-primary disabled:opacity-50">{isSavingFinanceOfficer ? "Saving…" : "Save finance setup"}</button>
-          </form>
-        </section>}
-
-        {canResetData && <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
-          <div className="mb-4 flex items-center justify-between gap-3 border-b pb-3" style={{ borderColor: "var(--border-subtle)" }}>
-            <div>
-              <h2 className="font-bold tracking-tight" style={{ fontSize: "1.0625rem", color: "var(--text)" }}>Reset History</h2>
-              <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>Recent scoped reset attempts recorded in the protected audit log.</p>
-            </div>
-          </div>
-          {resetHistoryError ? <p role="alert" className="text-xs text-red-700">{resetHistoryError}</p> : resetHistory.length === 0 ? <p className="py-5 text-center text-xs" style={{ color: "var(--text-muted)" }}>No reset operations recorded.</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[760px] text-left text-xs">
-                <thead><tr className="border-b text-[10px] uppercase tracking-wider" style={{ color: "var(--text-muted)", borderColor: "var(--border-subtle)" }}><th className="py-2 pr-3">Date</th><th className="py-2 pr-3">Admin</th><th className="py-2 pr-3">Module</th><th className="py-2 pr-3">Scope</th><th className="py-2 pr-3">Records</th><th className="py-2 pr-3">Status</th><th className="py-2">Action</th></tr></thead>
-                <tbody>{resetHistory.map((item) => <React.Fragment key={item.id}>
-                  <tr className="border-b" style={{ borderColor: "var(--border-subtle)" }}>
-                    <td className="py-3 pr-3 whitespace-nowrap">{item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}</td>
-                    <td className="py-3 pr-3">{item.adminName || 'Super Admin'}</td>
-                    <td className="py-3 pr-3">{item.moduleLabel || item.module || '—'}</td>
-                    <td className="py-3 pr-3">{item.scopeLabel || item.scope || '—'}</td>
-                    <td className="py-3 pr-3 tabular-nums">{Number(item.records || 0)}{String(item.module || '').startsWith('finance') && <span className="text-[10px] opacity-70"> ({Number(item.expenses || 0)} expenses · {Number(item.bills || 0)} bills)</span>}{Number(item.relatedRecords || 0) > 0 && <span className="text-[10px] opacity-70"> · {Number(item.relatedRecords || 0)} related</span>}</td>
-                    <td className="py-3 pr-3"><span className={`rounded-full px-2 py-1 text-[10px] font-bold ${String(item.status).startsWith('SUCCESS') ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300' : 'bg-red-100 text-red-800 dark:bg-red-950/50 dark:text-red-300'}`}>{item.status || 'UNKNOWN'}</span></td>
-                    <td className="py-3"><button type="button" onClick={() => setExpandedResetId((current) => current === item.id ? null : item.id)} className="font-semibold text-blue-700 hover:underline dark:text-blue-300">{expandedResetId === item.id ? 'Hide' : 'Details'}</button></td>
-                  </tr>
-                  {expandedResetId === item.id && <tr className="border-b bg-gray-50/70 dark:bg-gray-800/40" style={{ borderColor: "var(--border-subtle)" }}><td colSpan={7} className="px-3 py-3 text-[11px]">
-                    <div className="grid gap-2 sm:grid-cols-2"><div><strong>Reset ID:</strong> {item.resetId || '—'}</div><div><strong>Admin ID:</strong> {item.adminId || '—'}</div><div><strong>Client IP:</strong> {item.ip || 'Not available'}</div><div><strong>Device:</strong> {item.userAgent || 'Not available'}</div></div>
-                    {item.error && <p className="mt-2 text-red-700"><strong>Error:</strong> {item.error}</p>}
-                    {Array.isArray(item.fileCleanupErrors) && item.fileCleanupErrors.length > 0 && <p className="mt-2 text-amber-700"><strong>File cleanup:</strong> {item.fileCleanupErrors.join(' ')}</p>}
-                  </td></tr>}
-                </React.Fragment>)}</tbody>
-              </table>
-            </div>
-          )}
-        </section>}
-
-        {/* Basic Information */}
-        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
-          <div
-            className="flex items-center justify-between"
-            style={{ marginBottom: "0.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
-          >
-            <div>
-              <h2
-                className="font-bold tracking-tight"
-                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
-              >
-                Basic Information
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                How your identity is presented across TQI-ERP
-              </p>
-            </div>
-            {!isEditingBasic ? (
-              <EditLink
-                onClick={() => {
-                  setBasicForm({
-                    name: profile.name,
-                    region: profile.region,
-                    language: profile.language,
-                  });
-                  setIsEditingBasic(true);
-                }}
-                label="Edit"
-              />
-            ) : (
-              <CancelLink onClick={() => setIsEditingBasic(false)} />
-            )}
-          </div>
-
-          {!isEditingBasic ? (
-            <div className="tqi-rise">
-              <SettingsRow
-                label="Full name"
-                hint="As shown across TQI-ERP"
-                divider
-              >
-                <span
-                  style={{
-                    color: "var(--text)",
-                    fontSize: "0.9375rem",
-                    fontWeight: 600,
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  {profile.name}
-                </span>
-              </SettingsRow>
-              <SettingsRow label="Region" hint="Country of operation" divider>
-                <span
-                  style={{
-                    color: "var(--text)",
-                    fontSize: "0.9375rem",
-                    fontWeight: 600,
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  {profile.region}
-                </span>
-              </SettingsRow>
-              <SettingsRow label="Language" hint="Default app locale" divider={false}>
-                <span
-                  style={{
-                    color: "var(--text)",
-                    fontSize: "0.9375rem",
-                    fontWeight: 600,
-                    letterSpacing: "-0.005em",
-                  }}
-                >
-                  {profile.language}
-                </span>
-              </SettingsRow>
-            </div>
-          ) : (
-            <form onSubmit={handleSaveBasic} className="tqi-rise space-y-4 max-w-xl">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <InputField
-                  label="Full name"
-                  required
-                  value={basicForm.name}
-                  onChange={(e) =>
-                    setBasicForm({ ...basicForm, name: e.target.value })
-                  }
-                />
-                <InputField
-                  label="Region"
-                  required
-                  value={basicForm.region}
-                  onChange={(e) =>
-                    setBasicForm({ ...basicForm, region: e.target.value })
-                  }
-                />
-              </div>
-              <InputField
-                label="Language"
-                required
-                value={basicForm.language}
-                onChange={(e) =>
-                  setBasicForm({ ...basicForm, language: e.target.value })
-                }
-              />
-              <div className="flex items-center gap-3 pt-1">
+      {/* Two-Column Tesla Layout (Navigation + Content) */}
+      <div className="grid grid-cols-1 md:grid-cols-[240px_1fr] gap-8 lg:gap-16 items-start pt-2">
+        {/* Left Navigation: Account Settings */}
+        <aside className="w-full shrink-0">
+          <h2 className="text-sm font-bold tracking-tight text-slate-900 dark:text-slate-100 mb-4 px-2">
+            Account Settings
+          </h2>
+          <nav className="flex md:flex-col gap-1 overflow-x-auto pb-2 md:pb-0">
+            {navItems.map((item) => {
+              const IconComp = item.icon;
+              const isActive = activeCategory === item.id;
+              return (
                 <button
-                  type="submit"
-                  className="tqi-btn-primary inline-flex items-center gap-2"
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveCategory(item.id)}
+                  className={`flex items-center gap-3 px-3 py-2.5 text-xs text-left transition-colors whitespace-nowrap rounded-lg ${
+                    isActive
+                      ? 'font-bold text-slate-950 dark:text-white bg-slate-100 dark:bg-slate-900'
+                      : 'font-medium text-slate-600 hover:text-slate-950 dark:text-slate-400 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-slate-900/50'
+                  }`}
                 >
-                  Save changes
+                  <IconComp size={18} weight="duotone" className={isActive ? 'text-[#1a73e8]' : 'text-slate-400'} />
+                  <span>{item.label}</span>
                 </button>
-                <CancelLink onClick={() => setIsEditingBasic(false)} />
+              );
+            })}
+          </nav>
+        </aside>
+
+        {/* Center Main Content Area (Clean Tesla Whitespace-Driven Layout) */}
+        <main className="min-w-0 max-w-2xl">
+          {/* TAB 1: PERSONAL INFORMATION */}
+          {activeCategory === 'personal' && (
+            <div className="space-y-10 animate-in fade-in-0 duration-150">
+              {/* Header */}
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                  Personal Information
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Manage your basic information, contact methods, and addresses
+                </p>
               </div>
-            </form>
-          )}
-        </section>
 
-        {/* Contact Information */}
-        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
-          <div
-            className="flex items-center justify-between"
-            style={{ marginBottom: "1.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
-          >
-            <div>
-              <h2
-                className="font-bold tracking-tight"
-                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
-              >
-                Contact Information
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                Verified ways for TQI to reach you
-              </p>
-            </div>
-          </div>
-
-          <div className="tqi-rise">
-            {/* Email */}
-            <SettingsRow
-              label="Primary email"
-              hint="Used for sign-in and important notifications"
-              action={
-                !isEditingEmail ? (
-                  <EditLink
-                    onClick={() => {
-                      setEmailForm(profile.email);
-                      setIsEditingEmail(true);
-                    }}
-                    label="Edit"
-                  />
-                ) : undefined
-              }
-              divider
-            >
-              {!isEditingEmail ? (
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span
-                    className="inline-flex items-center gap-2"
-                    style={{
-                      color: "var(--text)",
-                      fontSize: "0.9375rem",
-                      fontWeight: 600,
-                    }}
-                  >
-                    <Mail
-                      size={14}
-                      weight="light"
-                      style={{ color: "var(--text-muted)" }}
-                    />
-                    {profile.email}
-                  </span>
-                  {profile.emailVerified && (
-                    <span
-                      className="tqi-chip tqi-chip-success"
-                      style={{ fontSize: "0.6875rem" }}
+              {/* Basic Information Section */}
+              <section className="space-y-4">
+                <div className="flex items-center justify-between border-b border-transparent pb-1">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Basic Information
+                  </h2>
+                  {!isEditingBasic ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBasicForm({
+                          name: profile.name,
+                          region: profile.region,
+                          language: profile.language,
+                        });
+                        setIsEditingBasic(true);
+                      }}
+                      className="text-xs font-normal text-slate-700 dark:text-slate-300 underline underline-offset-2 hover:text-[#1a73e8] dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      <Check size={12} weight="bold" />
-                      Verified
-                    </span>
+                      Edit
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingBasic(false)}
+                      className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
                   )}
                 </div>
-              ) : (
-                <form
-                  onSubmit={handleSaveEmail}
-                  className="tqi-rise space-y-3 max-w-md"
-                >
-                  <InputField
-                    type="email"
-                    required
-                    value={emailForm}
-                    onChange={(e) => setEmailForm(e.target.value)}
-                  />
-                  <div className="flex items-center gap-3">
-                    <button type="submit" className="tqi-btn-primary">
-                      Save email
-                    </button>
-                    <CancelLink onClick={() => setIsEditingEmail(false)} />
+
+                {!isEditingBasic ? (
+                  <div className="space-y-4 text-xs">
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">Name</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 mt-0.5">
+                        {profile.name}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">Region</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 mt-0.5">
+                        {profile.region}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500 dark:text-slate-400">Language</div>
+                      <div className="text-sm font-semibold text-slate-900 dark:text-slate-100 mt-0.5">
+                        {profile.language}
+                      </div>
+                    </div>
                   </div>
-                </form>
-              )}
-            </SettingsRow>
-
-            {/* Phone */}
-            <SettingsRow
-              label="Primary phone"
-              hint="Optional — used for SMS alerts only"
-              action={
-                !isEditingPhone && profile.phone ? (
-                  <EditLink
-                    onClick={() => {
-                      setPhoneForm(profile.phone);
-                      setIsEditingPhone(true);
-                    }}
-                    label="Edit"
-                  />
-                ) : undefined
-              }
-              divider={false}
-            >
-              {!isEditingPhone ? (
-                profile.phone ? (
-                  <span
-                    className="inline-flex items-center gap-2"
-                    style={{
-                      color: "var(--text)",
-                      fontSize: "0.9375rem",
-                      fontWeight: 600,
-                      fontFamily:
-                        "ui-monospace, SFMono-Regular, Menlo, monospace",
-                      letterSpacing: "-0.01em",
-                    }}
-                  >
-                    <Phone
-                      size={14}
-                      weight="light"
-                      style={{ color: "var(--text-muted)" }}
-                    />
-                    {profile.phone}
-                  </span>
                 ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPhoneForm(profile.phone);
-                      setIsEditingPhone(true);
-                    }}
-                    className="tqi-btn-ghost"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "0.5rem 0.75rem",
-                      borderRadius: 10,
-                      border: "1px dashed var(--border)",
-                      color: "var(--text-muted)",
-                      background: "transparent",
-                      fontSize: "0.875rem",
-                      fontWeight: 500,
-                      cursor: "pointer",
-                      transition: "all 0.18s var(--ease-out-expo)",
-                    }}
-                  >
-                    <Plus
-                      size={14}
-                      weight="light"
-                      style={{ color: "var(--brand)" }}
+                  <form onSubmit={handleSaveBasic} className="space-y-3 max-w-md pt-1">
+                    <InputField
+                      label="Name"
+                      required
+                      value={basicForm.name}
+                      onChange={(e) => setBasicForm({ ...basicForm, name: e.target.value })}
                     />
-                    Add a phone number
-                  </button>
-                )
-              ) : (
-                <form
-                  onSubmit={handleSavePhone}
-                  className="tqi-rise space-y-3 max-w-md"
-                >
-                  <InputField
-                    type="tel"
-                    placeholder="+91 98765 43210"
-                    value={phoneForm}
-                    onChange={(e) => setPhoneForm(e.target.value)}
-                  />
-                  <div className="flex items-center gap-3">
-                    <button type="submit" className="tqi-btn-primary">
-                      Save phone
-                    </button>
-                    <CancelLink onClick={() => setIsEditingPhone(false)} />
-                  </div>
-                </form>
-              )}
-            </SettingsRow>
-          </div>
-        </section>
-
-        {/* Addresses */}
-        <section className="tqi-card" style={{ padding: "1.5rem 1.75rem" }}>
-          <div
-            className="flex items-center justify-between"
-            style={{ marginBottom: "0.25rem", paddingBottom: "0.85rem", borderBottom: "1px solid var(--border-subtle)" }}
-          >
-            <div>
-              <h2
-                className="font-bold tracking-tight"
-                style={{ fontSize: "1.0625rem", color: "var(--text)" }}
-              >
-                Addresses
-              </h2>
-              <p className="text-xs mt-0.5" style={{ color: "var(--text-muted)" }}>
-                Postal address for physical correspondence
-              </p>
-            </div>
-          </div>
-
-          <div className="tqi-rise">
-            <SettingsRow
-              label="Mailing address"
-              hint="Optional"
-              action={
-                !isEditingAddress && profile.mailingAddress ? (
-                  <EditLink
-                    onClick={() => {
-                      setAddressForm(profile.mailingAddress);
-                      setIsEditingAddress(true);
-                    }}
-                    label="Edit"
-                  />
-                ) : undefined
-              }
-              divider={false}
-            >
-              {!isEditingAddress ? (
-                profile.mailingAddress ? (
-                  <span
-                    className="inline-flex items-start gap-2"
-                    style={{
-                      color: "var(--text)",
-                      fontSize: "0.9375rem",
-                      fontWeight: 500,
-                      whiteSpace: "pre-line",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    <MapPin
-                      size={14}
-                      weight="light"
-                      style={{
-                        color: "var(--text-muted)",
-                        marginTop: 3,
-                        flexShrink: 0,
-                      }}
+                    <InputField
+                      label="Region"
+                      required
+                      value={basicForm.region}
+                      onChange={(e) => setBasicForm({ ...basicForm, region: e.target.value })}
                     />
-                    {profile.mailingAddress}
-                  </span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAddressForm(profile.mailingAddress);
-                      setIsEditingAddress(true);
-                    }}
-                    className="tqi-btn-ghost"
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: 8,
-                        padding: "0.5rem 0.75rem",
-                        borderRadius: 10,
-                        border: "1px dashed var(--border)",
-                        color: "var(--text-muted)",
-                        background: "transparent",
-                        fontSize: "0.875rem",
-                        fontWeight: 500,
-                        cursor: "pointer",
-                        transition: "all 0.18s var(--ease-out-expo)",
+                    <InputField
+                      label="Language"
+                      required
+                      value={basicForm.language}
+                      onChange={(e) => setBasicForm({ ...basicForm, language: e.target.value })}
+                    />
+                    <div className="flex items-center gap-2.5 pt-1">
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-medium px-4 py-2 shadow-xs transition-colors cursor-pointer"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditingBasic(false)}
+                        className="text-xs text-slate-500 hover:text-slate-800 px-2 py-1 cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+
+              {/* Contact Information Section */}
+              <section className="space-y-4 pt-2">
+                <div className="flex items-center justify-between border-b border-transparent pb-1">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Contact Information
+                  </h2>
+                  {!isEditingEmail && !isEditingPhone ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEmailForm(profile.email);
+                        setIsEditingEmail(true);
                       }}
+                      className="text-xs font-normal text-slate-700 dark:text-slate-300 underline underline-offset-2 hover:text-[#1a73e8] dark:hover:text-white transition-colors cursor-pointer"
                     >
-                      <Plus
-                        size={14}
-                        weight="light"
-                        style={{ color: "var(--brand)" }}
-                      />
-                      Add a mailing address
+                      Edit
                     </button>
-                  )
-              ) : (
-                <form
-                  onSubmit={handleSaveAddress}
-                  className="tqi-rise space-y-3 max-w-lg"
-                >
-                  <TextAreaField
-                    rows={3}
-                    placeholder="e.g. 12/45, Gandhi Street, Dharmapuri, Tamil Nadu - 636701"
-                    value={addressForm}
-                    onChange={(e) => setAddressForm(e.target.value)}
-                  />
-                  <div className="flex items-center gap-3">
-                    <button type="submit" className="tqi-btn-primary">
-                      Save address
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsEditingEmail(false);
+                        setIsEditingPhone(false);
+                      }}
+                      className="text-xs text-slate-400 hover:text-slate-700 cursor-pointer"
+                    >
+                      Cancel
                     </button>
-                    <CancelLink onClick={() => setIsEditingAddress(false)} />
+                  )}
+                </div>
+
+                <div className="space-y-5 text-xs">
+                  {/* Primary Email */}
+                  <div>
+                    <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                      <span>Primary Email</span>
+                      <Info size={13} className="text-slate-400" />
+                    </div>
+                    {!isEditingEmail ? (
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                          {profile.email}
+                        </span>
+                        {profile.emailVerified && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                            <Check size={11} weight="bold" /> Verified
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSaveEmail} className="space-y-2 max-w-sm mt-1.5">
+                        <InputField
+                          type="email"
+                          required
+                          value={emailForm}
+                          onChange={(e) => setEmailForm(e.target.value)}
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-medium px-3.5 py-1.5 shadow-xs transition-colors cursor-pointer"
+                          >
+                            Save email
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingEmail(false)}
+                            className="text-xs text-slate-500 px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
                   </div>
-                </form>
+
+                  {/* Primary Phone Number */}
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                        <span>Primary Phone Number</span>
+                        <Info size={13} className="text-slate-400" />
+                      </div>
+                      {!isEditingPhone && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPhoneForm(profile.phone);
+                            setIsEditingPhone(true);
+                          }}
+                          className="text-xs font-normal text-slate-700 dark:text-slate-300 underline underline-offset-2 hover:text-[#1a73e8] dark:hover:text-white cursor-pointer"
+                        >
+                          {profile.phone ? 'Edit' : 'Add'}
+                        </button>
+                      )}
+                    </div>
+
+                    {!isEditingPhone ? (
+                      <div className="text-sm text-slate-700 dark:text-slate-300 mt-0.5 font-medium">
+                        {profile.phone || 'No phone number added'}
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSavePhone} className="space-y-2 max-w-sm mt-1.5">
+                        <InputField
+                          type="tel"
+                          placeholder="+91 98765 43210"
+                          value={phoneForm}
+                          onChange={(e) => setPhoneForm(e.target.value)}
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-medium px-3.5 py-1.5 shadow-xs transition-colors cursor-pointer"
+                          >
+                            Save phone
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingPhone(false)}
+                            className="text-xs text-slate-500 px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* Addresses Section */}
+              <section className="space-y-4 pt-2">
+                <div className="flex items-center justify-between border-b border-transparent pb-1">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-slate-100">
+                    Addresses
+                  </h2>
+                  {!isEditingAddress && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddressForm(profile.mailingAddress);
+                        setIsEditingAddress(true);
+                      }}
+                      className="text-xs font-normal text-slate-700 dark:text-slate-300 underline underline-offset-2 hover:text-[#1a73e8] dark:hover:text-white transition-colors cursor-pointer"
+                    >
+                      {profile.mailingAddress ? 'Edit' : 'Add'}
+                    </button>
+                  )}
+                </div>
+
+                <div className="space-y-4 text-xs">
+                  <div>
+                    <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400">
+                      <span>Mailing</span>
+                      <Info size={13} className="text-slate-400" />
+                    </div>
+                    {!isEditingAddress ? (
+                      <div className="text-sm text-slate-700 dark:text-slate-300 mt-0.5 font-medium whitespace-pre-line">
+                        {profile.mailingAddress || 'No mailing address added'}
+                      </div>
+                    ) : (
+                      <form onSubmit={handleSaveAddress} className="space-y-2 max-w-md mt-1.5">
+                        <TextAreaField
+                          rows={3}
+                          placeholder="e.g. 12/45, Gandhi Street, Dharmapuri, Tamil Nadu - 636701"
+                          value={addressForm}
+                          onChange={(e) => setAddressForm(e.target.value)}
+                        />
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="submit"
+                            className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-medium px-3.5 py-1.5 shadow-xs transition-colors cursor-pointer"
+                          >
+                            Save address
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingAddress(false)}
+                            className="text-xs text-slate-500 px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                </div>
+              </section>
+
+              {/* Google-Style Security Checkup Card */}
+              <section className="pt-4">
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-sm">
+                  <div className="space-y-1">
+                    <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
+                      Security Checkup
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Complete these steps to protect and be able to recover your account
+                    </p>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="mt-4 space-y-1.5">
+                    <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full overflow-hidden">
+                      <div className="bg-[#1a73e8] h-full rounded-full transition-all duration-300 w-1/4" />
+                    </div>
+                    <p className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">
+                      1 of 4 completed
+                    </p>
+                  </div>
+
+                  {/* Accordion / List of Security Items */}
+                  <div className="mt-5 divide-y divide-slate-100 dark:divide-slate-800 text-xs">
+                    {/* Item 1: Multi-Factor Authentication */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-4 w-4 items-center justify-center rounded-full border-2 border-slate-700 dark:border-slate-300">
+                          <div className="h-2 w-2 rounded-full bg-slate-800 dark:bg-slate-200" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Set Up Multi-Factor Authentication
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Use authenticator app or SMS verification code for elevated portal security.
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+
+                    {/* Item 2: Add Recovery Email */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Add Recovery Email
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Alternative email to restore credentials if you lose primary mailbox access.
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+
+                    {/* Item 3: Set Up Passkey */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 h-4 w-4 rounded-full border-2 border-slate-300 dark:border-slate-600" />
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Set Up Passkey
+                          </div>
+                          <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            FIDO2 passkey for passwordless biometrics.
+                          </p>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">∧</span>
+                    </div>
+
+                    {/* Item 4: Email Verified */}
+                    <div className="py-3 flex items-start justify-between gap-3 group cursor-pointer">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-4 w-4 items-center justify-center text-emerald-600 dark:text-emerald-400">
+                          <Check size={14} weight="bold" />
+                        </div>
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-slate-100">
+                            Email Verified
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 font-mono">
+                            {profile.email}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="text-slate-400 text-xs mt-0.5 group-hover:text-slate-600">⌵</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </div>
+          )}
+
+          {/* TAB 2: WEBSITE MAINTENANCE */}
+          {activeCategory === 'maintenance' && canResetData && (
+            <div className="space-y-8 animate-in fade-in-0 duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                    Website Maintenance
+                  </h1>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Control public visitor access and system deployment countdowns
+                  </p>
+                </div>
+                <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold ${
+                  maintenance?.enabled
+                    ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                    : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                }`}>
+                  <span className={`h-2 w-2 rounded-full ${maintenance?.enabled ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                  {maintenance?.enabled ? 'Maintenance Active' : 'System Live'}
+                </span>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-5 bg-white dark:bg-slate-900">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                      Maintenance Mode Switch
+                    </div>
+                    <div className="text-xs text-slate-500 mt-0.5">
+                      {maintenance?.enabled
+                        ? 'Non-admin users are blocked and shown the maintenance screen.'
+                        : 'Normal users have full access to the portal.'}
+                    </div>
+                  </div>
+
+                  {/* Tesla Capsule Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => maintenance?.enabled ? void handleMaintenanceAction('disable') : setMaintenanceDialogOpen(true)}
+                    disabled={maintenanceBusy}
+                    className={`relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      maintenance?.enabled ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-700'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-6 w-6 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out ${
+                        maintenance?.enabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {maintenance?.enabled && (
+                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 grid gap-3 sm:grid-cols-2 text-xs">
+                    <div>
+                      <div className="text-slate-400">Scheduled End Time</div>
+                      <div className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">
+                        {maintenance.expectedCompletion ? new Date(maintenance.expectedCompletion).toLocaleString() : 'Not configured'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-slate-400">Auto Disable</div>
+                      <div className="font-semibold text-slate-800 dark:text-slate-200 mt-0.5">
+                        {maintenance.autoDisable ? 'Enabled' : 'Disabled'}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-2.5">
+                  {maintenance?.enabled ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleMaintenanceAction('disable')}
+                        disabled={maintenanceBusy}
+                        className="rounded-lg bg-slate-900 text-white text-xs font-semibold px-4 py-2 hover:bg-black cursor-pointer"
+                      >
+                        {maintenanceBusy ? 'Updating…' : 'Disable Maintenance'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setMaintenanceDraftOpen(true)}
+                        className="rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 px-4 py-2 hover:bg-slate-50 cursor-pointer"
+                      >
+                        Edit Settings
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setMaintenanceDialogOpen(true)}
+                      className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-semibold px-4 py-2 shadow-xs transition-colors cursor-pointer"
+                    >
+                      Schedule Maintenance
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: BACKUPS & SNAPSHOTS */}
+          {activeCategory === 'backups' && canResetData && (
+            <div className="space-y-8 animate-in fade-in-0 duration-150">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                    Backups &amp; Snapshots
+                  </h1>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    Automated snapshots preserve operational databases and uploaded files
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void createBackupNow()}
+                  disabled={backupBusy}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-semibold px-4 py-2 shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  <RefreshCw size={13} className={backupBusy ? 'animate-spin' : ''} />
+                  {backupBusy ? 'Creating…' : 'Create Snapshot'}
+                </button>
+              </div>
+
+              {backupMessage && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-3.5 py-2 text-xs text-emerald-800">
+                  {backupMessage}
+                </div>
               )}
-            </SettingsRow>
-          </div>
-        </section>
+              {backupError && (
+                <div className="rounded-lg bg-rose-50 border border-rose-200 px-3.5 py-2 text-xs text-rose-800">
+                  {backupError}
+                </div>
+              )}
+
+              {backups.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  No snapshots recorded. Automated snapshots occur at startup.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-semibold text-slate-400 tracking-wider bg-slate-50 dark:bg-slate-900">
+                        <th className="py-2.5 px-3">Created</th>
+                        <th className="py-2.5 px-3">Type</th>
+                        <th className="py-2.5 px-3">Size</th>
+                        <th className="py-2.5 px-3 text-right">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {backups.map((backup) => (
+                        <tr key={backup.id} className="hover:bg-slate-50 dark:hover:bg-slate-850/50 transition-colors">
+                          <td className="py-3 px-3 font-medium text-slate-800 dark:text-slate-200">
+                            {new Date(backup.createdAt).toLocaleString()}
+                          </td>
+                          <td className="py-3 px-3 capitalize text-slate-600 dark:text-slate-400">
+                            {backup.kind}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-600 dark:text-slate-400">
+                            {(Number(backup.bytes || 0) / 1024 / 1024).toFixed(2)} MB
+                          </td>
+                          <td className="py-3 px-3 text-right">
+                            <div className="inline-flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void downloadBackup(backup)}
+                                className="rounded border border-slate-300 dark:border-slate-700 px-2.5 py-1 text-[11px] font-medium hover:bg-slate-50 cursor-pointer"
+                              >
+                                Download
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => { setRestoreTarget(backup); setRestoreConfirmation(''); setBackupError(''); }}
+                                className="rounded border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-800 hover:bg-amber-100 cursor-pointer"
+                              >
+                                Restore
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: FINANCE SETUP */}
+          {activeCategory === 'finance' && canManageFinanceSettings && (
+            <div className="space-y-8 animate-in fade-in-0 duration-150">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                  Finance Setup
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Configure finance officer signature and export titles
+                </p>
+              </div>
+
+              <form onSubmit={(event) => void handleSaveFinanceOfficer(event)} className="space-y-4 max-w-md">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    Finance Officer Name
+                  </label>
+                  <input
+                    required
+                    value={financeOfficerForm}
+                    onChange={(event) => setFinanceOfficerForm(event.target.value)}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3.5 py-2 text-xs text-slate-800 dark:text-slate-100 outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                    placeholder="e.g. TQI Finance Operations"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={isSavingFinanceOfficer || !financeOfficerForm.trim()}
+                  className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white text-xs font-semibold px-4 py-2 shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+                >
+                  {isSavingFinanceOfficer ? 'Saving…' : 'Save Finance Setup'}
+                </button>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 5: DATA RESET */}
+          {activeCategory === 'reset' && canResetData && (
+            <div className="space-y-8 animate-in fade-in-0 duration-150">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                  Data Management
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Manage operational data purge controls and academic cycle wipe
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-rose-200 dark:border-rose-900/60 bg-white dark:bg-slate-900 p-6 space-y-3">
+                <div className="text-sm font-bold text-rose-800 dark:text-rose-400">
+                  Scoped Data Reset
+                </div>
+                <p className="text-xs text-slate-600 dark:text-slate-400 max-w-xl">
+                  Selectively reset module records (attendance, session curriculum, finance expenses) for specific cycles.
+                  Protected admin accounts and audit trails are never purged.
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenResetData}
+                  className="rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold px-4 py-2 shadow-xs cursor-pointer"
+                >
+                  Open Reset Console
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: AUDIT HISTORY */}
+          {activeCategory === 'history' && canResetData && (
+            <div className="space-y-8 animate-in fade-in-0 duration-150">
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
+                  Audit History
+                </h1>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  Immutable record of administrative operations
+                </p>
+              </div>
+
+              {resetHistory.length === 0 ? (
+                <div className="py-8 text-center text-xs text-slate-400">
+                  No operations recorded in this cycle.
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] uppercase font-semibold text-slate-400 bg-slate-50 dark:bg-slate-900">
+                        <th className="py-2.5 px-3">Timestamp</th>
+                        <th className="py-2.5 px-3">Admin</th>
+                        <th className="py-2.5 px-3">Module</th>
+                        <th className="py-2.5 px-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {resetHistory.map((item) => (
+                        <tr key={item.id} className="hover:bg-slate-50 dark:hover:bg-slate-850/50 transition-colors">
+                          <td className="py-2.5 px-3 text-slate-800 dark:text-slate-200">
+                            {item.createdAt ? new Date(item.createdAt).toLocaleString() : '—'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                            {item.adminName || 'Super Admin'}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">
+                            {item.moduleLabel || item.module || '—'}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="text-[10px] font-semibold text-emerald-700">
+                              {item.status || 'SUCCESS'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
       </div>
+
+      {/* Footer */}
+      <footer className="mt-20 pt-8 border-t border-slate-100 dark:border-slate-900 text-center text-xs text-slate-400">
+        TQI ERP &copy; 2026 &nbsp;&nbsp; Privacy &amp; Legal
+      </footer>
+
+      {/* Maintenance Dialog Modal */}
       {maintenanceDialogOpen && (
-        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="maintenance-title">
-          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900 p-6 shadow-2xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF7A00]">Website Maintenance</div>
-                <h2 id="maintenance-title" className="mt-1 text-xl font-black text-[#0B3D91]">Enable Maintenance Mode?</h2>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Enable Maintenance Mode
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Temporarily restricts access for non-super-admin users.
+                </p>
               </div>
-              <button type="button" onClick={() => setMaintenanceDialogOpen(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100"> <X size={16} /> </button>
-            </div>
-            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-              This will temporarily prevent normal users from accessing the TQI application.
-            </div>
-            <div className="mt-4 text-sm text-slate-600">
-              Affected users:
-              <ul className="mt-2 list-disc space-y-1 pl-5">
-                <li>Cluster Admin</li>
-                <li>Financer</li>
-                <li>Volunteer</li>
-                <li>Other normal users</li>
-              </ul>
-            </div>
-            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-              Super Admin will continue to have access.
+              <button
+                type="button"
+                onClick={() => setMaintenanceDialogOpen(false)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={15} />
+              </button>
             </div>
 
-            <div className="mt-5 space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Title
-                <input value={maintenanceForm.title} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" placeholder="Website Under Maintenance" />
-              </label>
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Message
-                <textarea value={maintenanceForm.message} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))} rows={4} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" placeholder="We are currently performing scheduled maintenance and system improvements. Please check back shortly." />
-              </label>
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Expected Completion Date &amp; Time
-                <input type="datetime-local" value={maintenanceForm.expectedCompletion} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
-              </label>
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Maintenance Title
+                </label>
+                <input
+                  value={maintenanceForm.title}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                  placeholder="Website Under Maintenance"
+                />
+              </div>
 
-              <div className="space-y-2 text-sm text-slate-700">
-                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.showCountdown} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))} /> Show Countdown Timer</label>
-                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.autoDisable} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))} /> Automatically disable maintenance mode at the scheduled time</label>
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Maintenance Message
+                </label>
+                <textarea
+                  value={maintenanceForm.message}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                  placeholder="We are currently performing scheduled maintenance."
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Expected Completion Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={maintenanceForm.expectedCompletion}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                />
+              </div>
+
+              <div className="space-y-2 pt-1 text-slate-600 dark:text-slate-300">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={maintenanceForm.showCountdown}
+                    onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))}
+                    className="rounded border-slate-300 text-[#1a73e8] focus:ring-[#1a73e8]"
+                  />
+                  <span>Display countdown clock to visitors</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={maintenanceForm.autoDisable}
+                    onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))}
+                    className="rounded border-slate-300 text-[#1a73e8] focus:ring-[#1a73e8]"
+                  />
+                  <span>Automatically restore normal access upon completion</span>
+                </label>
               </div>
             </div>
 
-            <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setMaintenanceDialogOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700">Cancel</button>
-              <button type="button" disabled={maintenanceBusy} onClick={() => void handleMaintenanceAction('enable')} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{maintenanceBusy ? 'Enabling…' : 'Enable Maintenance Mode'}</button>
+            <div className="mt-5 flex justify-end gap-2.5 border-t border-slate-100 pt-3.5 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setMaintenanceDialogOpen(false)}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={maintenanceBusy}
+                onClick={() => void handleMaintenanceAction('enable')}
+                className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white px-4 py-2 text-xs font-medium shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {maintenanceBusy ? 'Enabling…' : 'Enable Maintenance'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Edit Maintenance Settings Modal */}
       {maintenanceDraftOpen && (
-        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="maintenance-edit-title">
-          <div className="w-full max-w-xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-4">
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900 p-6 shadow-2xl animate-in fade-in-0 zoom-in-95">
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#FF7A00]">Website Maintenance</div>
-                <h2 id="maintenance-edit-title" className="mt-1 text-xl font-black text-[#0B3D91]">Edit Maintenance Settings</h2>
+                <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+                  Edit Maintenance Settings
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Update the live maintenance notice and timer.
+                </p>
               </div>
-              <button type="button" onClick={() => setMaintenanceDraftOpen(false)} className="rounded-md p-2 text-slate-500 hover:bg-slate-100"> <X size={16} /> </button>
+              <button
+                type="button"
+                onClick={() => setMaintenanceDraftOpen(false)}
+                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X size={15} />
+              </button>
             </div>
-            <div className="mt-5 space-y-4">
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Title
-                <input value={maintenanceForm.title} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
-              </label>
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Maintenance Message
-                <textarea value={maintenanceForm.message} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))} rows={4} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
-              </label>
-              <label className="block text-xs font-bold uppercase tracking-[0.16em] text-slate-500">Expected Completion Date &amp; Time
-                <input type="datetime-local" value={maintenanceForm.expectedCompletion} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))} className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#0B3D91]" />
-              </label>
-              <div className="space-y-2 text-sm text-slate-700">
-                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.showCountdown} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))} /> Show Countdown Timer</label>
-                <label className="flex items-center gap-3"><input type="checkbox" checked={maintenanceForm.autoDisable} onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))} /> Automatically disable maintenance mode at the scheduled time</label>
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Maintenance Title
+                </label>
+                <input
+                  value={maintenanceForm.title}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, title: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Maintenance Message
+                </label>
+                <textarea
+                  value={maintenanceForm.message}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, message: event.target.value }))}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                />
+              </div>
+
+              <div>
+                <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  Expected Completion Time
+                </label>
+                <input
+                  type="datetime-local"
+                  value={maintenanceForm.expectedCompletion}
+                  onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, expectedCompletion: event.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs outline-none focus:border-[#1a73e8] focus:ring-2 focus:ring-[#1a73e8]/20"
+                />
+              </div>
+
+              <div className="space-y-2 pt-1 text-slate-600 dark:text-slate-300">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={maintenanceForm.showCountdown}
+                    onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, showCountdown: event.target.checked }))}
+                    className="rounded border-slate-300 text-[#1a73e8] focus:ring-[#1a73e8]"
+                  />
+                  <span>Display countdown clock</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={maintenanceForm.autoDisable}
+                    onChange={(event) => setMaintenanceForm((prev) => ({ ...prev, autoDisable: event.target.checked }))}
+                    className="rounded border-slate-300 text-[#1a73e8] focus:ring-[#1a73e8]"
+                  />
+                  <span>Auto-restore system when timer finishes</span>
+                </label>
               </div>
             </div>
-            <div className="mt-6 flex justify-end gap-3">
-              <button type="button" onClick={() => setMaintenanceDraftOpen(false)} className="rounded-lg border border-slate-300 px-4 py-2.5 text-xs font-bold text-slate-700">Cancel</button>
-              <button type="button" disabled={maintenanceBusy} onClick={() => void handleMaintenanceAction('update')} className="rounded-lg bg-[#0B3D91] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-60">{maintenanceBusy ? 'Saving…' : 'Save Settings'}</button>
+
+            <div className="mt-5 flex justify-end gap-2.5 border-t border-slate-100 pt-3.5 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setMaintenanceDraftOpen(false)}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={maintenanceBusy}
+                onClick={() => void handleMaintenanceAction('update')}
+                className="rounded-lg bg-[#1a73e8] hover:bg-[#1557b0] text-white px-4 py-2 text-xs font-medium shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              >
+                {maintenanceBusy ? 'Saving…' : 'Save Changes'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Restore Operational Backup Modal */}
       {restoreTarget && (
-        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-gray-950/70 p-4" role="dialog" aria-modal="true" aria-labelledby="restore-backup-title">
-          <div className="w-full max-w-lg space-y-4 rounded-2xl border border-amber-300 bg-white p-5 shadow-2xl dark:border-amber-900 dark:bg-gray-900">
-            <h2 id="restore-backup-title" className="text-base font-bold text-gray-900 dark:text-white">Restore Operational Backup?</h2>
-            <p className="text-xs text-gray-600 dark:text-gray-300">This replaces operational records with the snapshot from {new Date(restoreTarget.createdAt).toLocaleString()}. User accounts, password hashes, system settings, academic setup, and audit logs are excluded and will remain unchanged.</p>
-            <p className="text-xs font-semibold">Records in the snapshot: {Object.values(restoreTarget.counts || {}).map((value) => Number(value || 0)).reduce((sum, value) => sum + value, 0)}</p>
-            {backupError && <p role="alert" className="rounded-lg bg-red-50 p-2.5 text-xs text-red-800">{backupError}</p>}
-            <label className="block text-xs font-semibold">Type <span className="font-mono text-red-700">RESTORE</span> to proceed<input autoComplete="off" value={restoreConfirmation} onChange={(event) => setRestoreConfirmation(event.target.value)} className="mt-1.5 w-full rounded-lg border border-gray-300 bg-transparent px-3 py-2 font-mono dark:border-gray-700" placeholder="RESTORE" /></label>
-            <div className="flex justify-end gap-2"><button type="button" disabled={backupBusy} onClick={() => { setRestoreTarget(null); setRestoreConfirmation(''); setBackupError(''); }} className="rounded-lg border border-gray-300 px-4 py-2 text-xs font-semibold dark:border-gray-700">Cancel</button><button type="button" disabled={backupBusy || restoreConfirmation !== 'RESTORE'} onClick={() => void restoreBackup()} className="rounded-lg bg-amber-700 px-4 py-2 text-xs font-bold text-white disabled:opacity-40">{backupBusy ? 'Restoring…' : 'Restore Backup'}</button></div>
+        <div className="fixed inset-0 z-[100002] flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs" role="dialog" aria-modal="true">
+          <div className="w-full max-w-lg space-y-4 rounded-2xl border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900 p-6 shadow-2xl animate-in fade-in-0 zoom-in-95">
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Restore Operational Snapshot?
+            </h3>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              This replaces operational tables with the snapshot created on {new Date(restoreTarget.createdAt).toLocaleString()}.
+              User accounts, settings, and audit logs are protected and will remain unchanged.
+            </p>
+            {backupError && <p role="alert" className="rounded-lg bg-rose-50 p-2.5 text-xs text-rose-800">{backupError}</p>}
+            <label className="block text-xs font-medium text-slate-700 dark:text-slate-300">
+              Type <span className="font-mono font-bold text-rose-600">RESTORE</span> to confirm:
+              <input
+                autoComplete="off"
+                value={restoreConfirmation}
+                onChange={(event) => setRestoreConfirmation(event.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-3 py-2 text-xs font-mono outline-none focus:border-[#1a73e8]"
+                placeholder="RESTORE"
+              />
+            </label>
+            <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                disabled={backupBusy}
+                onClick={() => { setRestoreTarget(null); setRestoreConfirmation(''); setBackupError(''); }}
+                className="rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-850 px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={backupBusy || restoreConfirmation !== 'RESTORE'}
+                onClick={() => void restoreBackup()}
+                className="rounded-lg bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 text-xs font-medium shadow-xs transition-colors disabled:opacity-40 cursor-pointer"
+              >
+                {backupBusy ? 'Restoring…' : 'Restore Snapshot'}
+              </button>
+            </div>
           </div>
         </div>
       )}

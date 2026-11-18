@@ -280,8 +280,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     minLength={8}
                     onChange={(e) => { setNewPassword(e.target.value); setErrorMessage(null); }}
                     placeholder="At least 8 characters"
+                    className="tqi-login-input"
                   />
-                  <button type="button" onClick={() => setShowNewPassword((value) => !value)} className="mt-1 text-[11px] font-semibold text-blue-700">{showNewPassword ? 'Hide password' : 'Show password'}</button>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword((value) => !value)}
+                    className="tqi-login-input-action"
+                    aria-label={showNewPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showNewPassword ? <EyeOff size={16} weight="light" /> : <Eye size={16} weight="light" />}
+                  </button>
                 </div>
                 <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
                   Minimum 8 characters, uppercase, lowercase, number, and special character.
@@ -301,8 +309,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     minLength={8}
                     onChange={(e) => { setConfirmPassword(e.target.value); setErrorMessage(null); }}
                     placeholder="Re-enter the same password"
+                    className="tqi-login-input"
                   />
-                  <button type="button" onClick={() => setShowConfirmPassword((value) => !value)} className="mt-1 text-[11px] font-semibold text-blue-700">{showConfirmPassword ? 'Hide password' : 'Show password'}</button>
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword((value) => !value)}
+                    className="tqi-login-input-action"
+                    aria-label={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <EyeOff size={16} weight="light" /> : <Eye size={16} weight="light" />}
+                  </button>
                 </div>
               </div>
 

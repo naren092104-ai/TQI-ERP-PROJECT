@@ -1,6 +1,6 @@
 const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
-// Vercel routes same-origin /api requests to the backend service. Keep the
-// URL relative so previews and custom domains use their own deployment.
+// Vercel routes same-origin /api requests to the backend service. Set
+// VITE_API_URL explicitly when deploying the frontend outside Vercel.
 export const API_BASE_URL = (configuredApiUrl || '/api').replace(/\/+$/, '');
 const externalApiOrigin = /^https?:\/\//i.test(API_BASE_URL)
   ? new URL(API_BASE_URL).origin
@@ -10,7 +10,7 @@ export function apiUrl(path: string): string {
   if (!path) return API_BASE_URL;
   if (path.startsWith('data:') || path.startsWith('blob:')) return path;
   if (path.startsWith('http://') || path.startsWith('https://')) {
-    if (!import.meta.env.PROD || externalApiOrigin) return path;
+    if (!isProduction || externalApiOrigin) return path;
     try {
       const url = new URL(path);
       return `${url.pathname}${url.search}${url.hash}`;

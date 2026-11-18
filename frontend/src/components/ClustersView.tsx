@@ -22,6 +22,13 @@ import { DistrictCombobox } from './ui/DistrictCombobox';
 import { CollegeCombobox } from './ui/CollegeCombobox';
 import { TAMIL_NADU_ALL_CITIES_AND_DISTRICTS, TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
 import { apiUrl } from '../utils/api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface ClustersViewProps {
   clusters: Cluster[];
@@ -339,85 +346,251 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   ];
 
   return (
-    <div className="min-h-full space-y-6 bg-[#F7F9FC] pb-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+    <div className="min-h-full space-y-6 pb-8">
+      {/* Google Console Breadcrumb & Page Header */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200/90 pb-4 dark:border-slate-800">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[#10234E] sm:text-3xl">Clusters</h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">Manage clusters, view SPOC details, colleges, students, volunteers and update panchayats &amp; villages.</p>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+            <span>TQI ERP</span>
+            <span>/</span>
+            <span>Operations</span>
+            <span>/</span>
+            <span className="text-slate-800 dark:text-slate-200 font-medium">Clusters</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-medium tracking-tight text-slate-900 dark:text-slate-100">Clusters</h1>
+          <p className="mt-0.5 text-xs text-slate-500">Manage regional college clusters, SPOC coordinators, and educational coverage.</p>
         </div>
-        {isSuperAdmin && <button type="button" onClick={openCreate} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#082f70]">
-          <Plus className="h-4 w-4" /> Add Cluster
-        </button>}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-xs transition hover:bg-blue-700"
+          >
+            Create cluster
+          </button>
+        )}
       </div>
 
-      <section aria-label="Cluster summary" className="grid grid-cols-1 gap-3 min-[520px]:grid-cols-2 xl:grid-cols-5">
-        {statsCards.map(({ label, value, icon: Icon, tint }) => (
-          <div key={label} className="flex min-h-[92px] items-center gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-[0_4px_16px_rgba(15,23,42,0.035)]">
-            <span className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${tint}`}><Icon className="h-6 w-6" /></span>
-            <div className="min-w-0"><p className="text-xs font-medium text-slate-500">{label}</p>{isLoading ? <div className="mt-2 h-6 w-16 animate-pulse rounded bg-slate-100" /> : <p className="mt-1 text-2xl font-bold tabular-nums text-[#10234E]">{value.toLocaleString()}</p>}</div>
+      {/* Google Console Metric Summary Bar (Clean, No Icon Boxes) */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3">
+        {statsCards.map(({ label, value }) => (
+          <div key={label} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</p>
+            {isLoading ? (
+              <div className="mt-2 h-7 w-16 animate-pulse rounded bg-slate-100 dark:bg-slate-800" />
+            ) : (
+              <p className="mt-1 text-2xl font-normal tabular-nums text-slate-900 dark:text-slate-100">{value.toLocaleString()}</p>
+            )}
           </div>
         ))}
-      </section>
+      </div>
 
-      <section className="rounded-2xl border border-slate-200/80 bg-white p-3 shadow-[0_4px_16px_rgba(15,23,42,0.035)] sm:p-4">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search clusters, colleges, SPOCs..." className="w-full rounded-xl border border-slate-200 bg-slate-50/60 py-2.5 pl-10 pr-3 text-sm outline-none focus:border-[#0B3D91] focus:ring-4 focus:ring-blue-100" />
+      {/* Google Console Filter Strip */}
+      <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-2.5">
+          <div className="relative min-w-[200px] flex-1 max-w-sm">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+              placeholder="Filter clusters, colleges, SPOCs..."
+              className="h-9 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-xs text-slate-800 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100"
+            />
           </div>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:flex">
-            <select aria-label="Filter by district" value={districtFilter} onChange={(event) => setDistrictFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none"><option value="all">All Districts</option>{districtOptions.map((district) => <option key={district} value={district}>{district}</option>)}</select>
-            <select aria-label="Filter by college" value={collegeFilter} onChange={(event) => setCollegeFilter(event.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none"><option value="all">All Colleges</option>{collegeOptions.map((college) => <option key={college} value={college}>{college}</option>)}</select>
-            <select aria-label="Sort clusters" value={sortOrder} onChange={(event) => setSortOrder(event.target.value as 'asc' | 'desc')} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-xs font-medium text-slate-700 outline-none"><option value="asc">Cluster Name A–Z</option><option value="desc">Cluster Name Z–A</option></select>
-            <div className="flex items-center gap-1 rounded-xl border border-slate-200 p-1">
-              <button type="button" aria-label="Grid view" aria-pressed={viewMode === 'grid'} onClick={() => setViewMode('grid')} className={`flex flex-1 items-center justify-center rounded-lg p-1.5 ${viewMode === 'grid' ? 'bg-[#0B3D91] text-white' : 'text-slate-500 hover:bg-slate-100'}`}><GridFour className="h-4 w-4" /></button>
-              <button type="button" aria-label="List view" aria-pressed={viewMode === 'list'} onClick={() => setViewMode('list')} className={`flex flex-1 items-center justify-center rounded-lg p-1.5 ${viewMode === 'list' ? 'bg-[#0B3D91] text-white' : 'text-slate-500 hover:bg-slate-100'}`}><Rows className="h-4 w-4" /></button>
-            </div>
-          </div>
+
+          <Select value={districtFilter} onValueChange={(val) => setDistrictFilter(val)}>
+            <SelectTrigger className="h-9 min-w-[130px] rounded-md border-slate-300 text-xs">
+              <SelectValue placeholder="All Districts" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="all">All Districts</SelectItem>
+              {districtOptions.map((district) => (
+                <SelectItem key={district} value={district}>{district}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={collegeFilter} onValueChange={(val) => setCollegeFilter(val)}>
+            <SelectTrigger className="h-9 min-w-[130px] rounded-md border-slate-300 text-xs">
+              <SelectValue placeholder="All Colleges" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="all">All Colleges</SelectItem>
+              {collegeOptions.map((college) => (
+                <SelectItem key={college} value={college}>{college}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={sortOrder} onValueChange={(val) => setSortOrder(val as 'asc' | 'desc')}>
+            <SelectTrigger className="h-9 min-w-[140px] rounded-md border-slate-300 text-xs">
+              <SelectValue placeholder="Sort Clusters" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="asc">Cluster Name A–Z</SelectItem>
+              <SelectItem value="desc">Cluster Name Z–A</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-      </section>
 
-      {loadError ? <div className="rounded-2xl border border-rose-200 bg-white px-5 py-12 text-center shadow-sm">
-        <p className="font-semibold text-slate-800">Unable to load cluster data.</p><p className="mt-1 text-sm text-slate-500">{loadError}</p>
-        <button type="button" onClick={() => void loadClusters()} className="mt-4 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2 text-sm font-semibold text-white"><RefreshCw className="h-4 w-4" />Retry</button>
-      </div> : isLoading ? <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 2xl:grid-cols-3' : 'grid-cols-1'}`} aria-label="Loading clusters">
-        {Array.from({ length: 6 }, (_, index) => <div key={index} className="h-[285px] animate-pulse rounded-2xl border border-slate-200 bg-white"><div className="h-20 rounded-t-2xl bg-slate-100" /><div className="space-y-4 p-4"><div className="h-4 w-1/2 rounded bg-slate-100" /><div className="h-14 rounded bg-slate-50" /><div className="h-12 rounded bg-slate-50" /><div className="h-9 rounded bg-slate-100" /></div></div>)}
-      </div> : filteredClusters.length === 0 ? <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-[#0B3D91]"><Building2 className="h-7 w-7" /></span>
-        <h2 className="mt-4 text-lg font-bold text-[#10234E]">No Clusters Found</h2>
-        <p className="mt-1 text-sm text-slate-500">No clusters have been added for this academic year yet.</p>
-        {isSuperAdmin && <button type="button" onClick={openCreate} className="mt-5 inline-flex items-center gap-2 rounded-xl bg-[#0B3D91] px-4 py-2.5 text-sm font-semibold text-white"><Plus className="h-4 w-4" />Add Cluster</button>}
-      </div> : <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 2xl:grid-cols-3' : 'grid-cols-1'}`}>
-        {filteredClusters.map((cluster, index) => {
-          const numbers = getClusterNumbers(cluster);
-          const spocName = cluster.spocName || cluster.adminName || 'Not assigned';
-          const phone = cluster.spocMobile || cluster.adminPhone || '';
-          const email = cluster.adminEmail || '';
-          const initials = spocName.split(/\s+/).map((part) => part[0]).slice(0, 2).join('').toUpperCase();
-          const accent = accents[index % accents.length];
-          return <article key={cluster.id} className={`overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_6px_22px_rgba(15,23,42,0.045)] transition hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(15,23,42,0.09)] ${viewMode === 'list' ? 'lg:grid lg:grid-cols-[minmax(230px,1.2fr)_minmax(260px,1fr)_minmax(250px,1fr)_auto] lg:items-center' : ''}`}>
-            <div className={`relative flex min-h-[78px] items-center gap-3 border-b bg-gradient-to-r px-4 py-3 ${accent} ${viewMode === 'list' ? 'lg:h-full lg:border-b-0 lg:border-r' : ''}`}>
-              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/80 shadow-sm"><MapPin className="h-5 w-5" /></span>
-              <div className="min-w-0 flex-1"><h2 className="truncate text-[15px] font-bold text-[#10234E]">{cluster.name}</h2><p className="mt-0.5 truncate text-xs text-slate-600">{cluster.district} District</p></div>
-              <button type="button" onClick={() => void copyClusterDetails(cluster)} title="Copy cluster details" aria-label={`Copy ${cluster.name} details`} className="rounded-lg p-2 text-slate-500 transition hover:bg-white/70 hover:text-[#0B3D91]"><ClipboardList className="h-4 w-4" /></button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-4 lg:border-b-0">
-              {[['Panchayats', numbers.panchayats], ['Villages', numbers.villages], ['Students', numbers.students], ['Volunteers', numbers.volunteers]].map(([label, value]) => <div key={label} className="rounded-xl border border-slate-100 bg-slate-50/60 px-2 py-2 text-center"><p className="text-lg font-bold tabular-nums text-[#10234E]">{Number(value).toLocaleString()}</p><p className="text-[10px] font-medium text-slate-500">{label}</p></div>)}
-            </div>
-            <div className="grid grid-cols-1 gap-3 border-b border-slate-100 px-4 py-3 sm:grid-cols-2 lg:border-b-0">
-              <div className="min-w-0"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">SPOC Details</p><div className="flex items-center gap-2"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[10px] font-bold text-[#0B3D91]">{initials || 'SP'}</span><div className="min-w-0"><p className="truncate text-xs font-semibold text-slate-800">{spocName}</p><a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} className="block truncate text-[11px] text-slate-500 hover:text-[#0B3D91]">{phone || 'Phone not provided'}</a><a href={email ? `mailto:${email}` : undefined} className="block truncate text-[11px] text-slate-500 hover:text-[#0B3D91]">{email || 'Email not provided'}</a></div></div></div>
-              <div className="min-w-0"><p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">College</p><div className="flex items-start gap-2"><Building2 className="mt-0.5 h-4 w-4 shrink-0 text-[#0B3D91]" /><div className="min-w-0"><p className="line-clamp-2 text-xs font-semibold text-slate-800">{cluster.collegeName || 'College not assigned'}</p><p className="truncate text-[11px] text-slate-500">{cluster.collegeDistrict || cluster.district}</p></div></div></div>
-            </div>
-            <div className={`flex flex-wrap items-center gap-2 px-4 py-3 ${viewMode === 'list' ? 'lg:justify-end' : ''}`}>
-              <a href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} aria-disabled={!phone} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${phone ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Phone className="h-3.5 w-3.5" />Call</a>
-              <a href={email ? `mailto:${email}` : undefined} aria-disabled={!email} className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-semibold ${email ? 'bg-blue-50 text-[#0B3D91] hover:bg-blue-100' : 'pointer-events-none bg-slate-100 text-slate-400'}`}><Mail className="h-3.5 w-3.5" />Email</a>
-              {isSuperAdmin && <button type="button" onClick={() => openEdit(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-[#0B3D91] px-2 py-2 text-xs font-semibold text-white hover:bg-[#082f70]"><Pencil className="h-3.5 w-3.5" />Edit</button>}
-              {isSuperAdmin && onResendCredentials && <button type="button" disabled={resettingCredentialsFor === cluster.id} onClick={() => void resetClusterCredentials(cluster)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50 px-2 py-2 text-xs font-semibold text-[#0B3D91] hover:bg-blue-100 disabled:opacity-60" title="Generate and email a new temporary password"><RefreshCw className={`h-3.5 w-3.5 ${resettingCredentialsFor === cluster.id ? 'animate-spin' : ''}`} />{resettingCredentialsFor === cluster.id ? 'Sending…' : 'Reset Login'}</button>}
-              {isSuperAdmin && onDeleteCluster && <button type="button" onClick={() => void deleteCluster(cluster)} title={`Delete ${cluster.name}`} aria-label={`Delete ${cluster.name}`} className="rounded-xl border border-red-200 p-2 text-red-600 hover:bg-red-50"><Trash2 className="h-4 w-4" /></button>}
-            </div>
-          </article>;
-        })}
-      </div>}
+        {/* View Mode Toggle (Tesla / Google Pill Switch) */}
+        <div className="inline-flex items-center rounded-full border border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 p-1 self-end sm:self-auto">
+          <button
+            type="button"
+            aria-label="Grid view"
+            aria-pressed={viewMode === 'grid'}
+            onClick={() => setViewMode('grid')}
+            className={`flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
+              viewMode === 'grid'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+            }`}
+          >
+            Grid
+          </button>
+          <button
+            type="button"
+            aria-label="List view"
+            aria-pressed={viewMode === 'list'}
+            onClick={() => setViewMode('list')}
+            className={`flex items-center justify-center rounded-full px-4 py-1.5 text-xs font-medium transition-all ${
+              viewMode === 'list'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+            }`}
+          >
+            Table
+          </button>
+        </div>
+      </div>
+
+      {loadError ? (
+        <div className="rounded-lg border border-rose-200 bg-white px-5 py-12 text-center shadow-xs">
+          <p className="font-medium text-slate-800">Unable to load cluster data.</p>
+          <p className="mt-1 text-xs text-slate-500">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void loadClusters()}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white"
+          >
+            Retry
+          </button>
+        </div>
+      ) : isLoading ? (
+        <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 2xl:grid-cols-3' : 'grid-cols-1'}`}>
+          {Array.from({ length: 6 }, (_, index) => (
+            <div key={index} className="h-48 animate-pulse rounded-lg border border-slate-200 bg-white p-4" />
+          ))}
+        </div>
+      ) : filteredClusters.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-slate-300 bg-white px-5 py-16 text-center">
+          <h2 className="text-base font-medium text-slate-900">No Clusters Found</h2>
+          <p className="mt-1 text-xs text-slate-500">No clusters have been added for this academic year yet.</p>
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={openCreate}
+              className="mt-4 inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white"
+            >
+              Add Cluster
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 md:grid-cols-2 2xl:grid-cols-3' : 'grid-cols-1'}`}>
+          {filteredClusters.map((cluster) => {
+            const numbers = getClusterNumbers(cluster);
+            const spocName = cluster.spocName || cluster.adminName || 'Not assigned';
+            const phone = cluster.spocMobile || cluster.adminPhone || '';
+            const email = cluster.adminEmail || '';
+
+            return (
+              <article
+                key={cluster.id}
+                className={`rounded-lg border border-slate-200 bg-white shadow-xs transition hover:border-slate-300 hover:shadow-sm dark:border-slate-800 dark:bg-slate-900 ${
+                  viewMode === 'list' ? 'lg:grid lg:grid-cols-[1.5fr_1.2fr_1.2fr_auto] lg:items-center lg:gap-4' : ''
+                }`}
+              >
+                {/* Header (Clean Google Resource Style, No loud gradients) */}
+                <div className="border-b border-slate-100 p-4 dark:border-slate-800/80">
+                  <div className="flex items-center justify-between gap-2">
+                    <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100 truncate">{cluster.name}</h2>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-slate-800 dark:text-slate-300 shrink-0">
+                      {cluster.district} District
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">{cluster.collegeName || 'No college mapped'}</p>
+                </div>
+
+                {/* Numbers Grid */}
+                <div className="grid grid-cols-4 gap-2 border-b border-slate-100 px-4 py-3 dark:border-slate-800/80">
+                  {[
+                    ['Panchayats', numbers.panchayats],
+                    ['Villages', numbers.villages],
+                    ['Students', numbers.students],
+                    ['Volunteers', numbers.volunteers],
+                  ].map(([label, value]) => (
+                    <div key={label} className="text-center">
+                      <p className="text-base font-medium tabular-nums text-slate-900 dark:text-slate-100">{Number(value).toLocaleString()}</p>
+                      <p className="text-[10px] text-slate-500 uppercase">{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* SPOC & Contact */}
+                <div className="px-4 py-3 border-b border-slate-100 dark:border-slate-800/80 text-xs">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">Coordinator / SPOC</p>
+                  <p className="font-medium text-slate-800 dark:text-slate-200 truncate">{spocName}</p>
+                  <div className="flex items-center gap-3 mt-1 text-[11px] text-slate-500">
+                    {phone && <span>{phone}</span>}
+                    {email && <span className="truncate">{email}</span>}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center justify-end gap-2 px-4 py-3">
+                  <button
+                    type="button"
+                    onClick={() => void copyClusterDetails(cluster)}
+                    className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300"
+                  >
+                    Copy
+                  </button>
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => openEdit(cluster)}
+                      className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:border-slate-700"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {isSuperAdmin && onResendCredentials && (
+                    <button
+                      type="button"
+                      disabled={resettingCredentialsFor === cluster.id}
+                      onClick={() => void resetClusterCredentials(cluster)}
+                      className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50 dark:border-slate-700"
+                    >
+                      {resettingCredentialsFor === cluster.id ? 'Sending…' : 'Reset Login'}
+                    </button>
+                  )}
+                  {isSuperAdmin && onDeleteCluster && (
+                    <button
+                      type="button"
+                      onClick={() => void deleteCluster(cluster)}
+                      aria-label={`Delete ${cluster.name}`}
+                      className="rounded-md border border-slate-200 px-2 py-1.5 text-xs text-red-600 hover:bg-red-50 dark:border-slate-700"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
 
       {drawerMode && <div className="fixed inset-0 z-[99999] flex justify-end bg-slate-950/40 backdrop-blur-[2px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setDrawerMode(null); }}>
         <aside role="dialog" aria-modal="true" aria-labelledby="cluster-drawer-title" className="flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">

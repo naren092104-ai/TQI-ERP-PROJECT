@@ -102,27 +102,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   useEffect(() => {
     if (!effectiveAuthToken) return;
 
-    const timeoutId = window.setTimeout(() => {
-      fetch(apiUrl('/api/academic-setup'), {
-        headers: {
-          Authorization: `Bearer ${effectiveAuthToken}`,
-        },
+    const controller = new AbortController();
+    fetch(apiUrl('/api/academic-setup'), {
+      headers: {
+        Authorization: `Bearer ${effectiveAuthToken}`,
+      },
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.success && Array.isArray(data.setup)) {
+          setSetupDays(
+            data.setup.map((s: { day_number: number; session_name: string }) => ({
+              dayNumber: s.day_number,
+              sessionName: s.session_name,
+            }))
+          );
+        }
       })
-        .then((res) => (res.ok ? res.json() : null))
-        .then((data) => {
-          if (data?.success && Array.isArray(data.setup)) {
-            setSetupDays(
-              data.setup.map((s: { day_number: number; session_name: string }) => ({
-                dayNumber: s.day_number,
-                sessionName: s.session_name,
-              }))
-            );
-          }
-        })
-        .catch(() => {});
-    }, 2000);
+      .catch(() => {});
 
-    return () => window.clearTimeout(timeoutId);
+    return () => controller.abort();
   }, [effectiveAuthToken]);
 
   // Real MySQL calculated metrics
@@ -175,10 +175,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // 8-Day Progress
   const dayProgressList = useMemo(() => {
+    const defaultNames = [
+      'Parents Meet',
+      'Know Your Locality',
+      'Books to Bytes',
+      'Sports',
+      'Science',
+      'Art Education',
+      'Constitution',
+      'Tinkering Session',
+    ];
+
     return Array.from({ length: 8 }, (_, i) => {
       const dayNum = i + 1;
       const customConfig = setupDays.find((s) => s.dayNumber === dayNum);
-      const dayName = customConfig?.sessionName || 'Name not set';
+      const dayName = customConfig?.sessionName || defaultNames[i] || `Session ${dayNum}`;
       const daySessions = sessions.filter((s) => s.dayNumber === dayNum);
       const isDone =
         daySessions.length > 0 && daySessions.every((s) => s.status === 'Completed');
@@ -255,24 +266,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <button
             type="button"
             onClick={onOpenNewFinance}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs hover:bg-surface-hover transition-colors"
+            className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-300 bg-white px-3.5 text-xs font-medium text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition-colors"
           >
-            <CurrencyInr size={14} className="text-muted-foreground" />
-            <span>Record Expense</span>
+            Record Expense
           </button>
           <button
             type="button"
             onClick={onOpenNewAttendance}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground shadow-xs hover:bg-brand-dark transition-colors"
+            className="inline-flex h-9 items-center justify-center rounded-lg bg-blue-600 px-3.5 text-xs font-medium text-white shadow-xs hover:bg-blue-700 transition-colors"
           >
-            <CalendarCheck size={14} />
-            <span>Mark Attendance</span>
+            Mark Attendance
           </button>
         </div>
       </div>
 
-      {/* 2. Compact KPI Blocks */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+      {/* 2. Google Console Style Metric Tiles */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {(isClusterAdmin
           ? [
               {
@@ -370,29 +379,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             key={kpi.label}
             type="button"
             onClick={() => onNavigate(kpi.tab)}
-            className={`flex flex-col justify-between p-3.5 rounded-md border bg-card text-left transition-colors hover:border-border-strong hover:bg-surface-hover shadow-xs ${
+            className={`group flex flex-col justify-between p-4 rounded-lg border bg-white dark:bg-slate-900 text-left transition-all hover:border-blue-500 hover:shadow-xs cursor-pointer ${
               (kpi as any).alert
-                ? 'border-red-200 dark:border-red-900/60'
+                ? 'border-red-200 bg-red-50/20 dark:border-red-900/50 dark:bg-red-950/10'
                 : (kpi as any).highlight
-                ? 'border-amber-200 dark:border-amber-900/60'
-                : 'border-border'
+                ? 'border-amber-200 bg-amber-50/20 dark:border-amber-900/50 dark:bg-amber-950/10'
+                : 'border-slate-200 dark:border-slate-800'
             }`}
           >
-            <span className="text-[11px] font-medium text-muted-foreground truncate">
-              {kpi.label}
-            </span>
-            <span
-              className={`mt-1.5 text-2xl font-bold tracking-tight ${
-                (kpi as any).alert
-                  ? 'text-red-700 dark:text-red-400'
-                  : (kpi as any).highlight
-                  ? 'text-amber-700 dark:text-amber-400'
-                  : 'text-foreground'
-              }`}
-            >
-              {kpi.val}
-            </span>
-            <span className="mt-1 text-[10px] text-muted-foreground truncate">{kpi.hint}</span>
+            <div className="w-full mb-1">
+              <span className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate block">
+                {kpi.label}
+              </span>
+            </div>
+            <div>
+              <span
+                className={`text-2xl sm:text-3xl font-normal tracking-tight tabular-nums ${
+                  (kpi as any).alert
+                    ? 'text-red-700 dark:text-red-400 font-medium'
+                    : (kpi as any).highlight
+                    ? 'text-amber-700 dark:text-amber-400 font-medium'
+                    : 'text-slate-900 dark:text-slate-100'
+                }`}
+              >
+                {kpi.val}
+              </span>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
+                {kpi.hint}
+              </p>
+            </div>
           </button>
         ))}
       </div>

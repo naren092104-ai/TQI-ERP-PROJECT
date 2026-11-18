@@ -15,10 +15,18 @@ import {
   Lightning,
   ArrowRight,
   CheckCircle,
+  CalendarBlank,
 } from './ui/icons';
 import { NotificationItem, UserRole, TabType } from '../types';
 import { ModeToggle } from './mode-toggle';
 import Badge from './ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface HeaderProps {
   userEmail?: string;
@@ -143,50 +151,50 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      {/* Enterprise Top Header */}
-      <header className="tqi-app-header sticky top-0 z-30 w-full h-14 border-b border-border bg-card px-4 sm:px-6 flex items-center justify-between gap-3 shrink-0 shadow-xs">
-        {/* Left: mobile toggle + search */}
-        <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+      {/* Google Admin Console Style Top Header */}
+      <header className="tqi-app-header sticky top-0 z-30 w-full h-16 border-b border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 sm:px-6 flex items-center justify-between gap-4 shrink-0">
+        {/* Left: mobile toggle + Google style search */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
           <button
             type="button"
             onClick={onToggleSidebar}
-            className="lg:hidden flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-surface-hover hover:text-foreground transition-colors"
+            className="lg:hidden flex h-9 w-9 items-center justify-center rounded-full text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
             aria-label="Toggle navigation"
           >
-            <Menu size={18} />
+            <Menu size={20} />
           </button>
 
-          {/* Inline search (tablet+) */}
+          {/* Google Admin Style Global Search (tablet+) */}
           <div
             ref={searchContainerRef}
-            className={`relative w-full max-w-md hidden sm:flex items-center gap-2 h-9 rounded-md border transition-colors px-2.5 ${
+            className={`relative w-full max-w-lg hidden sm:flex items-center gap-3 h-10 rounded-full border transition-all px-3.5 ${
               searchFocused
-                ? 'border-primary ring-1 ring-primary bg-card'
-                : 'border-border bg-background hover:border-border-strong'
+                ? 'border-blue-500 ring-2 ring-blue-500/20 bg-white dark:bg-slate-900 shadow-sm'
+                : 'border-transparent bg-slate-100 hover:bg-slate-200/60 dark:bg-slate-800/80 dark:hover:bg-slate-800'
             }`}
           >
-            <Search size={14} className="shrink-0 text-muted-foreground" />
+            <Search size={16} className="shrink-0 text-slate-500 dark:text-slate-400" />
             <input
               ref={searchRef}
               type="text"
-              placeholder="Search records, students, sessions, clusters..."
+              placeholder="Search in ERP (users, students, sessions, clusters...)"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setSearchFocused(true)}
-              className="flex-1 bg-transparent border-none outline-none text-xs text-foreground placeholder:text-muted-foreground font-sans"
+              className="flex-1 bg-transparent border-none outline-none text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-500 font-sans"
             />
-            <kbd className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded border border-border bg-muted/60 text-[10px] font-mono text-muted-foreground">
+            <kbd className="inline-flex items-center gap-0.5 h-5 px-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900 text-[10px] font-mono text-slate-500">
               <Command size={10} />K
             </kbd>
 
             {searchFocused && searchQuery && (
               <div
-                className="absolute left-0 right-0 top-[40px] rounded-md border border-border bg-card py-2 max-h-96 overflow-y-auto custom-scrollbar shadow-lg z-50"
+                className="absolute left-0 right-0 top-[46px] rounded-2xl border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900 py-2.5 max-h-96 overflow-y-auto custom-scrollbar shadow-xl z-50"
               >
                 {Object.keys(grouped).length > 0 ? (
                   Object.entries(grouped).map(([cat, items]) => (
-                    <div key={cat} className="px-1.5">
-                      <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                    <div key={cat} className="px-2">
+                      <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                         {cat}
                       </div>
                       {items.map((item) => (
@@ -198,16 +206,16 @@ export const Header: React.FC<HeaderProps> = ({
                             setSearchQuery('');
                             setSearchFocused(false);
                           }}
-                          className="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-surface-hover transition-colors text-left"
+                          className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors text-left"
                         >
                           <span className="truncate">{item.label}</span>
-                          <CaretDown size={12} className="-rotate-90 text-muted-foreground" />
+                          <CaretDown size={12} className="-rotate-90 text-slate-400" />
                         </button>
                       ))}
                     </div>
                   ))
                 ) : (
-                  <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                  <div className="px-4 py-8 text-center text-xs text-slate-500">
                     No records matching &ldquo;{searchQuery}&rdquo;.
                   </div>
                 )}
@@ -230,20 +238,50 @@ export const Header: React.FC<HeaderProps> = ({
           )}
           {/* Global Academic Year Selector */}
           <div className="tqi-header-year relative">
-            <select
-              aria-label="Academic Year"
-              value={selectedAcademicYearId}
-              onChange={(event) => onSelectAcademicYear?.(event.target.value)}
-              title="Select an academic year to view data for that cycle"
-              className="tqi-header-year-select h-8 rounded-md border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary cursor-pointer shadow-xs"
+            <Select
+              value={selectedAcademicYearId || ''}
+              onValueChange={(val) => {
+                if (val && onSelectAcademicYear) {
+                  onSelectAcademicYear(val);
+                }
+              }}
             >
-              <option value="">Select Academic Year</option>
-              {academicYears.map((year) => (
-                <option key={year.id} value={year.id}>
-                  {year.name}{(year.is_active || year.status === 'ACTIVE') ? ' (Active)' : ''}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger
+                className="h-9 w-[195px] sm:w-[210px] rounded-full border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-850 px-3.5 text-xs font-medium text-slate-800 dark:text-slate-100 shadow-xs hover:border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all cursor-pointer"
+                title="Select an academic year to view data for that cycle"
+              >
+                <div className="flex items-center gap-2 truncate">
+                  <CalendarBlank size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                  <SelectValue placeholder="Select Academic Year" />
+                </div>
+              </SelectTrigger>
+              <SelectContent
+                position="popper"
+                align="start"
+                sideOffset={6}
+                className="w-[195px] sm:w-[210px] rounded-2xl border border-slate-200/90 bg-white dark:border-slate-700 dark:bg-slate-900 p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)] z-[999999]"
+              >
+                {academicYears.map((year) => {
+                  const isActive = Boolean(year.is_active || year.status === 'ACTIVE');
+                  return (
+                    <SelectItem
+                      key={year.id}
+                      value={year.id}
+                      className="cursor-pointer rounded-xl py-2 pl-3 pr-8 text-xs font-medium text-slate-800 dark:text-slate-100 hover:bg-slate-100/70 dark:hover:bg-slate-800 focus:bg-slate-100/70 dark:focus:bg-slate-800 transition-colors"
+                    >
+                      <div className="flex items-center justify-between w-full gap-2">
+                        <span className="truncate">{year.name}</span>
+                        {isActive && (
+                          <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200/80 dark:border-emerald-800/80 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 shrink-0">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Notifications */}
@@ -251,25 +289,25 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setShowNotifications(!showNotifications)}
-              className={`flex h-8 w-8 items-center justify-center rounded-md border transition-colors relative ${
+              className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors relative ${
                 showNotifications
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-card text-muted-foreground hover:bg-surface-hover hover:text-foreground'
+                  ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/60 dark:text-blue-400'
+                  : 'text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800'
               }`}
               aria-label="View notifications"
             >
-              <Bell size={15} />
+              <Bell size={17} />
               {(unreadCount > 0 || pendingApprovalsCount > 0) && (
-                <span className="absolute top-1 right-1 flex h-2 w-2 rounded-full bg-red-600 ring-2 ring-card" />
+                <span className="absolute top-1.5 right-1.5 flex h-2 w-2 rounded-full bg-red-600 ring-2 ring-white dark:ring-slate-900" />
               )}
             </button>
 
             {showNotifications && (
               <div
-                className="absolute right-0 mt-2 w-80 rounded-md border border-border bg-card py-2 z-50 shadow-lg"
+                className="absolute right-0 mt-2 w-80 rounded-2xl border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900 py-2.5 z-50 shadow-xl"
               >
-                <div className="flex items-center justify-between px-3.5 pb-2 mb-1 border-b border-border">
-                  <span className="text-xs font-semibold text-foreground">Notifications</span>
+                <div className="flex items-center justify-between px-4 pb-2.5 mb-1 border-b border-slate-100 dark:border-slate-800">
+                  <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">Notifications</span>
                   <Badge color="primary" size="sm">
                     {unreadCount + pendingApprovalsCount} new
                   </Badge>
@@ -283,17 +321,17 @@ export const Header: React.FC<HeaderProps> = ({
                         onNavigate('approvals');
                         setShowNotifications(false);
                       }}
-                      className="flex w-full items-center justify-between px-3.5 py-2 text-left hover:bg-surface-hover border-b border-border/60 transition-colors"
+                      className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 border-b border-slate-100 dark:border-slate-800 transition-colors"
                     >
                       <div>
                         <div className="text-xs font-semibold text-amber-700 dark:text-amber-400">
                           {pendingApprovalsCount} pending approvals
                         </div>
-                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                        <div className="text-[11px] text-slate-500 mt-0.5">
                           Attendance, lesson plans &amp; finance reviews
                         </div>
                       </div>
-                      <ArrowRight size={12} className="text-muted-foreground shrink-0" />
+                      <ArrowRight size={12} className="text-slate-400 shrink-0" />
                     </button>
                   )}
                   {notifications.slice(0, 5).map((n) => (
@@ -304,17 +342,17 @@ export const Header: React.FC<HeaderProps> = ({
                         if (n.actionTab) onNavigate(n.actionTab, n.targetId);
                         setShowNotifications(false);
                       }}
-                      className="flex w-full items-start gap-2.5 px-3.5 py-2 text-left hover:bg-surface-hover border-b border-border/40 transition-colors last:border-b-0"
+                      className="flex w-full items-start gap-2.5 px-4 py-2.5 text-left hover:bg-slate-50 dark:hover:bg-slate-800/60 border-b border-slate-100/60 dark:border-slate-800/60 transition-colors last:border-b-0"
                     >
-                      <Bell size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                      <Bell size={14} className="text-slate-400 mt-0.5 shrink-0" />
                       <div className="min-w-0 flex-1">
-                        <div className="text-xs font-medium text-foreground">{n.title}</div>
-                        <div className="text-[11px] text-muted-foreground truncate">{n.message}</div>
+                        <div className="text-xs font-medium text-slate-900 dark:text-slate-100">{n.title}</div>
+                        <div className="text-[11px] text-slate-500 truncate">{n.message}</div>
                       </div>
                     </button>
                   ))}
                   {notifications.length === 0 && pendingApprovalsCount === 0 && (
-                    <div className="px-4 py-8 text-center text-xs text-muted-foreground">
+                    <div className="px-4 py-8 text-center text-xs text-slate-400">
                       All caught up. No new notifications.
                     </div>
                   )}
@@ -325,78 +363,68 @@ export const Header: React.FC<HeaderProps> = ({
 
           <ModeToggle />
 
-          {/* User Profile */}
+          {/* User Profile (Google Account Style) */}
           <div className="relative" ref={profileRef}>
             <button
               type="button"
               onClick={() => setShowProfileMenu(!showProfileMenu)}
-              className={`flex items-center gap-2 h-8 pl-1.5 pr-2.5 rounded-md border text-xs transition-colors ${
+              className={`flex items-center gap-2 h-9 px-3.5 rounded-full border text-xs font-medium transition-all ${
                 showProfileMenu
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-card text-foreground hover:bg-surface-hover'
+                  ? 'border-blue-500 bg-blue-50/80 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                  : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100'
               }`}
             >
-              <span className="flex items-center justify-center h-6 w-6 rounded-full bg-primary text-primary-foreground font-bold text-[10px]">
-                {userName
-                  .split(' ')
-                  .map((p) => p[0])
-                  .slice(0, 2)
-                  .join('') || 'AD'}
+              <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                {userRole === 'Cluster Admin' ? 'Cluster Admin' : 'Super Admin'}
               </span>
-              <div className="hidden sm:flex flex-col text-left leading-tight">
-                <span className="text-xs font-semibold text-foreground truncate max-w-[120px]">
-                  {userRole === 'Cluster Admin' ? 'Cluster Admin' : 'Admin'}
-                </span>
-                <span className="text-[9px] font-bold text-primary tracking-wider uppercase">
-                  {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
-                </span>
-              </div>
               <CaretDown
                 size={11}
-                className={`text-muted-foreground transition-transform ${showProfileMenu ? 'rotate-180' : ''}`}
+                className={`text-slate-400 transition-transform ${showProfileMenu ? 'rotate-180' : ''}`}
               />
             </button>
 
             {showProfileMenu && (
               <div
-                className="absolute right-0 mt-2 w-56 rounded-md border border-border bg-card py-1.5 z-50 shadow-lg"
+                className="absolute right-0 mt-2 w-64 rounded-2xl border border-slate-200/90 bg-white dark:border-slate-800 dark:bg-slate-900 p-2 z-50 shadow-[0_12px_36px_rgba(0,0,0,0.12)]"
               >
-                <div className="px-3 py-2 border-b border-border">
-                  <p className="text-xs font-semibold text-foreground">{userName}</p>
-                  <p className="text-[11px] text-muted-foreground truncate">{userEmail}</p>
-                  <span className="inline-block mt-1 text-[10px] font-bold text-primary uppercase">
+                <div className="px-3.5 py-3 border-b border-slate-100 dark:border-slate-800">
+                  <p className="text-xs font-semibold text-slate-900 dark:text-slate-100">{userName}</p>
+                  <p className="text-[11px] text-slate-500 truncate">{userEmail}</p>
+                  <span className="inline-block mt-1 text-[10px] font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
                     {userRole === 'Cluster Admin' ? 'CLUSTER ADMIN' : 'SUPER ADMIN'}
                   </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onNavigate('settings');
-                    setShowProfileMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-foreground hover:bg-surface-hover transition-colors"
-                >
-                  <UserCircle size={14} className="text-muted-foreground" />
-                  Account Settings
-                </button>
+                <div className="pt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onNavigate('settings');
+                      setShowProfileMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 rounded-xl transition-colors"
+                  >
+                    <UserCircle size={15} className="text-slate-400" />
+                    Account Settings
+                  </button>
 
-                {onLogout && (
-                  <>
-                    <div className="my-1 h-px bg-border" />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onLogout();
-                        setShowProfileMenu(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-3 py-2 text-xs font-medium text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
-                    >
-                      <SignOut size={14} />
-                      Sign Out
-                    </button>
-                  </>
-                )}
+                  {onLogout && (
+                    <>
+                      <div className="my-1 h-px bg-slate-100 dark:bg-slate-800" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onLogout();
+                          setShowProfileMenu(false);
+                        }}
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl transition-colors"
+                      >
+                        <SignOut size={15} />
+                        Sign Out
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

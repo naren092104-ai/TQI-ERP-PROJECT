@@ -12,6 +12,13 @@ import {
 import { apiUrl } from '../utils/api';
 import { AcademicYear } from '../types';
 import { AcademicSessionIllustration, ACADEMIC_SESSION_NAMES } from './AcademicSessionIllustration';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface AcademicSetupViewProps {
   userRole?: 'Super Admin' | 'Cluster Admin';
@@ -791,12 +798,19 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
                   </label>
                   {copyMode === 'copy' && (
                     <>
-                      <label className="block space-y-1 text-xs font-semibold">Copy From
-                        <select value={copyFromYearId} onChange={(event) => setCopyFromYearId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
-                          <option value="">Select source year</option>
-                          {academicYears.filter((year) => year.id !== selectedAcademicYearId).map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
-                        </select>
-                      </label>
+                      <div className="space-y-1">
+                        <span className="block text-xs font-semibold">Copy From</span>
+                        <Select value={copyFromYearId} onValueChange={(val) => setCopyFromYearId(val)}>
+                          <SelectTrigger className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
+                            <SelectValue placeholder="Select source year" />
+                          </SelectTrigger>
+                          <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+                            {academicYears.filter((year) => year.id !== selectedAcademicYearId).map((year) => (
+                              <SelectItem key={year.id} value={year.id}>{year.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="rounded-xl border border-slate-200 p-3">
                         <h5 className="text-sm font-semibold">Select Data to Copy</h5>
                         <div className="mt-2 grid grid-cols-2 gap-2">
@@ -911,12 +925,19 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
               </div>
               <button type="button" onClick={() => setTransferTargetYear(null)} className="rounded-lg border border-border p-2 text-muted-foreground"><X className="h-4 w-4" /></button>
             </div>
-            <label className="mt-5 block space-y-1 text-sm font-semibold">Copy From
-              <select value={copyFromYearId} onChange={(event) => setCopyFromYearId(event.target.value)} className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
-                <option value="">Select source year</option>
-                {academicYears.filter((year) => year.id !== transferTargetYear.id && (!canManageAcademicYears ? getAcademicYearStart(year.name) < getAcademicYearStart(transferTargetYear.name) : true)).map((year) => <option key={year.id} value={year.id}>{year.name}</option>)}
-              </select>
-            </label>
+            <div className="mt-5 space-y-1">
+              <span className="block text-sm font-semibold">Copy From</span>
+              <Select value={copyFromYearId} onValueChange={(val) => setCopyFromYearId(val)}>
+                <SelectTrigger className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-normal">
+                  <SelectValue placeholder="Select source year" />
+                </SelectTrigger>
+                <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+                  {academicYears.filter((year) => year.id !== transferTargetYear.id && (!canManageAcademicYears ? getAcademicYearStart(year.name) < getAcademicYearStart(transferTargetYear.name) : true)).map((year) => (
+                    <SelectItem key={year.id} value={year.id}>{year.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
             <div className="mt-4 rounded-xl border border-slate-200 p-3">
               <h4 className="text-sm font-semibold">Select Data to Copy</h4>
               <div className="mt-2 grid grid-cols-2 gap-2">

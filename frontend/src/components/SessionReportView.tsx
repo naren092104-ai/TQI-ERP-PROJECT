@@ -3,6 +3,13 @@ import { Calendar, CheckCircle2, Clock, Download, Edit3 as Edit, Eye, FileText, 
 import type { AcademicYear, LessonPlan, Panchayat, SessionReport, SessionReportActivity, SessionReportPhoto, Session, UserRole, Volunteer } from '../types';
 import { apiUrl } from '../utils/api';
 import { exportSessionReportPdf } from '../utils/pdf/SessionReportPdf';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './ui/select';
 
 interface SessionReportContext {
   session: { id: string; name: string; dayNumber: number | null; date: string | null; status: string };
@@ -419,33 +426,114 @@ export const SessionReportView: React.FC<SessionReportViewProps> = ({
 
   return (
     <div className="space-y-6 pb-6">
-      <header className="flex flex-col justify-between gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center">
-        <div className="flex items-center gap-3">
-          <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-800"><FileText size={21} /></span>
-          <div><h1 className="text-xl font-bold text-slate-900">Session Reports</h1><p className="mt-1 text-sm text-slate-500">{isSuperAdmin ? 'Review submitted reports and respond to requests.' : 'Capture session outcomes, observations and evidence.'}</p></div>
+      {/* Google Console Breadcrumb & Page Header */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b border-slate-200/90 pb-4 dark:border-slate-800">
+        <div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
+            <span>TQI ERP</span>
+            <span>/</span>
+            <span>Curriculum</span>
+            <span>/</span>
+            <span className="text-slate-800 dark:text-slate-200 font-medium">Session Reports</span>
+          </div>
+          <h1 className="text-xl sm:text-2xl font-medium tracking-tight text-slate-900 dark:text-slate-100">Session Reports</h1>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {isSuperAdmin ? 'Review submitted reports, audit outcomes and track requests.' : 'Capture session outcomes, observations and field evidence.'}
+          </p>
         </div>
-      </header>
-
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        {[
-          ['Total Reports', metrics.total, 'bg-blue-50 text-blue-800'], ['Draft', metrics.draft, 'bg-amber-50 text-amber-800'],
-          ['Submitted', metrics.submitted, 'bg-sky-50 text-sky-800'], ['Approved', metrics.approved, 'bg-emerald-50 text-emerald-800'],
-          ['Corrections Required', metrics.corrections, 'bg-rose-50 text-rose-800'],
-        ].map(([label, count, color]) => <div key={String(label)} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm"><p className="text-xs font-medium text-slate-500">{label}</p><p className={`mt-2 inline-flex min-w-9 justify-center rounded-lg px-2 py-1 text-xl font-bold ${color}`}>{count}</p></div>)}
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <label className="relative"><Search className="absolute left-3 top-3 text-slate-400" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search reports" className={`${inputClass} pl-9`} /></label>
-          {isSuperAdmin && <select value={clusterFilter} onChange={(event) => setClusterFilter(event.target.value)} className={inputClass}><option value="ALL">All clusters</option>{clusters.map((cluster) => <option key={cluster.id} value={cluster.id}>{cluster.name}</option>)}</select>}
-          <select value={villageFilter} onChange={(event) => setVillageFilter(event.target.value)} className={inputClass}><option value="ALL">All villages</option>{villages.map((village) => <option key={village} value={village}>{village}</option>)}</select>
-          <select value={gradeFilter} onChange={(event) => setGradeFilter(event.target.value)} className={inputClass}><option value="ALL">All grades</option>{grades.map((grade) => <option key={grade} value={grade}>{grade}</option>)}</select>
-          <select value={dayFilter} onChange={(event) => setDayFilter(event.target.value)} className={inputClass}><option value="ALL">All days</option>{Array.from({ length: 8 }, (_, index) => <option key={index + 1} value={String(index + 1)}>Day {index + 1}</option>)}</select>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className={inputClass}>
-            <option value="ALL">All statuses</option>{['DRAFT', 'SUBMITTED', 'CORRECTIONS_REQUIRED', 'APPROVED', 'EDIT_REQUEST_PENDING', 'DELETE_REQUEST_PENDING'].map((status) => <option key={status} value={status}>{statusText[status]}</option>)}
-          </select>
+      {/* Google Console Metric Strip */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {[
+          ['Total Reports', metrics.total],
+          ['Draft', metrics.draft],
+          ['Submitted', metrics.submitted],
+          ['Approved', metrics.approved],
+          ['Corrections Required', metrics.corrections],
+        ].map(([label, count]) => (
+          <div key={String(label)} className="rounded-lg border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
+            <p className="text-[11px] font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400">{label}</p>
+            <p className="mt-1 text-2xl font-normal tabular-nums text-slate-900 dark:text-slate-100">{count}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Google Console Filter Strip */}
+      <div className="rounded-lg border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900 shadow-xs">
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-6">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search reports..."
+              className="h-9 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-xs text-slate-800 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100"
+            />
+          </div>
+          {isSuperAdmin && (
+            <Select value={clusterFilter} onValueChange={(val) => setClusterFilter(val)}>
+              <SelectTrigger className="h-9 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100">
+                <SelectValue placeholder="All clusters" />
+              </SelectTrigger>
+              <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+                <SelectItem value="ALL">All clusters</SelectItem>
+                {clusters.map((cluster) => (
+                  <SelectItem key={cluster.id} value={cluster.id}>{cluster.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <Select value={villageFilter} onValueChange={(val) => setVillageFilter(val)}>
+            <SelectTrigger className="h-9 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100">
+              <SelectValue placeholder="All villages" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="ALL">All villages</SelectItem>
+              {villages.map((village) => (
+                <SelectItem key={village} value={village}>{village}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={gradeFilter} onValueChange={(val) => setGradeFilter(val)}>
+            <SelectTrigger className="h-9 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100">
+              <SelectValue placeholder="All grades" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="ALL">All grades</SelectItem>
+              {grades.map((grade) => (
+                <SelectItem key={grade} value={grade}>{grade}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={dayFilter} onValueChange={(val) => setDayFilter(val)}>
+            <SelectTrigger className="h-9 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100">
+              <SelectValue placeholder="All days" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="ALL">All days</SelectItem>
+              {Array.from({ length: 8 }, (_, index) => (
+                <SelectItem key={index + 1} value={String(index + 1)}>Day {index + 1}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select value={statusFilter} onValueChange={(val) => setStatusFilter(val)}>
+            <SelectTrigger className="h-9 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 dark:border-slate-700 dark:bg-slate-850 dark:text-slate-100">
+              <SelectValue placeholder="All statuses" />
+            </SelectTrigger>
+            <SelectContent className="max-h-60 rounded-xl border border-slate-200 bg-white shadow-lg">
+              <SelectItem value="ALL">All statuses</SelectItem>
+              {['DRAFT', 'SUBMITTED', 'CORRECTIONS_REQUIRED', 'APPROVED', 'EDIT_REQUEST_PENDING', 'DELETE_REQUEST_PENDING'].map((status) => (
+                <SelectItem key={status} value={status}>{statusText[status]}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </section>
+      </div>
 
       {!isSuperAdmin && <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
         <div className="mb-4"><h2 className="text-sm font-bold text-slate-900">Create a report by day</h2><p className="mt-1 text-xs text-slate-500">Choose a scheduled day to start its Session Report.</p></div>

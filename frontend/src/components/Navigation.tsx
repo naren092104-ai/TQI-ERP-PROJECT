@@ -224,11 +224,11 @@ export const Navigation: React.FC<NavigationProps> = ({
             <button
               type="button"
               onClick={onOpenCommandPalette}
-              className="group flex w-full items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground shadow-xs hover:border-border-strong hover:bg-surface-hover hover:text-foreground transition-colors"
+              className="group flex w-full items-center gap-2 rounded-full border border-slate-200/90 bg-slate-50 dark:border-slate-800 dark:bg-slate-800/80 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-white hover:border-slate-300 dark:hover:bg-slate-800 transition-all"
             >
-              <MagnifyingGlass size={13} className="shrink-0" />
-              <span className="truncate flex-1 text-left">Quick search</span>
-              <span className="inline-flex items-center rounded border border-border px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+              <MagnifyingGlass size={14} className="shrink-0 text-slate-500" />
+              <span className="truncate flex-1 text-left font-medium">Quick search</span>
+              <span className="inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-[10px] font-mono text-slate-500">
                 ⌘K
               </span>
             </button>
@@ -244,7 +244,7 @@ export const Navigation: React.FC<NavigationProps> = ({
             return (
               <div key={group.label} className="space-y-0.5">
                 {(!isCollapsed || isMobileOpen) ? (
-                  <div className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 select-none">
+                  <div className="px-3.5 pb-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wider text-slate-500/90 dark:text-slate-400 select-none">
                     {group.label}
                   </div>
                 ) : (
@@ -264,32 +264,26 @@ export const Navigation: React.FC<NavigationProps> = ({
                         onCloseMobile?.();
                       }}
                       title={collapsed ? item.label : undefined}
-                      className={`relative flex w-full items-center gap-2.5 rounded-md text-xs font-medium transition-colors ${
-                        collapsed ? 'justify-center py-2' : 'px-2.5 py-1.5'
+                      className={`relative flex w-full items-center gap-3 rounded-full text-xs transition-colors ${
+                        collapsed ? 'justify-center py-2.5' : 'px-3.5 py-2'
                       } ${
                         isActive
-                          ? 'bg-primary/10 text-primary font-semibold border border-primary/20'
-                          : 'text-foreground/80 hover:bg-surface-hover hover:text-foreground border border-transparent'
+                          ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300 font-semibold'
+                          : 'text-slate-700 font-medium hover:bg-slate-100/80 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
                       }`}
                     >
-                      {isActive && !collapsed && (
-                        <span
-                          aria-hidden
-                          className="absolute left-0 top-1/2 -translate-y-1/2 h-3.5 w-1 rounded-r bg-primary"
-                        />
-                      )}
                       <span
                         className={`shrink-0 flex items-center justify-center ${
-                          isActive ? 'text-primary' : 'text-muted-foreground'
+                          isActive ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-slate-400'
                         }`}
                       >
-                        <IconComponent size={15} />
+                        <IconComponent size={17} />
                       </span>
                       {!collapsed && (
                         <span className="truncate flex-1 text-left">{item.label}</span>
                       )}
                       {item.badge !== undefined && item.badge > 0 && (
-                        <span className="inline-flex items-center justify-center min-w-4 h-4 px-1 rounded text-[10px] font-bold bg-amber-500 text-white">
+                        <span className="inline-flex items-center justify-center min-w-4 h-4 px-1.5 rounded-full text-[10px] font-bold bg-amber-500 text-white">
                           {item.badge}
                         </span>
                       )}

@@ -207,40 +207,34 @@ export default function App() {
       setAuthStatus('unauthenticated');
       return;
     }
-    setAuthValidatedToken(null);
-    setAuthStatus('checking');
+
+    // If this token was already explicitly validated (e.g. from handleLoginSuccess), remain authenticated
+    if (authValidatedToken === sessionToken && authStatus === 'authenticated') {
+      return;
+    }
 
     let active = true;
     let rejected = false;
     let requestInFlight = false;
     const controller = new AbortController();
     const clearInvalidSession = () => {
-      if (readStoredAuthToken() === sessionToken) {
-        try {
-          localStorage.removeItem('tqi_auth_session');
-        } catch {
-          // Keep the in-memory logout even if browser storage is unavailable.
-        }
+      try {
+        localStorage.removeItem('tqi_auth_session');
+      } catch {
+        // Keep the in-memory logout even if browser storage is unavailable.
       }
       if (!active) return;
-      setAuthValidatedToken((token) => token === sessionToken ? null : token);
+      setAuthValidatedToken(null);
       setAuthStatus('unauthenticated');
-      setCurrentUser((user) => user?.token === sessionToken ? null : user);
+      setCurrentUser(null);
     };
 
     const verifyPasswordState = async () => {
       if (!active || rejected || requestInFlight) return;
-
-      const storedToken = readStoredAuthToken();
-      if (!storedToken || storedToken !== sessionToken) {
-        rejected = true;
-        clearInvalidSession();
-        return;
-      }
       requestInFlight = true;
       try {
         const response = await fetch(apiUrl('/api/auth/me'), {
-          headers: { Authorization: `Bearer ${storedToken}` },
+          headers: { Authorization: `Bearer ${sessionToken}` },
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -260,7 +254,7 @@ export default function App() {
         if (response.ok && data?.user) {
           const verifiedUser = data.user;
           const verifiedRole = normalizeUserRole(verifiedUser.role);
-          setCurrentUser((user) => user?.token === storedToken
+          setCurrentUser((user) => user?.token === sessionToken
             ? {
                 ...user,
                 id: String(verifiedUser.id ?? user.id),
@@ -276,7 +270,7 @@ export default function App() {
             : user);
           setCurrentUserRole(verifiedRole);
           setCurrentUserClusterId(verifiedUser.clusterId || 'all');
-          setAuthValidatedToken(storedToken);
+          setAuthValidatedToken(sessionToken);
           setAuthStatus('authenticated');
         }
       } catch {
@@ -368,9 +362,6 @@ export default function App() {
       fetch(apiUrl(url), { headers, signal })
         .then((response) => {
           if (response.status === 401) {
-            localStorage.removeItem('tqi_auth_session');
-            setAuthStatus('unauthenticated');
-            setCurrentUser(null);
             return null;
           }
           if (response.status === 403) {
@@ -537,13 +528,8 @@ export default function App() {
           signal: controller.signal,
         });
         if (response.status === 401) {
-          authenticationRejected = true;
-          controller.abort();
-          localStorage.removeItem('tqi_auth_session');
+          // Do not wipe session on maintenance poll - auth status is managed exclusively by /api/auth/me
           setMaintenanceLoading(false);
-          setAuthValidatedToken(null);
-          setAuthStatus('unauthenticated');
-          setCurrentUser(null);
           return;
         }
         const data = await response.json().catch(() => null);
@@ -666,7 +652,8 @@ export default function App() {
     }
     setCurrentUser(normalizedSession);
     setCurrentUserRole(normalizedSession.role);
-    setAuthStatus('checking');
+    setAuthValidatedToken(normalizedSession.token || null);
+    setAuthStatus('authenticated');
     setCurrentUserClusterId(normalizedSession.clusterId);
     setCurrentTab('dashboard');
     if (session.role === 'Super Admin') {
