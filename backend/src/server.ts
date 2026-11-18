@@ -752,6 +752,17 @@ const ensureEssentialTablesAndColumns = async () => {
       await pool.query(sql).catch(() => undefined); // ignore if index already exists
     }
 
+    // ── Self-heal approvals columns (migration 229, 230) ──
+    const approvalCols = [
+      `ALTER TABLE approvals ADD COLUMN session_id VARCHAR(64) NULL`,
+      `ALTER TABLE approvals ADD COLUMN record_id VARCHAR(64) NULL`,
+    ];
+    for (const sql of approvalCols) {
+      await pool.query(sql).catch((err: any) => {
+        if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
+      });
+    }
+
     // ── Self-heal volunteer columns (migration 225, 226, 227) ──
     const volunteerCols = [
       `ALTER TABLE volunteers ADD COLUMN college_name VARCHAR(255) NULL`,
