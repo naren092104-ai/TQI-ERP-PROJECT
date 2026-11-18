@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Building2,
   CheckCircle2,
@@ -107,9 +107,11 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const [draft, setDraft] = useState<ClusterDraft>(emptyDraft);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [toast, setToast] = useState('');
   const [credentialDisplay, setCredentialDisplay] = useState<CredentialDisplay | null>(null);
   const [resettingCredentialsFor, setResettingCredentialsFor] = useState<string | null>(null);
+  const resendInFlight = useRef(new Set<string>());
 
   const loadClusters = useCallback(async () => {
     setIsLoading(true);
@@ -219,6 +221,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
 
   const saveCluster = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (saveInFlight.current) return;
     setFormError('');
     const mobile = draft.spocMobile.replace(/\D/g, '').slice(-10);
     const email = draft.adminEmail.trim().toLowerCase();
@@ -242,6 +245,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       setFormError('Enter a valid Gmail address ending in @gmail.com.');
       return;
     }
+    saveInFlight.current = true;
     setIsSaving(true);
     const payload: Partial<Cluster> = {
       ...draft,
@@ -281,13 +285,16 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     } catch (error: any) {
       setFormError(error?.message || 'Unable to save cluster.');
     } finally {
+      saveInFlight.current = false;
       setIsSaving(false);
     }
   };
 
   const resetClusterCredentials = async (cluster: Cluster) => {
     if (!onResendCredentials) return;
+    if (resendInFlight.current.has(cluster.id)) return;
     if (!window.confirm(`Reset the login password for ${cluster.name}? A new temporary password will be generated.`)) return;
+    resendInFlight.current.add(cluster.id);
     setResettingCredentialsFor(cluster.id);
     try {
       const result = await onResendCredentials(cluster.id);
@@ -301,6 +308,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     } catch (error: any) {
       setToast(error?.message || 'Unable to reset cluster credentials.');
     } finally {
+      resendInFlight.current.delete(cluster.id);
       setResettingCredentialsFor(null);
     }
   };

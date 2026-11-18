@@ -156,6 +156,41 @@ const academicSessionId = (clusterId: string, academicYearId: string, dayNumber:
 };
 
 const app = express();
+const trustedProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+if (!Number.isInteger(trustedProxyHops) || trustedProxyHops < 0 || trustedProxyHops > 5) {
+  throw new Error('TRUST_PROXY_HOPS must be an integer between 0 and 5.');
+}
+app.set('trust proxy', trustedProxyHops);
+
+const authRateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+const authRateLimit = (scope: string, limit: number, windowMs: number) => (
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) => {
+  const now = Date.now();
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const key = `${scope}:${clientIp}`;
+  let bucket = authRateLimitBuckets.get(key);
+
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + windowMs };
+  }
+  if (bucket.count >= limit) {
+    res.setHeader('Retry-After', String(Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))));
+    res.status(429).json({ success: false, error: 'Too many requests. Please wait and try again.' });
+    return;
+  }
+
+  bucket.count += 1;
+  authRateLimitBuckets.set(key, bucket);
+  if (authRateLimitBuckets.size > 10_000) {
+    for (const [bucketKey, value] of authRateLimitBuckets) {
+      if (value.resetAt <= now) authRateLimitBuckets.delete(bucketKey);
+    }
+  }
+  next();
+};
 
 let serverlessDatabaseInitialization: Promise<void> | null = null;
 const ensureServerlessDatabase = () => {
@@ -206,7 +241,12 @@ app.use(async (_req: Request, res: Response, next: NextFunction) => {
     next();
   } catch (error: any) {
     console.error('[DB] Unable to initialize the serverless database connection:', error?.message || error);
-    res.status(503).json({ success: false, error: 'Database service is temporarily unavailable.' });
+    res.status(503).json({
+      success: false,
+      status: 'degraded',
+      database: 'unavailable',
+      error: 'Database service is temporarily unavailable.',
+    });
   }
 });
 
@@ -469,6 +509,11 @@ const requireAuth = async (req: AuthenticatedRequest, res: Response, next: NextF
 };
 
 const runSqlFiles = async (): Promise<number> => {
+  if (process.env.NODE_ENV === 'production') {
+    const [rows] = await pool.query<any[]>('SELECT COUNT(*) AS count FROM schema_migrations');
+    return Number(rows[0]?.count || 0);
+  }
+
   const migrationDir = path.join(PROJECT_ROOT, 'database', 'migrations');
   if (!fs.existsSync(migrationDir)) return 0;
 
@@ -1151,7 +1196,12 @@ app.get('/api/health', async (_req: Request, res: Response) => {
   });
 });
 
-app.post('/api/auth/request-otp', async (req: Request, res: Response) => {
+app.post('/api/auth/request-otp', authRateLimit('request-otp', 5, 15 * 60 * 1000), async (req: Request, res: Response) => {
+  const genericResponse = {
+    success: true,
+    otpRequired: true,
+    message: 'If an active account exists for that email, a verification code will be sent.',
+  };
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
 
@@ -1160,33 +1210,71 @@ app.post('/api/auth/request-otp', async (req: Request, res: Response) => {
       return;
     }
 
-    const [rows] = await pool.query<any[]>('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
+    const [rows] = await pool.query<any[]>('SELECT id, name, status, role FROM users WHERE email = ? LIMIT 1', [email]);
     if (!rows.length) {
-      // Don't leak whether email exists or not
-      res.json({ success: true, otpRequired: true, message: 'If the email exists, a verification code was sent.' });
+      res.json(genericResponse);
       return;
     }
 
     const userRow = rows[0];
+    if (String(userRow.status || '').toLowerCase() !== 'active' && normalizeRole(userRow.role) !== 'Super Admin') {
+      res.json(genericResponse);
+      return;
+    }
 
+    let otpConnection: any;
+    let otpId: number;
     const otp = String(randomInt(0, 1000000)).padStart(6, '0');
     const otpHash = await bcrypt.hash(otp, 10);
-    const expiryMinutes = 10;
-    await pool.query('UPDATE auth_otps SET used_at = NOW() WHERE email = ? AND used_at IS NULL', [email]);
-    await pool.query(
-      'INSERT INTO auth_otps (email, otp_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 10 MINUTE))',
-      [email, otpHash],
-    );
-    await sendLoginOtp({ recipient: email, name: userRow.name || 'TQI user', otp, projectRoot: PROJECT_ROOT, expiryMinutes });
+    const expiryMinutes = 5;
+    try {
+      otpConnection = await pool.getConnection();
+      await otpConnection.beginTransaction();
+      await otpConnection.query('SELECT id FROM users WHERE id = ? LIMIT 1 FOR UPDATE', [userRow.id]);
+      const [recentRows] = await otpConnection.query(
+        `SELECT COUNT(*) AS request_count, MAX(created_at) AS latest_request
+         FROM auth_otps WHERE email = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)`,
+        [email],
+      );
+      const latestRequestAt = recentRows[0]?.latest_request ? new Date(recentRows[0].latest_request).getTime() : 0;
+      if (
+        Number(recentRows[0]?.request_count || 0) >= 5 ||
+        (latestRequestAt && Date.now() - latestRequestAt < 60_000)
+      ) {
+        await otpConnection.commit();
+        res.json(genericResponse);
+        return;
+      }
 
-    res.json({ success: true, otpRequired: true, message: 'A verification code was sent to your email.' });
-  } catch (error) {
-    console.error('OTP request failed:', error);
+      await otpConnection.query('UPDATE auth_otps SET used_at = NOW() WHERE email = ? AND used_at IS NULL', [email]);
+      const [insertResult] = await otpConnection.query(
+        'INSERT INTO auth_otps (email, otp_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE))',
+        [email, otpHash],
+      );
+      otpId = Number(insertResult.insertId);
+      await otpConnection.commit();
+    } catch (error) {
+      await otpConnection?.rollback().catch(() => undefined);
+      throw error;
+    } finally {
+      otpConnection?.release();
+    }
+
+    try {
+      await sendLoginOtp({ recipient: email, name: userRow.name || 'TQI user', otp, projectRoot: PROJECT_ROOT, expiryMinutes });
+    } catch {
+      await pool.query('UPDATE auth_otps SET used_at = NOW() WHERE id = ? AND used_at IS NULL', [otpId]).catch(() => undefined);
+      // Keep the response identical for known and unknown accounts.
+    }
+
+    res.json(genericResponse);
+  } catch (error: any) {
+    console.error('[AUTH OTP] Request failed (code:', error?.code || 'unknown', ').');
     res.status(500).json({ success: false, error: 'Unable to send verification code. Please try again.' });
   }
 });
 
-app.post('/api/auth/login', async (req: Request, res: Response) => {
+app.post('/api/auth/login', authRateLimit('login', 10, 15 * 60 * 1000), async (req: Request, res: Response) => {
   try {
     const email = String(req.body.email || '').trim().toLowerCase();
     const password = String(req.body.password || '');
@@ -1242,26 +1330,59 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       return;
     }
 
-    const [otpRows] = await pool.query<any[]>(
-      'SELECT * FROM auth_otps WHERE email = ? AND used_at IS NULL AND expires_at > NOW() ORDER BY created_at DESC LIMIT 1',
-      [email],
-    );
-    if (!otpRows.length || !(await bcrypt.compare(otp, otpRows[0].otp_hash))) {
-      if (otpRows.length) await pool.query('UPDATE auth_otps SET attempts = attempts + 1 WHERE id = ?', [otpRows[0].id]);
+    const otpConnection = await pool.getConnection();
+    let otpUser: any;
+    try {
+      await otpConnection.beginTransaction();
+      const [otpRows] = await otpConnection.query<any[]>(
+        'SELECT * FROM auth_otps WHERE email = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < 5 ORDER BY created_at DESC LIMIT 1 FOR UPDATE',
+        [email],
+      );
+      if (!otpRows.length || !(await bcrypt.compare(otp, otpRows[0].otp_hash))) {
+        if (otpRows.length) {
+          await otpConnection.query(
+            'UPDATE auth_otps SET used_at = CASE WHEN attempts >= 4 THEN NOW() ELSE used_at END, attempts = attempts + 1 WHERE id = ?',
+            [otpRows[0].id],
+          );
+          await otpConnection.commit();
+        } else {
+          await otpConnection.rollback();
+        }
+        res.status(401).json({ success: false, error: 'Invalid or expired verification code.' });
+        return;
+      }
+
+      const [consumeResult] = await otpConnection.query<any>(
+        'UPDATE auth_otps SET used_at = NOW() WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < 5',
+        [otpRows[0].id],
+      );
+      if (consumeResult.affectedRows !== 1) {
+        await otpConnection.rollback();
+        res.status(401).json({ success: false, error: 'Invalid or expired verification code.' });
+        return;
+      }
+      await otpConnection.commit();
+      otpUser = createAuthToken(user);
+    } catch (error) {
+      await otpConnection.rollback().catch(() => undefined);
+      throw error;
+    } finally {
+      otpConnection.release();
+    }
+
+    if (!otpUser) {
       res.status(401).json({ success: false, error: 'Invalid or expired verification code.' });
       return;
     }
-
-    await pool.query('UPDATE auth_otps SET used_at = NOW() WHERE id = ?', [otpRows[0].id]);
-    const { token, user: otpUser } = createAuthToken(rows[0]);
-    res.json({ success: true, token, user: otpUser, authenticationMethod: 'otp', mustChangePassword: otpUser.mustChangePassword });
+    const { token, user: serializedOtpUser } = otpUser;
+    res.json({ success: true, token, user: serializedOtpUser, authenticationMethod: 'otp', mustChangePassword: serializedOtpUser.mustChangePassword });
   } catch (error) {
     console.error('Login failed:', error);
     res.status(500).json({ success: false, error: 'Unable to sign in. Please try again.' });
   }
 });
 
-app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
+app.post('/api/auth/forgot-password', authRateLimit('forgot-password', 3, 15 * 60 * 1000), async (req: Request, res: Response) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   if (!email) {
     res.status(400).json({ success: false, error: 'Email is required.' });
@@ -1270,7 +1391,7 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
 
   const genericResponse = {
     success: true,
-    message: 'If an account exists for that email, a password reset link will be sent.',
+    message: 'If an account exists for that email, a five-minute password reset code will be sent.',
   };
 
   try {
@@ -1281,42 +1402,73 @@ app.post('/api/auth/forgot-password', async (req: Request, res: Response) => {
     }
 
     const user = users[0];
-    const token = randomBytes(32).toString('hex');
-    const tokenHash = createHash('sha256').update(token).digest('hex');
-    await pool.query('DELETE FROM password_reset_tokens WHERE user_id = ?', [user.id]);
-    await pool.query(
-      'INSERT INTO password_reset_tokens (token_hash, user_id, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 1 HOUR))',
-      [tokenHash, user.id],
-    );
+    const otp = String(randomInt(0, 1000000)).padStart(6, '0');
+    const otpHash = await bcrypt.hash(otp, 10);
+    let connection: any;
+    let otpHashId = '';
+    try {
+      connection = await pool.getConnection();
+      await connection.beginTransaction();
+      await connection.query('SELECT id FROM users WHERE id = ? LIMIT 1 FOR UPDATE', [user.id]);
+      const [recentRows] = await connection.query(
+        `SELECT COUNT(*) AS request_count, MAX(created_at) AS latest_request
+         FROM password_reset_tokens WHERE user_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 15 MINUTE)`,
+        [user.id],
+      );
+      const latestRequestAt = recentRows[0]?.latest_request ? new Date(recentRows[0].latest_request).getTime() : 0;
+      if (
+        Number(recentRows[0]?.request_count || 0) >= 3 ||
+        (latestRequestAt && Date.now() - latestRequestAt < 60_000)
+      ) {
+        await connection.commit();
+        res.json(genericResponse);
+        return;
+      }
 
-    const resetUrl = new URL(process.env.FRONTEND_URL || process.env.APP_URL || 'http://localhost:5173');
-    resetUrl.searchParams.set('token', token);
+      await connection.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL', [user.id]);
+      await connection.query(
+        'INSERT INTO password_reset_tokens (token_hash, user_id, expires_at, attempts) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 5 MINUTE), 0)',
+        [otpHash, user.id],
+      );
+      otpHashId = otpHash;
+      await connection.commit();
+    } catch (error) {
+      await connection?.rollback().catch(() => undefined);
+      throw error;
+    } finally {
+      connection?.release();
+    }
+
     const emailSent = await sendWorkflowEmail({
       recipient: user.email,
       recipientName: user.name || 'TQI user',
       projectRoot: PROJECT_ROOT,
       title: 'Reset your TQI password',
-      summary: 'A password reset was requested for your TQI account. This link expires in one hour.',
-      details: [{ label: 'Expires', value: '1 hour' }],
-      actionLabel: 'Reset Password',
-      actionUrl: resetUrl.toString(),
+      summary: 'A password reset was requested for your TQI account. This one-time code expires in five minutes.',
+      details: [
+        { label: 'Verification Code', value: otp },
+        { label: 'Expires In', value: '5 minutes' },
+      ],
     });
 
-    if (!emailSent) {
-      await pool.query('DELETE FROM password_reset_tokens WHERE token_hash = ?', [tokenHash]);
-      console.warn(`[AUTH] Password reset email could not be delivered for user ${user.id}.`);
+    if (!emailSent && otpHashId) {
+      await pool.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE token_hash = ? AND used_at IS NULL', [otpHashId]).catch(() => undefined);
+      console.error('[AUTH RESET] Password reset email delivery failed.');
     }
     res.json(genericResponse);
-  } catch (error) {
-    console.error('Password reset request failed:', error);
+  } catch (error: any) {
+    console.error('[AUTH RESET] OTP request failed (code:', error?.code || 'unknown', ').');
     res.status(503).json({ success: false, error: 'Unable to process the password reset request. Please try again.' });
   }
 });
 
-app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
+app.post('/api/auth/reset-password', authRateLimit('reset-password', 10, 15 * 60 * 1000), async (req: Request, res: Response) => {
   const token = String(req.body.token || '').trim();
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const otp = String(req.body.otp || '').trim();
   const newPassword = String(req.body.newPassword || '');
-  if (!token) {
+  const isOtpReset = Boolean(email || otp);
+  if ((!isOtpReset && !token) || (isOtpReset && (!email || !/^\d{6}$/.test(otp)))) {
     res.status(400).json({ success: false, error: 'Password reset link is invalid or expired.' });
     return;
   }
@@ -1329,22 +1481,53 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
-    const tokenHash = createHash('sha256').update(token).digest('hex');
-    const [tokens] = await connection.query(
-      `SELECT tokens.user_id, users.name, users.role, users.cluster_id
-       FROM password_reset_tokens tokens
-       INNER JOIN users ON users.id = tokens.user_id
-       WHERE tokens.token_hash = ? AND tokens.used_at IS NULL AND tokens.expires_at > NOW()
-       LIMIT 1 FOR UPDATE`,
-      [tokenHash],
-    ) as [any[], any];
-    if (!tokens.length) {
-      await connection.rollback();
-      res.status(400).json({ success: false, error: 'Password reset link is invalid or expired.' });
-      return;
+    let user: any;
+    if (isOtpReset) {
+      const [userRows] = await connection.query(
+        'SELECT id, name, email, role, cluster_id FROM users WHERE email = ? LIMIT 1 FOR UPDATE',
+        [email],
+      ) as [any[], any];
+      const resetUser = userRows[0];
+      const [resetRows] = resetUser
+        ? await connection.query(
+          `SELECT token_hash, attempts FROM password_reset_tokens
+           WHERE user_id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < 5
+           ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+          [resetUser.id],
+        ) as [any[], any]
+        : [[] as any[], null];
+      const resetRow = resetRows[0];
+      const otpMatches = resetRow ? await bcrypt.compare(otp, String(resetRow.token_hash)) : false;
+      if (!resetUser || !resetRow || !otpMatches) {
+        if (resetRow) {
+          await connection.query(
+            'UPDATE password_reset_tokens SET used_at = CASE WHEN attempts >= 4 THEN NOW() ELSE used_at END, attempts = attempts + 1 WHERE token_hash = ? AND used_at IS NULL',
+            [resetRow.token_hash],
+          );
+        }
+        await connection.commit();
+        res.status(400).json({ success: false, error: 'Invalid or expired verification code.' });
+        return;
+      }
+      user = resetUser;
+    } else {
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const [tokens] = await connection.query(
+        `SELECT tokens.user_id, users.name, users.email, users.role, users.cluster_id
+         FROM password_reset_tokens tokens
+         INNER JOIN users ON users.id = tokens.user_id
+         WHERE tokens.token_hash = ? AND tokens.used_at IS NULL AND tokens.expires_at > NOW()
+         LIMIT 1 FOR UPDATE`,
+        [tokenHash],
+      ) as [any[], any];
+      if (!tokens.length) {
+        await connection.rollback();
+        res.status(400).json({ success: false, error: 'Password reset link is invalid or expired.' });
+        return;
+      }
+      user = tokens[0];
     }
 
-    const user = tokens[0];
     const passwordHash = await bcrypt.hash(newPassword, 12);
     await connection.query(
       `UPDATE users
@@ -1352,28 +1535,37 @@ app.post('/api/auth/reset-password', async (req: Request, res: Response) => {
            password_reset_at = NOW(), password_reset_by = NULL,
            password_created_at = COALESCE(password_created_at, NOW())
        WHERE id = ?`,
-      [passwordHash, user.user_id],
+      [passwordHash, user.id || user.user_id],
     );
-    await connection.query(
-      'UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL',
-      [user.user_id],
-    );
+    await connection.query('UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL', [user.id || user.user_id]);
     await recordPasswordEvent({
-      userId: user.user_id,
+      userId: user.id || user.user_id,
       action: 'PASSWORD_CHANGED',
-      actorId: user.user_id,
+      actorId: user.id || user.user_id,
       actorName: user.name,
       actorRole: user.role,
       clusterId: user.cluster_id,
       ip: req.ip || req.socket.remoteAddress,
       userAgent: String(req.headers['user-agent'] || ''),
-      details: 'Password reset using a verified email link.',
+      details: isOtpReset ? 'Password reset using a verified email OTP.' : 'Password reset using a verified email link.',
     }, connection);
     await connection.commit();
-    res.json({ success: true, message: 'Password reset successfully. You can now sign in.' });
-  } catch (error) {
+    const confirmationEmailSent = await sendWorkflowEmail({
+      recipient: email || String(user.email || ''),
+      recipientName: user.name || 'TQI user',
+      projectRoot: PROJECT_ROOT,
+      title: 'Your TQI password was reset',
+      summary: 'The password for your TQI account was changed. If you did not make this change, contact your system administrator immediately.',
+      details: [{ label: 'Security', value: 'Your password reset code or link can no longer be used.' }],
+    });
+    res.json({
+      success: true,
+      message: 'Password reset successfully. You can now sign in.',
+      confirmationEmailSent,
+    });
+  } catch (error: any) {
     await connection?.rollback().catch(() => undefined);
-    console.error('Password reset failed:', error);
+    console.error('[AUTH RESET] Password update failed (code:', error?.code || 'unknown', ').');
     res.status(503).json({ success: false, error: 'Unable to reset password. Please try again.' });
   } finally {
     connection?.release();
@@ -2844,7 +3036,14 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     return;
   }
 
-  const year = await resolveAcademicYear(req);
+  let year: any;
+  try {
+    year = await resolveAcademicYear(req);
+  } catch (error: any) {
+    console.error('[CREATE_CLUSTER] Academic-year lookup failed (code:', error?.code || 'unknown', ').');
+    res.status(503).json({ success: false, error: 'Unable to validate the selected academic year. Please try again.' });
+    return;
+  }
   if (!year) {
     res.status(404).json({ success: false, error: 'No academic year is available.' });
     return;
@@ -2886,19 +3085,54 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     return;
   }
 
-  const [emailRows] = await pool.query<any[]>('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1', [adminEmail]);
-  if (emailRows.length) {
-    res.status(409).json({ success: false, error: 'This Gmail address is already registered to a TQI user. Enter a different Gmail address.' });
-    return;
-  }
-
   const normalizedPhone = `+91 ${spocMobile}`;
   const adminId = String(req.body.adminId || `usr-${randomUUID()}`);
-  const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+  let passwordHash = '';
   let connection: any;
   try {
     connection = await pool.getConnection();
     await connection.beginTransaction();
+    // Serialize cluster creation for this year so simultaneous requests cannot
+    // both pass the same logical-duplicate check.
+    const [yearRows] = await connection.query(
+      'SELECT id FROM academic_years WHERE id = ? LIMIT 1 FOR UPDATE',
+      [year.id],
+    );
+    if (!yearRows.length) {
+      await connection.rollback();
+      connection.release();
+      connection = null;
+      res.status(404).json({ success: false, error: 'The selected academic year no longer exists.' });
+      return;
+    }
+    const [duplicateClusters] = await connection.query(
+      `SELECT id FROM clusters
+       WHERE academic_year_id = ?
+         AND LOWER(TRIM(name)) = LOWER(?)
+         AND LOWER(TRIM(COALESCE(college_name, ''))) = LOWER(?)
+       LIMIT 1`,
+      [year.id, name, collegeName],
+    );
+    if (duplicateClusters.length) {
+      await connection.rollback();
+      connection.release();
+      connection = null;
+      res.status(409).json({ success: false, error: 'A cluster for this college and district already exists in the selected academic year.' });
+      return;
+    }
+    const [existingAdminRows] = await connection.query(
+      'SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1',
+      [adminEmail],
+    );
+    if (existingAdminRows.length) {
+      await connection.rollback();
+      connection.release();
+      connection = null;
+      res.status(409).json({ success: false, error: 'This Gmail address is already registered to a TQI user. Enter a different Gmail address.' });
+      return;
+    }
+    passwordHash = await bcrypt.hash(temporaryPassword, 12);
+
     // Chicken-and-egg between clusters and users: each FK-references the other.
     //   clusters.admin_id   -> users.id   (fk_clusters_admin)
     //   users.cluster_id    -> clusters.id (fk_users_cluster)
@@ -2906,7 +3140,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     await connection.query(
       `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id) VALUES (?, ?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active', ?)`,
       [clusterId, name, district, collegeDistrict, code, collegeName, spocName, normalizedPhone, year.id],
-    ).catch(async () => {
+    ).catch(async (error: any) => {
+      if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error;
       // Fallback in case college_district column doesn't exist yet
       return connection.query(
         `INSERT INTO clusters (id, name, district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id) VALUES (?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active', ?)`,
@@ -2938,11 +3173,11 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       ],
     ).catch(() => undefined);
 
+    await recordPasswordEvent({ userId: adminId, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') }, connection);
+    await recordPasswordEvent({ userId: adminId, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId }, connection);
     await connection.commit();
     connection.release();
     connection = null;
-    await recordPasswordEvent({ userId: adminId, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') });
-    await recordPasswordEvent({ userId: adminId, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId });
 
     // Deliver the temporary password only after the account transaction commits.
     const emailSent = await sendOnboardingCredentialsEmail({
@@ -2967,16 +3202,13 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       await connection.rollback().catch(() => undefined);
       connection.release();
     }
-    console.error('[CREATE_CLUSTER ERROR]', error?.code, error?.message);
+    console.error('[CREATE_CLUSTER] Request failed (code:', error?.code || 'unknown', ').');
     const code = error?.code;
     let status = 503;
     let message = 'Unable to create cluster.';
     if (code === 'ER_DUP_ENTRY') {
       status = 409;
-      const duplicateKey = String(error?.sqlMessage || error?.message || '').toLowerCase();
-      message = duplicateKey.includes('email')
-        ? 'This SPOC email already has an account. Use a different email address or edit the existing cluster.'
-        : 'A cluster with this name already exists for the selected academic year.';
+      message = 'A cluster or SPOC account with these details already exists. Review the selected year and account email.';
     } else if (code === 'ER_NO_REFERENCED_ROW' || code === 'ER_NO_REFERENCED_ROW_2') {
       status = 400;
       message = 'Referenced cluster or admin is invalid. Please refresh and try again.';
@@ -2991,12 +3223,24 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   }
 });
 
-app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+app.get('/api/clusters/:id/resend-credentials', (_req: Request, res: Response) => {
+  res.setHeader('Allow', 'POST');
+  res.status(405).json({ success: false, error: 'Use POST to request credential delivery.' });
+});
+
+app.post('/api/clusters/:id/resend-credentials', requireAuth, authRateLimit('resend-credentials', 5, 15 * 60 * 1000), async (req: AuthenticatedRequest, res: Response) => {
   if (req.user.role !== 'Super Admin') {
     res.status(403).json({ success: false, error: 'Only Super Admin can resend cluster credentials.' });
     return;
   }
-  const year = await resolveAcademicYear(req);
+  let year: any;
+  try {
+    year = await resolveAcademicYear(req);
+  } catch (error: any) {
+    console.error('[CREDENTIALS RESET] Academic-year lookup failed (code:', error?.code || 'unknown', ').');
+    res.status(503).json({ success: false, error: 'Unable to validate the selected academic year. Please try again.' });
+    return;
+  }
   if (!year) {
     res.status(404).json({ success: false, error: 'No academic year is available.' });
     return;
@@ -3026,32 +3270,50 @@ app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: Authen
       return;
     }
     admin = rows[0];
+    const [recentResendRows] = await connection.query(
+      `SELECT id FROM user_password_history
+       WHERE user_id = ? AND action = 'TEMP_PASSWORD_GENERATED'
+         AND created_at >= DATE_SUB(NOW(), INTERVAL 60 SECOND)
+       ORDER BY created_at DESC LIMIT 1`,
+      [admin.user_id],
+    );
+    if (recentResendRows.length) {
+      await connection.rollback();
+      res.setHeader('Retry-After', '60');
+      res.status(429).json({ success: false, error: 'Credentials were generated recently. Wait 60 seconds before requesting another email.' });
+      return;
+    }
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
     await connection.query(
       "UPDATE users SET password_hash = ?, must_change_password = TRUE, password_reset_at = NOW(), password_reset_by = ?, status = 'Active' WHERE id = ?",
       [passwordHash, req.user.id, admin.user_id],
     );
+    await recordPasswordEvent({ userId: admin.user_id, action: 'PASSWORD_RESET', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') }, connection);
+    await recordPasswordEvent({ userId: admin.user_id, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id }, connection);
+    await recordPasswordEvent({ userId: admin.user_id, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id }, connection);
     await connection.commit();
-    await recordPasswordEvent({ userId: admin.user_id, action: 'PASSWORD_RESET', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id, ip: req.ip || req.socket.remoteAddress, userAgent: String(req.headers['user-agent'] || '') });
-    await recordPasswordEvent({ userId: admin.user_id, action: 'TEMP_PASSWORD_GENERATED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id });
-    await recordPasswordEvent({ userId: admin.user_id, action: 'FORCE_PASSWORD_CHANGE_ENABLED', actorId: req.user.id, actorName: req.user.name, actorRole: req.user.role, clusterId: req.params.id });
-  } catch (error) {
+  } catch (error: any) {
     await connection?.rollback().catch(() => undefined);
-    console.error('Failed to reset cluster credentials:', error);
+    console.error('[CREDENTIALS RESET] Request failed (code:', error?.code || 'unknown', ').');
     res.status(503).json({ success: false, error: 'Unable to reset cluster credentials.' });
     return;
   } finally {
     connection?.release();
   }
 
-  const emailSent = await sendOnboardingCredentialsEmail({
-    recipient: admin.admin_email,
-    name: admin.admin_name,
-    temporaryPassword,
-    role: 'Cluster Admin',
-    clusterName: admin.cluster_name,
-    projectRoot: PROJECT_ROOT,
-  });
+  let emailSent = false;
+  try {
+    emailSent = await sendOnboardingCredentialsEmail({
+      recipient: admin.admin_email,
+      name: admin.admin_name,
+      temporaryPassword,
+      role: 'Cluster Admin',
+      clusterName: admin.cluster_name,
+      projectRoot: PROJECT_ROOT,
+    });
+  } catch {
+    console.error('[CREDENTIALS RESET] Email delivery failed after the credential update.');
+  }
   res.json({
     success: true,
     emailSent,
@@ -3062,6 +3324,7 @@ app.post('/api/clusters/:id/resend-credentials', requireAuth, async (req: Authen
 });
 
 app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  let district = '';
   try {
     const year = await resolveAcademicYear(req);
     if (!year) {
@@ -3085,7 +3348,7 @@ app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedReque
       return;
     }
 
-    const district = String(clusterRows[0].district || clusterRows[0].name || '').trim()
+    district = String(clusterRows[0].district || clusterRows[0].name || '').trim()
       .replace(/\s+(district|cluster)$/i, '');
     const requestedDistrictSlug = district.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -9408,11 +9671,12 @@ app.delete('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequ
 
 app.get('/api/health', async (_req, res) => {
   const dbStatus = await getDatabaseStatus();
-  res.json({
-    status: 'ok',
+  const isDatabaseConnected = dbStatus === 'connected';
+  res.status(isDatabaseConnected ? 200 : 503).json({
+    success: isDatabaseConnected,
+    status: isDatabaseConnected ? 'ok' : 'degraded',
     timestamp: new Date().toISOString(),
     database: dbStatus,
-    port: PORT,
   });
 });
 

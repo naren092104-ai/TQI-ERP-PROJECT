@@ -186,11 +186,20 @@ override and should remain relative for Vercel previews and custom domains.
 - Required private Vercel variables: `NODE_ENV=production`, `JWT_SECRET`,
 	`DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, and normally
 	`DB_CREATE_IF_MISSING=false`.
+- For TiDB Cloud, set `DB_PORT=4000`, `DB_NAME=tqi_erp`, `DB_SSL=true`, and
+	`DB_SSL_CA` to the CA PEM downloaded from TiDB Cloud. `DB_HOST`, `DB_USER`, and
+	`DB_PASSWORD` must come from the cluster's Public Endpoint connection details.
+	The backend enforces a remote host, verified TLS/CA, and disables database
+	creation in production. Optional `DB_CONNECTION_LIMIT` defaults to 5 on Vercel;
+	`DB_CONNECT_TIMEOUT_MS` defaults to 10000.
+- Import the supplied SQL backup into the already-provisioned TiDB database
+	using your approved database migration/import workflow before connecting.
+	Production startup does not create databases, run schema migrations, or
+	perform table-repair DDL; existing tables must already match the application.
 - Set `FRONTEND_URL` to the actual production Vercel/custom domain (and `APP_URL`
 	if used) so password-reset links return to the production app.
 - Preserve the currently deployed JWT secret if existing tokens must remain
 	valid; all API instances must use the same secret.
-- Configure `DB_SSL=true` and `DB_SSL_CA` when required by the MySQL provider.
 - SMTP variables are optional unless OTP and workflow email delivery are used.
 
 If the frontend is instead deployed separately on Cloudflare Pages, set its

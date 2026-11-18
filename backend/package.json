@@ -11,6 +11,7 @@
     "start": "node dist/server.cjs",
     "build": "esbuild src/server.ts --bundle --platform=node --format=cjs --sourcemap --outfile=dist/server.cjs --tsconfig=tsconfig.json",
     "lint": "tsc --noEmit -p tsconfig.json",
+    "mail:verify": "tsx src/scripts/verifySmtp.ts",
     "db:init": "tsx -e \"import('./src/db/connection.js').then(m => m.initializeDatabase()).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); })\"",
     "db:reset": "tsx src/scripts/resetDatabase.ts",
     "db:clean": "tsx src/scripts/cleanReset.ts"

@@ -14,7 +14,6 @@ import {
   Receipt,
   Warning,
   Clock,
-  DownloadSimple,
   RefreshCw,
   Info,
 } from "./ui/icons";

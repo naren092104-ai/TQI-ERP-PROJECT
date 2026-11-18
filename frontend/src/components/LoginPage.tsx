@@ -86,12 +86,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [showForgotModal, setShowForgotModal] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotStatus, setForgotStatus] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [forgotStep, setForgotStep] = useState<'email' | 'otp' | 'complete'>('email');
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [forgotNotice, setForgotNotice] = useState('');
   const [forgotError, setForgotError] = useState<string | null>(null);
   const [resetToken] = useState(() => new URLSearchParams(window.location.search).get('token') || '');
 
   const openForgot = () => {
     setForgotEmail(identifier);
     setForgotStatus('idle');
+    setForgotStep('email');
+    setForgotOtp('');
+    setForgotNewPassword('');
+    setForgotConfirmPassword('');
+    setForgotNotice('');
     setForgotError(null);
     setShowForgotModal(true);
   };
@@ -100,13 +110,60 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     if (forgotStatus === 'sending') return;
     setShowForgotModal(false);
     setForgotStatus('idle');
+    setForgotStep('email');
+    setForgotOtp('');
+    setForgotNewPassword('');
+    setForgotConfirmPassword('');
+    setForgotNotice('');
     setForgotError(null);
   };
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const email = (forgotEmail || identifier).trim();
+    const email = forgotEmail.trim().toLowerCase();
     if (!email) { setForgotError('Please enter your work email.'); return; }
+    if (forgotStep === 'otp') {
+      if (!/^\d{6}$/.test(forgotOtp)) { setForgotError('Enter the 6-digit code from your email.'); return; }
+      if (!passwordStrong(forgotNewPassword)) { setForgotError('Use 8+ characters with uppercase, lowercase, a number, and a special character.'); return; }
+      if (forgotNewPassword !== forgotConfirmPassword) { setForgotError('Passwords do not match.'); return; }
+    }
+    setForgotStatus('sending');
+    setForgotError(null);
+    setForgotNotice('');
+    try {
+      const requestingCode = forgotStep === 'email';
+      const response = await fetch(apiUrl(requestingCode ? '/api/auth/forgot-password' : '/api/auth/reset-password'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestingCode
+          ? { email }
+          : { email, otp: forgotOtp, newPassword: forgotNewPassword }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) {
+        setForgotError(data?.error || (requestingCode ? 'Unable to send a verification code. Please try again.' : 'Unable to reset your password. Please try again.'));
+        setForgotStatus('error');
+        return;
+      }
+      if (requestingCode) {
+        setForgotStep('otp');
+        setForgotNotice('If your account is registered, a 6-digit code was sent. It expires in 5 minutes.');
+        setForgotStatus('idle');
+      } else {
+        setForgotStep('complete');
+        setForgotNotice(data.confirmationEmailSent === false
+          ? 'Your password was reset. The confirmation email could not be sent; contact your administrator if you did not make this change.'
+          : 'Your password was reset. You can now sign in with your new password.');
+        setForgotStatus('sent');
+      }
+    } catch {
+      setForgotError('Unable to reach the server. Please check your connection and try again.');
+      setForgotStatus('error');
+    }
+  };
+
+  const handleForgotResend = async () => {
+    const email = forgotEmail.trim().toLowerCase();
     setForgotStatus('sending');
     setForgotError(null);
     try {
@@ -116,15 +173,35 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         body: JSON.stringify({ email }),
       });
       const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data?.success) throw new Error(data?.error || 'Unable to request another code.');
+      setForgotNotice('If your account is registered, a code will be sent when the resend cooldown allows it.');
+      setForgotStatus('idle');
+    } catch (error: any) {
+      setForgotError(error?.message || 'Unable to request another code.');
+      setForgotStatus('error');
+    }
+  };
+
+  const handleLoginOtpResend = async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(apiUrl('/api/auth/request-otp'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: identifier.trim().toLowerCase() }),
+      });
+      const data = await response.json().catch(() => ({}));
       if (!response.ok || !data?.success) {
-        setForgotError(data?.error || 'Unable to send reset link. Please try again.');
-        setForgotStatus('error');
+        setErrorMessage(data?.error || 'Unable to request a verification code. Please wait and try again.');
         return;
       }
-      setForgotStatus('sent');
+      setOtp('');
+      setOtpRequested(true);
     } catch {
-      setForgotError('Unable to reach the server. Please check your connection and try again.');
-      setForgotStatus('error');
+      setErrorMessage('Unable to reach the authentication server. Please check your connection and try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -231,7 +308,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
       const data = await response.json();
       if (!response.ok || !data?.success) { setErrorMessage(data?.error || 'Unable to reset password.'); setIsLoading(false); return; }
       window.history.replaceState({}, '', window.location.pathname);
-      setErrorMessage('Password reset successfully. You can now sign in.');
+      setErrorMessage(data.confirmationEmailSent === false
+        ? 'Password reset successfully, but the confirmation email could not be sent. You can now sign in.'
+        : 'Password reset successfully. You can now sign in.');
       setNewPassword(''); setConfirmPassword(''); setIsLoading(false);
     } catch { setErrorMessage('Unable to reach the server. Please try again.'); setIsLoading(false); }
   };
@@ -438,10 +517,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   {otpRequested && (
                     <button
                       type="button"
-                      onClick={() => { setOtpRequested(false); setOtp(''); setErrorMessage(null); }}
+                      onClick={() => void handleLoginOtpResend()}
+                      disabled={isLoading}
                       style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--cobalt)' }}
                     >
-                      Resend
+                      Resend code
                     </button>
                   )}
                 </div>
@@ -456,7 +536,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   style={{ marginTop: '0.4rem', textAlign: 'center', letterSpacing: '0.45em', fontWeight: 700, fontSize: '1rem', paddingLeft: '0.875rem', paddingRight: '0.875rem' }}
                 />
                 <span style={{ fontSize: '0.6875rem', color: 'var(--text-muted)', marginTop: '0.3rem', display: 'block' }}>
-                  {otpRequested ? 'Code sent. Check your inbox.' : 'Tap "Send code" to receive a 6-digit OTP.'}
+                  {otpRequested ? 'If your account is registered, check your inbox. The code expires in 5 minutes.' : 'Tap "Send code" to receive a 6-digit OTP.'}
                 </span>
               </div>
             )}
@@ -534,15 +614,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
               </button>
             </header>
 
-            {forgotStatus === 'sent' ? (
+            {forgotStep === 'complete' ? (
               <div style={{ paddingTop: '1rem', textAlign: 'center' }}>
                 <div style={{ width: 56, height: 56, borderRadius: 16, margin: '0 auto 0.75rem', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: 'var(--success-bg)', color: 'var(--success)' }}>
                   <CheckCircle2 size={28} weight="light" />
                 </div>
-                <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text)' }}>Reset link sent</p>
-                <p style={{ fontSize: '0.75rem', color: 'var(--login-muted)', marginTop: '0.25rem', lineHeight: 1.5 }}>
-                  If <strong style={{ color: 'var(--text)' }}>{(forgotEmail || identifier).trim()}</strong> is registered, you'll receive a one-time reset link valid for 15 minutes.
-                </p>
+                <p style={{ fontSize: '0.875rem', fontWeight: 700, color: 'var(--text)' }}>Password reset complete</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--login-muted)', marginTop: '0.25rem', lineHeight: 1.5 }}>{forgotNotice}</p>
                 <button
                   type="button"
                   onClick={closeForgot}
@@ -556,24 +634,81 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
             ) : (
               <form onSubmit={handleForgotSubmit} style={{ marginTop: '1rem' }}>
                 <p style={{ fontSize: '0.75rem', color: 'var(--login-muted)', lineHeight: 1.5, marginBottom: '0.75rem' }}>
-                  Enter your registered work email. We'll send a one-time reset link valid for 15 minutes.
+                  {forgotStep === 'email'
+                    ? 'Enter your registered work email. If an account exists, we will send a one-time code valid for 5 minutes.'
+                    : `Enter the code sent to ${forgotEmail}, then choose a new password.`}
                 </p>
-                <div style={{ marginBottom: '0.75rem' }}>
-                  <label className="tqi-login-label" htmlFor="forgot-email">Work email</label>
-                  <div className="tqi-login-input-wrap">
-                    <Mail size={16} weight="light" className="tqi-login-input-icon" />
-                    <input
-                      id="forgot-email"
-                      type="email"
-                      required
-                      autoFocus
-                      value={forgotEmail || identifier}
-                      onChange={(e) => { setForgotEmail(e.target.value); if (forgotError) setForgotError(null); }}
-                      className="tqi-login-input"
-                      placeholder="name@college.org"
-                    />
+                {forgotStep === 'email' ? (
+                  <div style={{ marginBottom: '0.75rem' }}>
+                    <label className="tqi-login-label" htmlFor="forgot-email">Work email</label>
+                    <div className="tqi-login-input-wrap">
+                      <Mail size={16} weight="light" className="tqi-login-input-icon" />
+                      <input
+                        id="forgot-email"
+                        type="email"
+                        required
+                        autoFocus
+                        value={forgotEmail}
+                        onChange={(e) => { setForgotEmail(e.target.value); if (forgotError) setForgotError(null); }}
+                        className="tqi-login-input"
+                        placeholder="name@college.org"
+                      />
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <label className="tqi-login-label" htmlFor="forgot-otp">6-digit verification code</label>
+                      <input
+                        id="forgot-otp"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="one-time-code"
+                        maxLength={6}
+                        required
+                        value={forgotOtp}
+                        onChange={(e) => { setForgotOtp(e.target.value.replace(/\D/g, '')); if (forgotError) setForgotError(null); }}
+                        className="tqi-login-input tqi-num"
+                        placeholder="000000"
+                        style={{ textAlign: 'center', letterSpacing: '0.45em', fontWeight: 700 }}
+                      />
+                    </div>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <label className="tqi-login-label" htmlFor="forgot-new-password">New password</label>
+                      <input
+                        id="forgot-new-password"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                        value={forgotNewPassword}
+                        onChange={(e) => { setForgotNewPassword(e.target.value); if (forgotError) setForgotError(null); }}
+                        className="tqi-login-input"
+                        placeholder="8+ characters with mixed characters"
+                      />
+                    </div>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <label className="tqi-login-label" htmlFor="forgot-confirm-password">Confirm new password</label>
+                      <input
+                        id="forgot-confirm-password"
+                        type="password"
+                        autoComplete="new-password"
+                        minLength={8}
+                        required
+                        value={forgotConfirmPassword}
+                        onChange={(e) => { setForgotConfirmPassword(e.target.value); if (forgotError) setForgotError(null); }}
+                        className="tqi-login-input"
+                        placeholder="Re-enter your new password"
+                      />
+                    </div>
+                  </>
+                )}
+
+                {forgotNotice && !forgotError && (
+                  <div className="tqi-alert" style={{ marginBottom: '0.75rem' }}>
+                    <span>{forgotNotice}</span>
+                  </div>
+                )}
 
                 {forgotError && (
                   <div className="tqi-alert tqi-alert-error" style={{ marginBottom: '0.75rem' }}>
@@ -592,6 +727,17 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                   >
                     Cancel
                   </button>
+                  {forgotStep === 'otp' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleForgotResend()}
+                      disabled={forgotStatus === 'sending'}
+                      className="tqi-btn-ghost tqi-touch"
+                      style={{ height: 38, padding: '0 0.875rem' }}
+                    >
+                      Resend code
+                    </button>
+                  )}
                   <button
                     type="submit"
                     disabled={forgotStatus === 'sending'}
@@ -605,7 +751,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                       </>
                     ) : (
                       <>
-                        <span>Send link</span>
+                        <span>{forgotStep === 'email' ? 'Send code' : 'Reset password'}</span>
                         <ArrowRight size={14} weight="light" />
                       </>
                     )}
