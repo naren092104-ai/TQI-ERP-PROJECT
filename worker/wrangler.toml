@@ -5,3 +5,4 @@ compatibility_date = "2026-11-26"
 [vars]
 SUPABASE_URL = "https://aqadjaawhkuedrcqhkmc.supabase.co"
 CORS_ORIGINS = "https://tqi-erp-project.pages.dev"
+BACKEND_API_URL = "https://tqi.autorevives.com/api"

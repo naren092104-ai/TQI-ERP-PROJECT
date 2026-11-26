@@ -4,6 +4,7 @@ interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   JWT_SECRET: string;
+  BACKEND_API_URL?: string;
   CORS_ORIGINS?: string;
 }
 
@@ -220,6 +221,32 @@ export default {
       });
       const data = await response.json();
       return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
+    }
+
+    if (
+      request.method === 'POST' &&
+      (url.pathname === '/api/auth/forgot-password' || url.pathname === '/api/auth/reset-password')
+    ) {
+      const backendApiUrl = (env.BACKEND_API_URL || 'https://tqi.autorevives.com/api').replace(/\/+$/, '');
+      const route = url.pathname.endsWith('/forgot-password') ? 'forgot-password' : 'reset-password';
+      try {
+        const upstream = await fetch(`${backendApiUrl}/auth/${route}`, {
+          method: 'POST',
+          headers: { 'Content-Type': request.headers.get('Content-Type') || 'application/json' },
+          body: await request.text(),
+        });
+        return new Response(await upstream.text(), {
+          status: upstream.status,
+          headers: {
+            ...headers,
+            'Content-Type': upstream.headers.get('Content-Type') || 'application/json',
+            'Cache-Control': 'no-store',
+          },
+        });
+      } catch (error) {
+        console.error(`Password ${route} upstream request failed:`, error);
+        return json({ success: false, error: 'Unable to reach the password reset service. Please try again.' }, 503, headers);
+      }
     }
 
     if (url.pathname === '/api/auth/request-otp' && request.method === 'POST') {
