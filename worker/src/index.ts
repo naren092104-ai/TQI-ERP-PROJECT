@@ -28,6 +28,63 @@ const supabaseHeaders = (env: Env) => ({
   'Content-Type': 'application/json',
 });
 
+const supabaseRows = async (env: Env, table: string, filters: Record<string, string>) => {
+  const url = new URL(`${env.SUPABASE_URL}/rest/v1/${table}`);
+  url.searchParams.set('select', '*');
+  Object.entries(filters).forEach(([key, value]) => url.searchParams.set(key, value));
+  const response = await fetch(url, { headers: supabaseHeaders(env) });
+  if (!response.ok) throw new Error(`Supabase read failed for ${table} (${response.status}).`);
+  const rows = await response.json();
+  if (!Array.isArray(rows)) throw new Error(`Supabase returned an invalid ${table} response.`);
+  return rows as any[];
+};
+
+const authenticatedUser = async (request: Request, env: Env) => {
+  const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+  try {
+    const payload = await verifyJwt(token, env.JWT_SECRET);
+    return payload?.id ? payload : null;
+  } catch {
+    return null;
+  }
+};
+
+const resolveWorkerAcademicYear = async (request: Request, env: Env) => {
+  const requested = String(new URL(request.url).searchParams.get('academicYearId') || request.headers.get('x-academic-year-id') || '').trim();
+  const years = await supabaseRows(env, 'academic_years', {
+    select: 'id,name,status,is_active,archived_at,start_date',
+    order: 'is_active.desc,start_date.desc',
+    limit: '1000',
+  });
+  return requested ? years.find((year) => year.id === requested || year.name === requested) || null : years[0] || null;
+};
+
+const resolveWorkerClusterId = async (env: Env, user: any, academicYearId: string, requestedClusterId?: string) => {
+  if (user.role !== 'Cluster Admin') return requestedClusterId && requestedClusterId !== 'all' ? requestedClusterId : null;
+  const clusters = await supabaseRows(env, 'clusters', {
+    select: 'id,source_cluster_id',
+    academic_year_id: `eq.${academicYearId}`,
+    or: `(id.eq.${user.cluster_id},source_cluster_id.eq.${user.cluster_id})`,
+    limit: '10',
+  });
+  return clusters.find((cluster) => cluster.id === user.cluster_id)?.id || clusters[0]?.id || user.cluster_id;
+};
+
+const isoDate = (value: unknown) => {
+  if (!value) return '';
+  const text = String(value);
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : '';
+};
+
+const photoType = (caption: unknown, explicitType: unknown) => {
+  const type = String(explicitType || '').toLowerCase();
+  if (['session', 'homework', 'feedback'].includes(type)) return type;
+  const text = String(caption || '').toLowerCase();
+  if (text.startsWith('[homework]') || text.includes('#homework')) return 'homework';
+  if (text.startsWith('[feedback]') || text.includes('#feedback')) return 'feedback';
+  return 'session';
+};
+
 const allowedTables = new Set([
   'academic_years','clusters','users','panchayats','villages','students','volunteers','modules','sessions',
   'attendance_sessions','student_attendance','volunteer_attendance','lesson_plans','session_photos','session_reports',
@@ -306,6 +363,225 @@ export default {
       const deleteResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/academic_years?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' } });
       if (!deleteResponse.ok) return json({ success: false, error: 'Unable to delete academic year.' }, 400, headers);
       return json({ success: true, data: { id, name: year.name } }, 200, headers);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/program-days') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      try {
+        const year = await resolveWorkerAcademicYear(request, env);
+        if (!year) return json({ success: false, error: 'No academic year is available.' }, 404, headers);
+        const rows = await supabaseRows(env, 'academic_setup', {
+          select: 'day_number,session_name',
+          academic_year_id: `eq.${year.id}`,
+          order: 'day_number.asc',
+          limit: '1000',
+        });
+        const programDays = rows
+          .filter((row) => String(row.session_name || '').trim())
+          .map((row) => ({ id: `day-${row.day_number}`, day_number: Number(row.day_number), day_name: String(row.session_name) }));
+        return json({ success: true, programDays }, 200, headers);
+      } catch (error) {
+        console.error('Failed to load programme days:', error);
+        return json({ success: false, error: 'Unable to load programme days.' }, 503, headers);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/session-photos') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      try {
+        const year = await resolveWorkerAcademicYear(request, env);
+        if (!year) return json({ success: false, error: 'No academic year is available.' }, 404, headers);
+        const requestedCluster = String(url.searchParams.get('cluster') || url.searchParams.get('clusterId') || 'all');
+        const clusterId = await resolveWorkerClusterId(env, user, year.id, requestedCluster.toLowerCase());
+        const filters: Record<string, string> = {
+          select: 'id,cluster_id,session_id,academic_year_id,day_number,file_path,file_url,original_filename,mime_type,file_size,uploaded_by,uploaded_at,caption,photo_type,panchayat_id,panchayat_name,village_id,village_name,visit_date',
+          academic_year_id: `eq.${year.id}`,
+          order: 'day_number.asc,uploaded_at.desc',
+          limit: '1000',
+        };
+        if (clusterId) filters.cluster_id = `eq.${clusterId}`;
+        const photoRows = await supabaseRows(env, 'session_photos', filters);
+        const clusterIds = [...new Set(photoRows.map((row) => String(row.cluster_id || '')).filter(Boolean))];
+        const userIds = [...new Set(photoRows.map((row) => String(row.uploaded_by || '')).filter(Boolean))];
+        const [clusterRows, userRows, deleteRows] = await Promise.all([
+          clusterIds.length ? supabaseRows(env, 'clusters', { select: 'id,name', id: `in.(${clusterIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+          userIds.length ? supabaseRows(env, 'users', { select: 'id,name', id: `in.(${userIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+          supabaseRows(env, 'session_photo_delete_requests', {
+            select: 'id,photo_id,status,reason',
+            academic_year_id: `eq.${year.id}`,
+            status: 'eq.PENDING',
+            limit: '1000',
+          }),
+        ]);
+        const clusterNames = new Map(clusterRows.map((row) => [String(row.id), String(row.name || row.id)]));
+        const userNames = new Map(userRows.map((row) => [String(row.id), String(row.name || '')]));
+        const pendingDeletes = new Map(deleteRows.map((row) => [String(row.photo_id), row]));
+        const photos = photoRows.map((row) => {
+          const caption = String(row.caption || row.original_filename || `Day ${row.day_number || 1} photo`);
+          const pending = pendingDeletes.get(String(row.id));
+          return {
+            id: row.id,
+            clusterId: row.cluster_id,
+            clusterName: clusterNames.get(String(row.cluster_id)) || row.cluster_id || 'Dharmapuri',
+            sessionId: row.session_id || row.id,
+            sessionTitle: row.original_filename || `Day ${row.day_number || 1} Photos`,
+            dayNumber: Number(row.day_number || 1),
+            date: isoDate(row.visit_date) || isoDate(row.uploaded_at),
+            panchayatId: row.panchayat_id || '',
+            panchayatName: row.panchayat_name || '',
+            villageId: row.village_id || '',
+            villageName: row.village_name || '',
+            filePath: row.file_path,
+            fileUrl: row.file_url || `/api/session-photos/file/${row.id}`,
+            originalFilename: row.original_filename || 'photo.jpg',
+            mimeType: row.mime_type || 'image/jpeg',
+            fileSize: Number(row.file_size || 0),
+            uploadedBy: userNames.get(String(row.uploaded_by)) || user.name || row.uploaded_by || 'Cluster Admin',
+            uploadedRole: 'Cluster Admin',
+            uploadedAt: row.uploaded_at,
+            status: 'active',
+            caption,
+            photoType: photoType(caption, row.photo_type),
+            deleteRequestStatus: pending?.status || null,
+            deleteRequestId: pending?.id || null,
+            deleteRequestReason: pending?.reason || null,
+          };
+        });
+        return json({ success: true, photos }, 200, { ...headers, 'Cache-Control': 'no-store' });
+      } catch (error) {
+        console.error('Failed to load session photos:', error);
+        return json({ success: false, error: 'Unable to load session photos. Please try again.' }, 503, headers);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/session-photos/day-statuses') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      try {
+        const year = await resolveWorkerAcademicYear(request, env);
+        if (!year) return json({ success: false, error: 'No academic year is available.' }, 404, headers);
+        const requestedCluster = String(url.searchParams.get('clusterId') || 'all');
+        const clusterId = await resolveWorkerClusterId(env, user, year.id, requestedCluster);
+        const photoFilters: Record<string, string> = {
+          select: 'day_number,cluster_id',
+          academic_year_id: `eq.${year.id}`,
+          limit: '1000',
+        };
+        const submissionFilters: Record<string, string> = {
+          select: 'cluster_id,day_number,status',
+          academic_year_id: `eq.${year.id}`,
+          limit: '1000',
+        };
+        if (clusterId) {
+          photoFilters.cluster_id = `eq.${clusterId}`;
+          submissionFilters.cluster_id = `eq.${clusterId}`;
+        }
+        const [setupRows, photoRows, submissionRows, clusterRows] = await Promise.all([
+          supabaseRows(env, 'academic_setup', { select: 'day_number,session_name', academic_year_id: `eq.${year.id}`, order: 'day_number.asc', limit: '1000' }),
+          supabaseRows(env, 'session_photos', photoFilters),
+          supabaseRows(env, 'session_photo_submissions', submissionFilters),
+          supabaseRows(env, 'clusters', { select: 'id,name', academic_year_id: `eq.${year.id}`, limit: '1000' }),
+        ]);
+        const configuredDays = setupRows.filter((row) => String(row.session_name || '').trim());
+        const counts: Record<number, number> = {};
+        const photoCountsByClusterDay = new Map<string, number>();
+        photoRows.forEach((row) => {
+          const day = Number(row.day_number);
+          counts[day] = (counts[day] || 0) + 1;
+          const key = `${row.cluster_id}:${day}`;
+          photoCountsByClusterDay.set(key, (photoCountsByClusterDay.get(key) || 0) + 1);
+        });
+        const statusByDay = new Map<number, string>();
+        submissionRows.forEach((row) => {
+          const day = Number(row.day_number);
+          if (!statusByDay.has(day)) statusByDay.set(day, String(row.status || 'DRAFT'));
+        });
+        const clustersById = new Map(clusterRows.map((row) => [String(row.id), String(row.name || row.id)]));
+        const summaries = new Map<string, any>();
+        submissionRows.forEach((row) => {
+          const cluster = String(row.cluster_id);
+          const dayNumber = Number(row.day_number);
+          const summary = summaries.get(cluster) || {
+            clusterId: cluster,
+            clusterName: clustersById.get(cluster) || cluster,
+            totalPhotos: 0,
+            submittedDaysCount: 0,
+            days: [],
+          };
+          const photoCount = photoCountsByClusterDay.get(`${cluster}:${dayNumber}`) || 0;
+          summary.totalPhotos += photoCount;
+          if (['Submitted', 'Approved'].includes(String(row.status))) summary.submittedDaysCount += 1;
+          summary.days.push({ dayNumber, status: String(row.status || 'DRAFT').toUpperCase(), photoCount });
+          summaries.set(cluster, summary);
+        });
+        return json({
+          success: true,
+          counts,
+          statuses: configuredDays.map((row) => ({ day_number: Number(row.day_number), status: statusByDay.get(Number(row.day_number)) || 'DRAFT' })),
+          clusterSummaries: [...summaries.values()],
+        }, 200, headers);
+      } catch (error) {
+        console.error('Failed to load session photo day statuses:', error);
+        return json({ success: false, error: 'Unable to load session photo day statuses.' }, 503, headers);
+      }
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/session-photos/delete-requests') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      try {
+        const year = await resolveWorkerAcademicYear(request, env);
+        if (!year) return json({ success: false, error: 'No academic year is available.' }, 404, headers);
+        const requestedCluster = String(url.searchParams.get('clusterId') || 'all');
+        const clusterId = await resolveWorkerClusterId(env, user, year.id, requestedCluster);
+        const requestFilters: Record<string, string> = {
+          select: 'id,photo_id,academic_year_id,cluster_id,requested_by,reason,status,reviewed_by,reviewed_at,created_at',
+          academic_year_id: `eq.${year.id}`,
+          order: 'created_at.desc',
+          limit: '1000',
+        };
+        if (clusterId) requestFilters.cluster_id = `eq.${clusterId}`;
+        const requestRows = await supabaseRows(env, 'session_photo_delete_requests', requestFilters);
+        const photoIds = [...new Set(requestRows.map((row) => String(row.photo_id || '')).filter(Boolean))];
+        const clusterIds = [...new Set(requestRows.map((row) => String(row.cluster_id || '')).filter(Boolean))];
+        const userIds = [...new Set(requestRows.flatMap((row) => [String(row.requested_by || ''), String(row.reviewed_by || '')]).filter(Boolean))];
+        const [photoRows, clusterRows, userRows] = await Promise.all([
+          photoIds.length ? supabaseRows(env, 'session_photos', { select: 'id,day_number,original_filename,file_url,caption', id: `in.(${photoIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+          clusterIds.length ? supabaseRows(env, 'clusters', { select: 'id,name', id: `in.(${clusterIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+          userIds.length ? supabaseRows(env, 'users', { select: 'id,name', id: `in.(${userIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+        ]);
+        const photosById = new Map(photoRows.map((row) => [String(row.id), row]));
+        const clustersById = new Map(clusterRows.map((row) => [String(row.id), String(row.name || row.id)]));
+        const usersById = new Map(userRows.map((row) => [String(row.id), String(row.name || '')]));
+        const requests = requestRows.filter((row) => photosById.has(String(row.photo_id))).map((row) => {
+          const photo = photosById.get(String(row.photo_id));
+          const dayNumber = Number(photo?.day_number || 1);
+          return {
+            id: row.id,
+            photoId: row.photo_id,
+            clusterId: row.cluster_id,
+            clusterName: clustersById.get(String(row.cluster_id)) || row.cluster_id,
+            academicYearId: row.academic_year_id,
+            dayNumber,
+            dayName: `Day ${dayNumber}`,
+            sessionName: photo?.caption || `Day ${dayNumber}`,
+            fileName: photo?.original_filename || 'photo.jpg',
+            fileUrl: photo?.file_url || `/api/session-photos/file/${row.photo_id}`,
+            requestedBy: usersById.get(String(row.requested_by)) || row.requested_by || '',
+            reason: row.reason,
+            requestedDate: row.created_at,
+            status: row.status,
+            reviewedBy: usersById.get(String(row.reviewed_by)) || '',
+            reviewedAt: row.reviewed_at,
+          };
+        });
+        return json({ success: true, requests }, 200, headers);
+      } catch (error) {
+        console.error('Failed to load photo deletion requests:', error);
+        return json({ success: false, error: 'Unable to load photo deletion requests.' }, 503, headers);
+      }
     }
 
     const match = url.pathname.match(/^\/api\/supabase\/([a-z_]+)(?:\/([^/]+))?$/);
