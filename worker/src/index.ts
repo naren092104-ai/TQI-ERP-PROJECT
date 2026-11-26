@@ -225,7 +225,8 @@ export default {
       let query = `${env.SUPABASE_URL}/rest/v1/${route.table}?select=*&limit=1000`;
       const academicYearId = url.searchParams.get('academicYearId');
       const clusterId = url.searchParams.get('clusterId');
-      if (academicYearId) query += `&academic_year_id=eq.${encodeURIComponent(academicYearId)}`;
+      const yearScopedTables = new Set(['academic_setup','panchayats','villages','students','volunteers','modules','sessions','attendance_sessions','lesson_plans','finance_entries','finance_reports','approvals','date_change_requests','session_reports','session_submissions','session_photos','schools']);
+      if (academicYearId && yearScopedTables.has(route.table)) query += `&academic_year_id=eq.${encodeURIComponent(academicYearId)}`;
       if (clusterId && clusterId !== 'all') query += `&cluster_id=eq.${encodeURIComponent(clusterId)}`;
       const response = await fetch(query, { headers: supabaseHeaders(env) });
       const data = await response.json();
@@ -480,6 +481,73 @@ export default {
       }
 
       return json({ success: true, emailSent, temporaryPassword, loginEmail: adminEmail, clusterName: name, cluster: Array.isArray(clusterData) ? clusterData[0] : clusterData }, 201, headers);
+    }
+
+    if (url.pathname === '/api/admin/backups' && request.method === 'GET') {
+      const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      const payload = await verifyJwt(token, env.JWT_SECRET);
+      if (!payload?.id) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (payload.role !== 'Super Admin') return json({ success: false, error: 'Super Admin access required.' }, 403, headers);
+      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/operational_backups?select=*&order=created_at.desc&limit=200`, { headers: supabaseHeaders(env) });
+      const data = await response.json();
+      return json({ success: response.ok, backups: response.ok ? data : [] }, response.ok ? 200 : 400, headers);
+    }
+
+    if (url.pathname === '/api/admin/backups' && request.method === 'POST') {
+      const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      const payload = await verifyJwt(token, env.JWT_SECRET);
+      if (!payload?.id) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (payload.role !== 'Super Admin') return json({ success: false, error: 'Super Admin access required.' }, 403, headers);
+      const id = `tqi-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID().slice(0, 8)}`;
+      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/operational_backups`, {
+        method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+        body: JSON.stringify({ id, kind: 'manual', created_by: payload.email, status: 'READY' }),
+      });
+      const data = await response.json();
+      if (!response.ok) return json({ success: false, error: 'Unable to create backup record.' }, 400, headers);
+      return json({ success: true, backup: Array.isArray(data) ? data[0] : data }, 201, headers);
+    }
+
+    if (url.pathname === '/api/admin/data-reset/history' && request.method === 'GET') {
+      const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      const payload = await verifyJwt(token, env.JWT_SECRET);
+      if (!payload?.id) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (payload.role !== 'Super Admin') return json({ success: false, error: 'Super Admin access required.' }, 403, headers);
+      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/audit_logs?action=eq.RESET_DATA&select=*&order=created_at.desc&limit=200`, { headers: supabaseHeaders(env) });
+      const data = await response.json();
+      if (!response.ok) return json({ success: false, error: 'Unable to load reset history.' }, 400, headers);
+      const history = (data as any[]).map((row) => {
+        let details: any = {};
+        try { details = JSON.parse(row.details || '{}'); } catch { details = {}; }
+        return { id: row.id, resetId: row.record_id, adminId: row.user_id, adminName: row.user_name || 'Super Admin', createdAt: row.created_at, ...details };
+      });
+      return json({ success: true, history }, 200, headers);
+    }
+
+    if (url.pathname === '/api/admin/supabase-backup' && request.method === 'POST') {
+      const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      const payload = await verifyJwt(token, env.JWT_SECRET);
+      if (!payload?.id) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (payload.role !== 'Super Admin') return json({ success: false, error: 'Super Admin access required.' }, 403, headers);
+
+      const id = `tqi-${new Date().toISOString().replace(/[:.]/g, '-')}-${crypto.randomUUID().slice(0, 8)}`;
+      const snapshotTables = ['academic_years','clusters','users','panchayats','villages','students','volunteers','modules','sessions','attendance_sessions','lesson_plans','session_photos','session_reports','finance_entries','finance_reports','approvals','notifications','audit_logs'];
+      const snapshot: Record<string, unknown[]> = {};
+      const counts: Record<string, number> = {};
+      for (const table of snapshotTables) {
+        const tableResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}?select=*`, { headers: supabaseHeaders(env) });
+        const rows = await tableResponse.json();
+        snapshot[table] = Array.isArray(rows) ? rows : [];
+        counts[table] = snapshot[table].length;
+      }
+      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/operational_backups`, {
+        method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+        body: JSON.stringify({ id, kind: 'manual', created_by: payload.email, counts, snapshot, status: 'READY' }),
+      });
+      const data = await response.json();
+      if (!response.ok) return json({ success: false, error: 'Unable to create snapshot backup record.' }, 400, headers);
+
+      return json({ success: true, snapshotId: id, snapshot: snapshotTables }, 201, headers);
     }
 
     return json({ success: false, error: 'Method not allowed.' }, 405, headers);
