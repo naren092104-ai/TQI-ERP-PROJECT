@@ -3068,8 +3068,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const code = String(req.body.code || `TQI-${district.slice(0, 3).toUpperCase()}`).trim();
   const temporaryPassword = generateTemporaryPassword();
 
-  if (!collegeName || !district || !collegeDistrict || !spocName || !spocMobile || !adminEmail) {
-    res.status(400).json({ success: false, error: 'Cluster name/district, college, college location, SPOC name, mobile, and Gmail are required.' });
+  if (!collegeName || !district || !spocName || !spocMobile || !adminEmail) {
+    res.status(400).json({ success: false, error: 'Cluster name, college, SPOC name, mobile, and Gmail are required.' });
     return;
   }
 
@@ -3140,7 +3140,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     // Insert cluster first with admin_id = NULL, then user, then link the two.
     await connection.query(
       `INSERT INTO clusters (id, name, district, college_district, state, code, college_name, spoc_name, spoc_mobile, admin_id, status, academic_year_id) VALUES (?, ?, ?, ?, 'Tamil Nadu', ?, ?, ?, ?, NULL, 'Active', ?)`,
-      [clusterId, name, district, collegeDistrict, code, collegeName, spocName, normalizedPhone, year.id],
+      [clusterId, name, district, collegeDistrict || null, code, collegeName, spocName, normalizedPhone, year.id],
     ).catch(async (error: any) => {
       if (error?.code !== 'ER_BAD_FIELD_ERROR') throw error;
       // Fallback in case college_district column doesn't exist yet
@@ -3195,7 +3195,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
       emailSent,
       loginEmail: adminEmail,
       temporaryPassword,
-      cluster: mapCluster({ id: clusterId, name, district, college_district: collegeDistrict, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: normalizedPhone, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: normalizedPhone, status: 'Active' }),
+      cluster: mapCluster({ id: clusterId, name, district, college_district: collegeDistrict || null, state: 'Tamil Nadu', code, college_name: collegeName, spoc_name: spocName, spoc_mobile: normalizedPhone, admin_id: adminId, admin_name: adminName, admin_email: adminEmail, admin_phone: normalizedPhone, status: 'Active' }),
       user: serializeUser({ id: adminId, name: adminName, email: adminEmail, role: 'Cluster Admin', cluster_id: clusterId, phone: normalizedPhone, status: 'Active', must_change_password: true }),
     });
   } catch (error: any) {
@@ -6812,8 +6812,8 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
   const collegeDistrict = String(req.body.collegeDistrict ?? req.body.college_district ?? '').trim();
   const spocName = String(req.body.spocName ?? req.body.spoc_name ?? '').trim();
   const spocMobile = String(req.body.spocMobile ?? req.body.spoc_mobile ?? '').trim();
-  if (!name || !collegeName || !collegeDistrict) {
-    res.status(400).json({ success: false, error: 'Cluster name/district, college, and college location are required.' });
+  if (!name || !collegeName) {
+    res.status(400).json({ success: false, error: 'Cluster name and college are required.' });
     return;
   }
   const adminEmail = String(req.body.adminEmail || '').trim().toLowerCase();
@@ -6856,10 +6856,13 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
       }
     }
     const normalizedPhone = `+91 ${spocMobile.replace(/\D/g, '').slice(-10)}`;
-    await connection.query(
-      'UPDATE clusters SET name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, college_district = ?, state = ? WHERE id = ? AND academic_year_id = ?',
-      [name, collegeName, adminName, normalizedPhone, name, collegeDistrict, 'Tamil Nadu', req.params.id, year.id],
-    );
+    const clusterUpdates = collegeDistrict
+      ? 'name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, college_district = ?, state = ?'
+      : 'name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, state = ?';
+    const clusterValues = collegeDistrict
+      ? [name, collegeName, adminName, normalizedPhone, name, collegeDistrict, 'Tamil Nadu', req.params.id, year.id]
+      : [name, collegeName, adminName, normalizedPhone, name, 'Tamil Nadu', req.params.id, year.id];
+    await connection.query(`UPDATE clusters SET ${clusterUpdates} WHERE id = ? AND academic_year_id = ?`, clusterValues);
     if (adminId) {
       await connection.query(
         'UPDATE users SET name = ?, email = ?, phone = ? WHERE id = ?',

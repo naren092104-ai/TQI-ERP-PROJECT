@@ -748,14 +748,11 @@ export default {
       const body = await request.json() as any;
       const name = String(body.name || '').trim();
       const collegeName = String(body.collegeName || '').trim();
-      const collegeId = String(body.collegeId || '').trim();
-      const collegeDistrict = String(body.collegeDistrict || '').trim();
-      const subDistrict = String(body.subDistrict || '').trim();
       const spocName = String(body.spocName || body.adminName || '').trim();
       const spocMobile = String(body.spocMobile || body.adminPhone || '').replace(/\D/g, '').slice(-10);
       const adminEmail = String(body.adminEmail || '').trim().toLowerCase();
-      if (!name || !collegeName || !collegeDistrict || !spocName || !/^\d{10}$/.test(spocMobile) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
-        return json({ success: false, error: 'Cluster name, college, district, SPOC name, valid 10-digit phone, and valid email are required.' }, 400, headers);
+      if (!name || !collegeName || !spocName || !/^\d{10}$/.test(spocMobile) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+        return json({ success: false, error: 'Cluster name, college, SPOC name, valid 10-digit phone, and valid email are required.' }, 400, headers);
       }
 
       const clusterId = `cluster-${crypto.randomUUID()}`;
@@ -765,7 +762,7 @@ export default {
 
       const clusterResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/clusters`, {
         method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-        body: JSON.stringify({ id: clusterId, name, district: collegeDistrict, college_district: collegeDistrict, subdistrict: subDistrict, state: 'Tamil Nadu', college_name: collegeName, college_id: collegeId || null, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
+        body: JSON.stringify({ id: clusterId, name, district: name, college_district: null, subdistrict: null, state: 'Tamil Nadu', college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
       });
       const clusterData = await clusterResponse.json();
       if (!clusterResponse.ok) return json({ success: false, error: 'Unable to create cluster in Supabase.' }, 400, headers);
@@ -786,7 +783,7 @@ export default {
         try {
           const emailResponse = await fetch(emailWebhook, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: adminEmail, subject: 'TQI ERP – Cluster Registration Successful', spocName, clusterName: name, collegeName, district: collegeDistrict, subDistrict }),
+            body: JSON.stringify({ to: adminEmail, subject: 'TQI ERP – Cluster Registration Successful', spocName, clusterName: name, collegeName, district: name }),
           });
           emailSent = emailResponse.ok;
         } catch {

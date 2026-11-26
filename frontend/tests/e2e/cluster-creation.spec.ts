@@ -40,10 +40,6 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, clusters: [] }) });
       return;
     }
-      if (pathname.endsWith('/colleges')) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ success: true, colleges: [] }) });
-        return;
-      }
     if (pathname.endsWith('/clusters') && route.request().method() === 'POST') {
       createCalls += 1;
       await pendingCreateResponse;
@@ -61,17 +57,15 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
   await expect(page.getByRole('heading', { name: 'Super Admin Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'Clusters', exact: true }).click();
   await page.getByRole('button', { name: /Create cluster/i }).click();
-  await page.getByRole('textbox', { name: 'Cluster Name / District *' }).fill('Test District');
-  await page.getByLabel('College name').fill('Test College');
-    await page.getByLabel('College name').press('Escape');
-  await page.locator('#college-location').click();
-  await page.getByPlaceholder('Search district or city...').fill('Chennai');
-  await page.getByRole('option', { name: 'Chennai' }).click();
+  await page.getByRole('textbox', { name: 'Cluster Name *' }).fill('Test Cluster');
+  await page.getByRole('textbox', { name: 'College / Institution *' }).fill('Test College');
+  await expect(page.getByText('District', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Sub-District / Taluk', { exact: true })).toHaveCount(0);
   await page.getByRole('textbox', { name: 'SPOC Name *' }).fill('Test Admin');
   await page.getByRole('textbox', { name: 'SPOC Phone *' }).fill('9876543210');
   await page.getByRole('textbox', { name: 'SPOC Email *' }).fill('admin.test@gmail.com');
 
-  const submit = page.getByRole('dialog').locator('form button[type="submit"]');
+  const submit = page.locator('form button[type="submit"]');
   const submitRequest = submit.click();
   await expect(submit).toBeDisabled({ timeout: 5000 });
   expect(createCalls).toBe(1);

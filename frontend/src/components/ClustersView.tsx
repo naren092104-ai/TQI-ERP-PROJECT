@@ -18,8 +18,6 @@ import {
   Trash2,
 } from './ui/icons';
 import { Cluster, TabType, Panchayat, Student, Volunteer } from '../types';
-import { DistrictCombobox } from './ui/DistrictCombobox';
-import { TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
 import { apiUrl } from '../utils/api';
 import {
   Select,
@@ -54,18 +52,14 @@ interface CredentialDisplay {
 
 interface ClusterDraft {
   name: string;
-  district: string;
   collegeName: string;
-  collegeId: string;
-  collegeDistrict: string;
-  subDistrict: string;
   spocName: string;
   spocMobile: string;
   adminEmail: string;
 }
 
 const emptyDraft: ClusterDraft = {
-  name: '', district: '', collegeName: '', collegeId: '', collegeDistrict: '', subDistrict: '',
+  name: '', collegeName: '',
   spocName: '', spocMobile: '', adminEmail: '',
 };
 
@@ -195,11 +189,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     setEditingCluster(cluster);
     setDraft({
       name: cluster.name || '',
-      district: cluster.name || cluster.district || '',
       collegeName: cluster.collegeName || '',
-      collegeId: (cluster as any).collegeId || '',
-      collegeDistrict: cluster.collegeDistrict || cluster.district || '',
-      subDistrict: (cluster as any).subDistrict || '',
       spocName: cluster.spocName || cluster.adminName || '',
       spocMobile: String(cluster.spocMobile || cluster.adminPhone || '').replace(/\D/g, '').slice(-10),
       adminEmail: cluster.adminEmail || '',
@@ -219,15 +209,11 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       return;
     }
     if (!draft.name.trim()) {
-      setFormError('Cluster name / district is required.');
+      setFormError('Cluster name is required.');
       return;
     }
     if (!draft.collegeName.trim()) {
       setFormError('College / Institution name is required.');
-      return;
-    }
-    if (!draft.collegeDistrict.trim()) {
-      setFormError('Select the college district.');
       return;
     }
     if (!/^\d{10}$/.test(mobile)) {
@@ -248,9 +234,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       spocName: draft.spocName.trim(),
       adminEmail: email,
       collegeName: draft.collegeName.trim(),
-      collegeId: draft.collegeId,
-      collegeDistrict: draft.collegeDistrict.trim(),
-      subDistrict: draft.subDistrict.trim(),
       district: draft.name.trim(),
       name: draft.name.trim(),
       academicYearId: selectedAcademicYearId,
@@ -609,9 +592,8 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1 pr-2 sm:px-1">
               {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
-                <label className={labelClass}>Cluster Name / District *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value, district: event.target.value })} placeholder="Enter district name" className={inputClass} /></label>
-                <label className={labelClass}>College / Institution *<input required value={draft.collegeName} onChange={(event) => setDraft({ ...draft, collegeName: event.target.value, collegeId: '' })} placeholder="Enter college or institution name" className={inputClass} /></label>
-                <DistrictCombobox id="college-district" label="District" placeholder="Select district" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value, subDistrict: '' })} options={TAMIL_NADU_OFFICIAL_DISTRICTS} />
+                <label className={labelClass}>Cluster Name *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Enter cluster name" className={inputClass} /></label>
+                <label className={labelClass}>College / Institution *<input required value={draft.collegeName} onChange={(event) => setDraft({ ...draft, collegeName: event.target.value })} placeholder="Type college or institution name" className={inputClass} /></label>
               </section>
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">SPOC details</h3>
                 <label className={labelClass}>SPOC Name *<input required value={draft.spocName} onChange={(event) => setDraft({ ...draft, spocName: event.target.value })} placeholder="Full name" className={inputClass} /></label>
