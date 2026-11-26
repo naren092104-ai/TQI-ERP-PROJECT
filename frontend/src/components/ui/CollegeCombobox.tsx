@@ -127,8 +127,8 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
       <div className={`flex w-full items-center gap-2 rounded-2xl border bg-white px-3.5 py-3 shadow-sm transition focus-within:border-[#0B3D91] focus-within:ring-4 focus-within:ring-blue-100 ${isOpen ? 'border-[#0B3D91]' : 'border-slate-200'}`}>
         <Search className="h-4 w-4 shrink-0 text-slate-400" />
         <input
-          value={isOpen ? query : value}
-          onFocus={() => { setQuery(''); setIsOpen(true); }}
+          value={isOpen ? query || value : value}
+          onFocus={() => { setQuery(value); setIsOpen(true); }}
           onChange={(event) => {
             const next = event.target.value;
             setQuery(next);
@@ -143,9 +143,10 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
             } else if (event.key === 'ArrowUp') {
               event.preventDefault();
               setHighlightedIndex((index) => Math.max(index - 1, 0));
-            } else if (event.key === 'Enter' && highlightedIndex >= 0 && options[highlightedIndex]) {
+            } else if (event.key === 'Enter' && query.trim()) {
               event.preventDefault();
-              choose(options[highlightedIndex]);
+              onChange(null, query.trim());
+              setIsOpen(false);
             } else if (event.key === 'Escape') {
               setIsOpen(false);
             }
@@ -160,7 +161,7 @@ export const CollegeCombobox: React.FC<CollegeComboboxProps> = ({
         <ChevronDown className={`h-4 w-4 text-slate-400 transition ${isOpen ? 'rotate-180' : ''}`} />
       </div>
       {isOpen && <div className="absolute z-[1000000] mt-1 max-h-72 w-full overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl">
-        {query.trim().length < 2 ? <p className="px-3 py-3 text-xs text-slate-500">Type at least 2 letters to search the Tamil Nadu college directory.</p>
+        {query.trim().length < 2 ? <p className="px-3 py-3 text-xs text-slate-500">Type the college name manually, or continue typing for directory suggestions.</p>
               : isLoadingDirectory ? <p className="px-3 py-3 text-xs text-slate-500">Loading colleges from the TQI backend…</p>
               : directoryError ? <p className="px-3 py-3 text-xs text-rose-700">{directoryError} You can still enter the college name manually.</p>
               : options.length ? <><p className="sticky top-0 z-10 border-b border-slate-100 bg-white px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{options.length.toLocaleString()} matching colleges · sorted A–Z · all Tamil Nadu districts</p>{options.map((college, index) => <button key={college.id} type="button" onMouseEnter={() => setHighlightedIndex(index)} onClick={() => choose(college)} className={`flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left ${index === highlightedIndex ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
