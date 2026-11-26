@@ -19,7 +19,6 @@ import {
 } from './ui/icons';
 import { Cluster, TabType, Panchayat, Student, Volunteer } from '../types';
 import { DistrictCombobox } from './ui/DistrictCombobox';
-import { CollegeCombobox } from './ui/CollegeCombobox';
 import { TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
 import { apiUrl } from '../utils/api';
 import {
@@ -30,7 +29,6 @@ import {
   SelectValue,
 } from './ui/select';
 import { Modal } from './ui/modal';
-import tamilNaduColleges from '../data/tamilNaduColleges.json';
 
 interface ClustersViewProps {
   clusters: Cluster[];
@@ -153,18 +151,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const visibleBase = activeClusters;
   const districtOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.district).filter(Boolean))].sort(), [activeClusters]);
   const collegeOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.collegeName).filter((college): college is string => Boolean(college)) )].sort(), [activeClusters]);
-  const subDistrictOptions = useMemo(() => {
-    const district = draft.collegeDistrict.trim().toLowerCase();
-    if (!district) return [] as string[];
-    const values = new Set<string>();
-    const colleges = tamilNaduColleges as Array<{ name?: string; district?: string }>;
-    colleges.forEach((college) => {
-      if (String(college.district || '').trim().toLowerCase() !== district) return;
-      const match = String(college.name || '').match(/\b([A-Za-z][A-Za-z .'-]*)\s+Taluk\b/i);
-      if (match?.[1]) values.add(match[1].replace(/\s+/g, ' ').trim());
-    });
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [draft.collegeDistrict]);
 
   const stats = useMemo(() => ({
     clusters: activeClusters.length,
@@ -220,27 +206,6 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     });
     setFormError('');
     setDrawerMode('edit');
-  };
-
-  const handleCollegeSelection = (college: { id: string; name: string; district: string; university?: string } | null, typedName?: string) => {
-    if (!college) {
-      setDraft((current) => ({
-        ...current,
-        collegeName: typedName ?? current.collegeName,
-        collegeId: '',
-      }));
-      return;
-    }
-    const collegeDistrict = TAMIL_NADU_OFFICIAL_DISTRICTS.find(
-      (district) => district.toLowerCase() === college.district.toLowerCase(),
-    ) || college.district;
-    setDraft((current) => ({
-      ...current,
-      collegeName: college.name,
-      collegeId: college.id,
-      collegeDistrict,
-      subDistrict: '',
-    }));
   };
 
   const saveCluster = async (event: React.FormEvent) => {
@@ -645,9 +610,8 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
               {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
                 <label className={labelClass}>Cluster Name / District *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value, district: event.target.value })} placeholder="Enter district name" className={inputClass} /></label>
-                <div><span className={labelClass}>College *</span><CollegeCombobox value={draft.collegeName} authToken={authToken} onChange={handleCollegeSelection} required /></div>
+                <label className={labelClass}>College / Institution *<input required value={draft.collegeName} onChange={(event) => setDraft({ ...draft, collegeName: event.target.value, collegeId: '' })} placeholder="Enter college or institution name" className={inputClass} /></label>
                 <DistrictCombobox id="college-district" label="District" placeholder="Select district" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value, subDistrict: '' })} options={TAMIL_NADU_OFFICIAL_DISTRICTS} />
-                <DistrictCombobox id="college-subdistrict" label="Sub-District / Taluk" placeholder="Select sub-district" required={false} value={draft.subDistrict} disabled={!draft.collegeDistrict || subDistrictOptions.length === 0} onChange={(value) => setDraft({ ...draft, subDistrict: value })} options={subDistrictOptions} />
               </section>
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">SPOC details</h3>
                 <label className={labelClass}>SPOC Name *<input required value={draft.spocName} onChange={(event) => setDraft({ ...draft, spocName: event.target.value })} placeholder="Full name" className={inputClass} /></label>
