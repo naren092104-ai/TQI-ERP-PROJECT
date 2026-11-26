@@ -793,10 +793,13 @@ export default {
 
       const clusterResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/clusters`, {
         method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-        body: JSON.stringify({ id: clusterId, name, district: name, college_district: null, subdistrict: null, state: 'Tamil Nadu', college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
+        body: JSON.stringify({ id: clusterId, name, district: name, state: 'Tamil Nadu', college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
       });
       const clusterData = await clusterResponse.json();
-      if (!clusterResponse.ok) return json({ success: false, error: 'Unable to create cluster in Supabase.' }, 400, headers);
+      if (!clusterResponse.ok) {
+        console.error('Unable to create cluster in Supabase:', { status: clusterResponse.status, code: (clusterData as any)?.code || 'unknown' });
+        return json({ success: false, error: 'Unable to create cluster in Supabase.' }, 400, headers);
+      }
 
       const userResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/users`, {
         method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
