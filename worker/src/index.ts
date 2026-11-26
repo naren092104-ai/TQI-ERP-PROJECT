@@ -613,52 +613,52 @@ export default {
     }
 
     const match = url.pathname.match(/^\/api\/supabase\/([a-z_]+)(?:\/([^/]+))?$/);
-    if (!match) return json({ success: false, error: 'API endpoint not found.' }, 404, headers);
+    if (match) {
+      const [, table, id] = match;
+      if (!allowedTables.has(table)) return json({ success: false, error: 'Invalid table.' }, 400, headers);
 
-    const [, table, id] = match;
-    if (!allowedTables.has(table)) return json({ success: false, error: 'Invalid table.' }, 400, headers);
+      const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/${table}`;
 
-    const supabaseUrl = `${env.SUPABASE_URL}/rest/v1/${table}`;
+      if (request.method === 'GET') {
+        const limit = Math.min(Number(url.searchParams.get('limit') || 100), 1000);
+        const response = await fetch(`${supabaseUrl}?select=*&limit=${limit}`, { headers: supabaseHeaders(env) });
+        const data = await response.json();
+        return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
+      }
 
-    if (request.method === 'GET') {
-      const limit = Math.min(Number(url.searchParams.get('limit') || 100), 1000);
-      const response = await fetch(`${supabaseUrl}?select=*&limit=${limit}`, { headers: supabaseHeaders(env) });
-      const data = await response.json();
-      return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
-    }
+      if (request.method === 'POST') {
+        const body = await request.text();
+        const response = await fetch(supabaseUrl, {
+          method: 'POST',
+          headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+          body,
+        });
+        const data = await response.json();
+        return json({ success: response.ok, data }, response.ok ? 201 : 400, headers);
+      }
 
-    if (request.method === 'POST') {
-      const body = await request.text();
-      const response = await fetch(supabaseUrl, {
-        method: 'POST',
-        headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-        body,
-      });
-      const data = await response.json();
-      return json({ success: response.ok, data }, response.ok ? 201 : 400, headers);
-    }
+      if (request.method === 'PUT' || request.method === 'PATCH') {
+        if (!id) return json({ success: false, error: 'Record id is required.' }, 400, headers);
+        const body = await request.text();
+        const response = await fetch(`${supabaseUrl}?${primaryKeys[table]}=eq.${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+          body,
+        });
+        const data = await response.json();
+        return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
+      }
 
-    if (request.method === 'PUT' || request.method === 'PATCH') {
-      if (!id) return json({ success: false, error: 'Record id is required.' }, 400, headers);
-      const body = await request.text();
-      const response = await fetch(`${supabaseUrl}?${primaryKeys[table]}=eq.${encodeURIComponent(id)}`, {
-        method: 'PATCH',
-        headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-        body,
-      });
-      const data = await response.json();
-      return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
-    }
-
-    if (request.method === 'DELETE') {
-      if (!id) return json({ success: false, error: 'Record id is required.' }, 400, headers);
-      const primaryKey = primaryKeys[table] || 'id';
-      const response = await fetch(`${supabaseUrl}?${primaryKey}=eq.${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-      });
-      const data = await response.json().catch(() => []);
-      return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
+      if (request.method === 'DELETE') {
+        if (!id) return json({ success: false, error: 'Record id is required.' }, 400, headers);
+        const primaryKey = primaryKeys[table] || 'id';
+        const response = await fetch(`${supabaseUrl}?${primaryKey}=eq.${encodeURIComponent(id)}`, {
+          method: 'DELETE',
+          headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+        });
+        const data = await response.json().catch(() => []);
+        return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
+      }
     }
 
     const readRoutes: Record<string, { table: string; key?: string }> = {
@@ -772,6 +772,10 @@ export default {
     }
 
     if (url.pathname === '/api/clusters' && request.method === 'POST') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (user.role !== 'Super Admin') return json({ success: false, error: 'Only Super Admin can manage clusters.' }, 403, headers);
+
       const body = await request.json() as any;
       const name = String(body.name || '').trim();
       const collegeName = String(body.collegeName || '').trim();
