@@ -1,0 +1,7 @@
+name = "tqi-erp-api"
+main = "src/index.ts"
+compatibility_date = "2026-11-26"
+
+[vars]
+SUPABASE_URL = "https://aqadjaawhkuedrcqhkmc.supabase.co"
+CORS_ORIGINS = "https://tqi-erp-project.pages.dev"

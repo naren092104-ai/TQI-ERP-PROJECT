@@ -120,31 +120,27 @@ export async function sendOnboardingCredentialsEmail({
   projectRoot: string;
   loginUrl?: string;
 }): Promise<boolean> {
-  try {
-    const { from } = readSmtpConfig();
-    const { html, text } = renderOnboardingEmail({
-      name,
-      email: recipient,
-      temporaryPassword,
-      role,
-      clusterName,
-      loginUrl,
-    });
-    await sendMail({
-      from: `TQI Administration <${from}>`,
-      to: recipient,
-      subject: 'Welcome to TQI ERP — Your Account Credentials',
-      text,
-      html,
-      headers: {
-        'X-Auto-Response-Suppress': 'All',
-        'Auto-Submitted': 'auto-generated',
-      },
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const { from } = readSmtpConfig();
+  const { html, text } = renderOnboardingEmail({
+    name,
+    email: recipient,
+    temporaryPassword,
+    role,
+    clusterName,
+    loginUrl,
+  });
+  await sendMail({
+    from: `TQI Administration <${from}>`,
+    to: recipient,
+    subject: 'Welcome to TQI ERP — Your Account Credentials',
+    text,
+    html,
+    headers: {
+      'X-Auto-Response-Suppress': 'All',
+      'Auto-Submitted': 'auto-generated',
+    },
+  });
+  return true;
 }
 
 export async function sendWorkflowEmail({
@@ -152,19 +148,15 @@ export async function sendWorkflowEmail({
   projectRoot: _projectRoot,
   ...template
 }: WorkflowEmailProps & { recipient: string; projectRoot: string }): Promise<boolean> {
-  try {
-    const { from } = readSmtpConfig();
-    const { html, text } = renderWorkflowEmail(template);
-    await sendMail({
-      from: `TQI Workflow <${from}>`,
-      to: recipient,
-      subject: template.title.startsWith('TQI') ? template.title : `TQI ERP: ${template.title}`,
-      text,
-      html,
-      headers: { 'X-Auto-Response-Suppress': 'All', 'Auto-Submitted': 'auto-generated' },
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  const { from } = readSmtpConfig();
+  const { html, text } = renderWorkflowEmail(template);
+  await sendMail({
+    from: `TQI Workflow <${from}>`,
+    to: recipient,
+    subject: template.title.startsWith('TQI') ? template.title : `TQI ERP: ${template.title}`,
+    text,
+    html,
+    headers: { 'X-Auto-Response-Suppress': 'All', 'Auto-Submitted': 'auto-generated' },
+  });
+  return true;
 }

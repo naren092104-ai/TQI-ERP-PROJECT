@@ -14,7 +14,8 @@
     "mail:verify": "tsx src/scripts/verifySmtp.ts",
     "db:init": "tsx -e \"import('./src/db/connection.js').then(m => m.initializeDatabase()).then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); })\"",
     "db:reset": "tsx src/scripts/resetDatabase.ts",
-    "db:clean": "tsx src/scripts/cleanReset.ts"
+    "db:clean": "tsx src/scripts/cleanReset.ts",
+    "db:migrate-supabase": "tsx src/scripts/migrateMysqlToSupabase.ts"
   },
   "dependencies": {
     "archiver": "^8.0.0",

@@ -20,7 +20,7 @@ import {
 import { Cluster, TabType, Panchayat, Student, Volunteer } from '../types';
 import { DistrictCombobox } from './ui/DistrictCombobox';
 import { CollegeCombobox } from './ui/CollegeCombobox';
-import { TAMIL_NADU_ALL_CITIES_AND_DISTRICTS, TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
+import { TAMIL_NADU_OFFICIAL_DISTRICTS } from '../data/districts';
 import { apiUrl } from '../utils/api';
 import {
   Select,
@@ -29,6 +29,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from './ui/select';
+import { Modal } from './ui/modal';
+import tamilNaduColleges from '../data/tamilNaduColleges.json';
 
 interface ClustersViewProps {
   clusters: Cluster[];
@@ -56,14 +58,16 @@ interface ClusterDraft {
   name: string;
   district: string;
   collegeName: string;
+  collegeId: string;
   collegeDistrict: string;
+  subDistrict: string;
   spocName: string;
   spocMobile: string;
   adminEmail: string;
 }
 
 const emptyDraft: ClusterDraft = {
-  name: '', district: '', collegeName: '', collegeDistrict: '',
+  name: '', district: '', collegeName: '', collegeId: '', collegeDistrict: '', subDistrict: '',
   spocName: '', spocMobile: '', adminEmail: '',
 };
 
@@ -148,7 +152,19 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
   const activeClusters = useMemo(() => clusters.filter((cluster) => cluster.status !== 'Inactive'), [clusters]);
   const visibleBase = activeClusters;
   const districtOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.district).filter(Boolean))].sort(), [activeClusters]);
-  const collegeOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.collegeName).filter(Boolean))].sort(), [activeClusters]);
+  const collegeOptions = useMemo(() => [...new Set(activeClusters.map((cluster) => cluster.collegeName).filter((college): college is string => Boolean(college)) )].sort(), [activeClusters]);
+  const subDistrictOptions = useMemo(() => {
+    const district = draft.collegeDistrict.trim().toLowerCase();
+    if (!district) return [] as string[];
+    const values = new Set<string>();
+    const colleges = tamilNaduColleges as Array<{ name?: string; district?: string }>;
+    colleges.forEach((college) => {
+      if (String(college.district || '').trim().toLowerCase() !== district) return;
+      const match = String(college.name || '').match(/\b([A-Za-z][A-Za-z .'-]*)\s+Taluk\b/i);
+      if (match?.[1]) values.add(match[1].replace(/\s+/g, ' ').trim());
+    });
+    return Array.from(values).sort((a, b) => a.localeCompare(b));
+  }, [draft.collegeDistrict]);
 
   const stats = useMemo(() => ({
     clusters: activeClusters.length,
@@ -195,7 +211,9 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       name: cluster.name || '',
       district: cluster.name || cluster.district || '',
       collegeName: cluster.collegeName || '',
+      collegeId: (cluster as any).collegeId || '',
       collegeDistrict: cluster.collegeDistrict || cluster.district || '',
+      subDistrict: (cluster as any).subDistrict || '',
       spocName: cluster.spocName || cluster.adminName || '',
       spocMobile: String(cluster.spocMobile || cluster.adminPhone || '').replace(/\D/g, '').slice(-10),
       adminEmail: cluster.adminEmail || '',
@@ -204,18 +222,24 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     setDrawerMode('edit');
   };
 
-  const handleCollegeSelection = (college: { name: string; district: string } | null, typedName?: string) => {
+  const handleCollegeSelection = (college: { id: string; name: string; district: string; university?: string } | null, typedName?: string) => {
     if (!college) {
-      setDraft((current) => ({ ...current, collegeName: typedName ?? current.collegeName, collegeDistrict: '' }));
+      setDraft((current) => ({
+        ...current,
+        collegeName: typedName ?? current.collegeName,
+        collegeId: '',
+      }));
       return;
     }
     const collegeDistrict = TAMIL_NADU_OFFICIAL_DISTRICTS.find(
       (district) => district.toLowerCase() === college.district.toLowerCase(),
-    ) || college.district.toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+    ) || college.district;
     setDraft((current) => ({
       ...current,
       collegeName: college.name,
+      collegeId: college.id,
       collegeDistrict,
+      subDistrict: '',
     }));
   };
 
@@ -233,8 +257,12 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       setFormError('Cluster name / district is required.');
       return;
     }
+    if (!draft.collegeName.trim()) {
+      setFormError('College / Institution name is required.');
+      return;
+    }
     if (!draft.collegeDistrict.trim()) {
-      setFormError('Select the college location.');
+      setFormError('Select the college district.');
       return;
     }
     if (!/^\d{10}$/.test(mobile)) {
@@ -255,7 +283,9 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       spocName: draft.spocName.trim(),
       adminEmail: email,
       collegeName: draft.collegeName.trim(),
+      collegeId: draft.collegeId,
       collegeDistrict: draft.collegeDistrict.trim(),
+      subDistrict: draft.subDistrict.trim(),
       district: draft.name.trim(),
       name: draft.name.trim(),
       academicYearId: selectedAcademicYearId,
@@ -600,16 +630,24 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
         </div>
       )}
 
-      {drawerMode && <div className="fixed inset-0 z-[99999] flex justify-end bg-slate-950/40 backdrop-blur-[2px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !isSaving) setDrawerMode(null); }}>
-        <aside role="dialog" aria-modal="true" aria-labelledby="cluster-drawer-title" className="flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 sm:px-7"><div><h2 id="cluster-drawer-title" className="text-lg font-bold text-[#10234E]">{drawerMode === 'edit' ? 'Edit Cluster' : 'Add Cluster'}</h2><p className="mt-0.5 text-xs text-slate-500">Saved to the currently selected academic year.</p></div><button type="button" disabled={isSaving} onClick={() => setDrawerMode(null)} aria-label="Close drawer" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X className="h-5 w-5" /></button></div>
-          <form onSubmit={(event) => void saveCluster(event)} className="flex min-h-0 flex-1 flex-col">
-            <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-7">
+      {drawerMode && (
+        <Modal
+          isOpen={Boolean(drawerMode)}
+          onClose={isSaving ? () => undefined : () => setDrawerMode(null)}
+          size="lg"
+          title={drawerMode === 'edit' ? 'Edit Cluster' : 'Add Cluster'}
+          subtitle="Saved to the currently selected academic year"
+          sheetOnMobile
+          className="tqi-modal-no-fullscreen max-h-[92vh] max-w-[850px] rounded-2xl border-slate-200 bg-white shadow-2xl"
+        >
+          <form onSubmit={(event) => void saveCluster(event)} className="flex max-h-[calc(92vh-64px)] flex-col">
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1 pr-2 sm:px-1">
               {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
                 <label className={labelClass}>Cluster Name / District *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value, district: event.target.value })} placeholder="Enter district name" className={inputClass} /></label>
                 <div><span className={labelClass}>College *</span><CollegeCombobox value={draft.collegeName} authToken={authToken} onChange={handleCollegeSelection} required /></div>
-                <DistrictCombobox id="college-location" label="College Location" placeholder="Select college location" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value })} options={TAMIL_NADU_ALL_CITIES_AND_DISTRICTS} />
+                <DistrictCombobox id="college-district" label="District" placeholder="Select district" required value={draft.collegeDistrict} onChange={(value) => setDraft({ ...draft, collegeDistrict: value, subDistrict: '' })} options={TAMIL_NADU_OFFICIAL_DISTRICTS} />
+                <DistrictCombobox id="college-subdistrict" label="Sub-District / Taluk" placeholder="Select sub-district" required={false} value={draft.subDistrict} disabled={!draft.collegeDistrict || subDistrictOptions.length === 0} onChange={(value) => setDraft({ ...draft, subDistrict: value })} options={subDistrictOptions} />
               </section>
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">SPOC details</h3>
                 <label className={labelClass}>SPOC Name *<input required value={draft.spocName} onChange={(event) => setDraft({ ...draft, spocName: event.target.value })} placeholder="Full name" className={inputClass} /></label>
@@ -621,8 +659,8 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 sm:px-7"><button type="button" disabled={isSaving} onClick={() => setDrawerMode(null)} className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">Cancel</button><button type="submit" disabled={isSaving} className="rounded-xl bg-[#0B3D91] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#082f70] disabled:opacity-60">{isSaving ? 'Saving…' : drawerMode === 'edit' ? 'Save Changes' : 'Save Cluster'}</button></div>
           </form>
-        </aside>
-      </div>}
+        </Modal>
+      )}
 
       {credentialDisplay && <div className="fixed inset-0 z-[100001] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
         <section role="dialog" aria-modal="true" aria-labelledby="cluster-credentials-title" className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">

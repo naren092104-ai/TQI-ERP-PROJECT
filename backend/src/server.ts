@@ -1,4 +1,4 @@
-import express, { NextFunction, Request, Response } from 'express';
+﻿import express, { NextFunction, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createHash, randomBytes, randomInt, randomUUID } from 'crypto';
@@ -96,10 +96,7 @@ const isUsableJwtSecret = (secret?: string) => Boolean(
   secret && secret.length >= 32 && !/^(replace|change|your[-_])/i.test(secret),
 );
 
-// Fallback stable secret used when JWT_SECRET is unset, a placeholder, or when running in read-only serverless lambdas.
-// This ensures that all instances (and restarts) verify tokens with the exact same key rather than generating ephemeral keys per instance.
-const DETERMINISTIC_FALLBACK_JWT_SECRET = 'tqi_erp_production_jwt_secret_d8c9038290f6b4a2e1d75c83b4820194857b2a9e4c1d6e5a3b2c1d0f9e8a7b6c';
-
+// JWT_SECRET is required in production. Local development receives an untracked random secret.
 const loadOrCreateLocalJwtSecret = () => {
   const secretPath = path.join(PROJECT_ROOT, 'backend', 'storage', '.jwt-secret');
   try {
@@ -108,27 +105,27 @@ const loadOrCreateLocalJwtSecret = () => {
       if (isUsableJwtSecret(savedSecret)) return savedSecret;
     }
   } catch {
-    // If reading fails, proceed to persist fallback
+    // Fall through to creating a local development secret.
   }
-
   try {
     fs.mkdirSync(path.dirname(secretPath), { recursive: true });
-    fs.writeFileSync(secretPath, DETERMINISTIC_FALLBACK_JWT_SECRET, { encoding: 'utf8', flag: 'w' });
-    return DETERMINISTIC_FALLBACK_JWT_SECRET;
+    const randomSecret = randomBytes(48).toString('hex');
+    fs.writeFileSync(secretPath, randomSecret, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return randomSecret;
   } catch {
-    // Read-only filesystem (e.g. Vercel serverless / Docker / Lambda) - return deterministic fallback
-    return DETERMINISTIC_FALLBACK_JWT_SECRET;
+    throw new Error('A usable JWT_SECRET or a writable local secret file is required.');
   }
 };
 
 const JWT_SECRET = isUsableJwtSecret(configuredJwtSecret)
   ? configuredJwtSecret!
-  : (process.env.VERCEL ? DETERMINISTIC_FALLBACK_JWT_SECRET : loadOrCreateLocalJwtSecret());
+  : (process.env.NODE_ENV === 'production'
+      ? (() => { throw new Error('Production requires JWT_SECRET with at least 32 characters.'); })()
+      : loadOrCreateLocalJwtSecret());
 
-if (!isUsableJwtSecret(configuredJwtSecret)) {
-  console.warn('[AUTH] JWT_SECRET is unset or a placeholder; using stable fallback secret.');
+if (!isUsableJwtSecret(configuredJwtSecret) && process.env.NODE_ENV !== 'production') {
+  console.warn('[AUTH] JWT_SECRET is unset or a placeholder; using an untracked local development secret.');
 }
-
 const configuredCorsOrigins = process.env.CORS_ORIGINS?.split(',').map((origin) => origin.trim()).filter(Boolean) || [];
 const allowedCorsOrigins = new Set([
   'http://localhost:5173',
@@ -409,9 +406,9 @@ const getMaintenanceGuardStatus = async (req: AuthenticatedRequest) => {
 // ============================================================
 // Phase 4: Session Status Flow Enforcement
 // ============================================================
-// Status flow: SCHEDULED → IN_PROGRESS → SUBMITTED → PENDING_REVIEW
-//              → APPROVED → COMPLETED
-//              → RESUBMISSION_REQUIRED → RESUBMITTED → REVIEW → APPROVED → COMPLETED
+// Status flow: SCHEDULED â†’ IN_PROGRESS â†’ SUBMITTED â†’ PENDING_REVIEW
+//              â†’ APPROVED â†’ COMPLETED
+//              â†’ RESUBMISSION_REQUIRED â†’ RESUBMITTED â†’ REVIEW â†’ APPROVED â†’ COMPLETED
 
 const VALID_STATUS_TRANSITIONS: Record<string, string[]> = {
   'Draft':                   ['Scheduled', 'In Progress'],
@@ -452,7 +449,7 @@ const autoTransitionToInProgress = async (sessionId: string): Promise<void> => {
       [sessionId]
     );
   } catch {
-    // ignore — session may not exist or may already be in progress
+    // ignore â€” session may not exist or may already be in progress
   }
 };
 
@@ -559,11 +556,11 @@ const runSqlFiles = async (): Promise<number> => {
     // Only record the migration as applied if every statement succeeded.
     // Otherwise leave the row out so a corrected file gets retried next boot.
     if (hadFatalError) {
-      console.error(`[DB MIGRATION FAILED] ${file} — leaving unrecorded, will retry next start.`);
+      console.error(`[DB MIGRATION FAILED] ${file} â€” leaving unrecorded, will retry next start.`);
       continue;
     }
     await pool.query('INSERT IGNORE INTO schema_migrations (version) VALUES (?)', [file]);
-    console.log(`      ✓ Applied migration: ${file}`);
+    console.log(`      âœ“ Applied migration: ${file}`);
   }
   return files.length;
 };
@@ -695,7 +692,7 @@ const ensureEssentialTablesAndColumns = async () => {
       VALUES ('website_maintenance', FALSE, 'Website Under Maintenance')
     `).catch(() => undefined);
 
-    // ── Self-heal academic_years columns (migration 213) ──
+    // â”€â”€ Self-heal academic_years columns (migration 213) â”€â”€
     const academicYearCols = [
       `ALTER TABLE academic_years ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'DRAFT'`,
       `ALTER TABLE academic_years ADD COLUMN archived_at DATETIME NULL`,
@@ -712,7 +709,7 @@ const ensureEssentialTablesAndColumns = async () => {
       WHERE status = 'DRAFT' AND is_active = 1
     `).catch(() => undefined);
 
-    // ── Self-heal academic_year_id columns on core tables (migration 213) ──
+    // â”€â”€ Self-heal academic_year_id columns on core tables (migration 213) â”€â”€
     const yearIdAlters = [
       `ALTER TABLE clusters ADD COLUMN academic_year_id VARCHAR(64) NULL`,
       `ALTER TABLE clusters ADD COLUMN source_cluster_id VARCHAR(64) NULL`,
@@ -731,7 +728,7 @@ const ensureEssentialTablesAndColumns = async () => {
       });
     }
 
-    // ── Backfill academic_year_id on tables that have NULL ──
+    // â”€â”€ Backfill academic_year_id on tables that have NULL â”€â”€
     const backfillTables = [
       'clusters', 'panchayats', 'villages', 'students', 'volunteers', 'sessions', 'modules', 'academic_setup',
       'attendance_sessions', 'lesson_plans', 'session_photos', 'session_reports',
@@ -745,7 +742,7 @@ const ensureEssentialTablesAndColumns = async () => {
       `).catch(() => undefined);
     }
 
-    // ── Ensure schools table (migration 213) ──
+    // â”€â”€ Ensure schools table (migration 213) â”€â”€
     await pool.query(`
       CREATE TABLE IF NOT EXISTS schools (
         id VARCHAR(64) NOT NULL,
@@ -766,7 +763,7 @@ const ensureEssentialTablesAndColumns = async () => {
       console.warn('[DB] Self-heal schools notice:', err?.message || err);
     });
 
-    // ── Ensure tqi_settings table (migration 232) ──
+    // â”€â”€ Ensure tqi_settings table (migration 232) â”€â”€
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tqi_settings (
         setting_key VARCHAR(100) NOT NULL,
@@ -783,7 +780,7 @@ const ensureEssentialTablesAndColumns = async () => {
       VALUES ('finance_officer_name', 'TQI Finance Team')
     `).catch(() => undefined);
 
-    // ── Add indexes silently (migration 213 tail) ──
+    // â”€â”€ Add indexes silently (migration 213 tail) â”€â”€
     const indexStatements = [
       `ALTER TABLE clusters ADD INDEX idx_clusters_academic_year (academic_year_id)`,
       `ALTER TABLE panchayats ADD INDEX idx_panchayats_academic_year (academic_year_id)`,
@@ -797,7 +794,7 @@ const ensureEssentialTablesAndColumns = async () => {
       await pool.query(sql).catch(() => undefined); // ignore if index already exists
     }
 
-    // ── Self-heal approvals columns (migration 229, 230) ──
+    // â”€â”€ Self-heal approvals columns (migration 229, 230) â”€â”€
     const approvalCols = [
       `ALTER TABLE approvals ADD COLUMN session_id VARCHAR(64) NULL`,
       `ALTER TABLE approvals ADD COLUMN record_id VARCHAR(64) NULL`,
@@ -808,7 +805,7 @@ const ensureEssentialTablesAndColumns = async () => {
       });
     }
 
-    // ── Self-heal volunteer columns (migration 225, 226, 227) ──
+    // â”€â”€ Self-heal volunteer columns (migration 225, 226, 227) â”€â”€
     const volunteerCols = [
       `ALTER TABLE volunteers ADD COLUMN college_name VARCHAR(255) NULL`,
       `ALTER TABLE volunteers ADD COLUMN study_year VARCHAR(32) NULL`,
@@ -820,14 +817,14 @@ const ensureEssentialTablesAndColumns = async () => {
       });
     }
 
-    // ── Self-heal attendance_sessions columns (migration 224) ──
+    // â”€â”€ Self-heal attendance_sessions columns (migration 224) â”€â”€
     await pool.query(
       `ALTER TABLE attendance_sessions ADD COLUMN attendance_type ENUM('students', 'volunteers') NOT NULL DEFAULT 'students' AFTER academic_year_id`
     ).catch((err: any) => {
       if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
     });
 
-    // ── Self-heal sessions columns (migration 228) ──
+    // â”€â”€ Self-heal sessions columns (migration 228) â”€â”€
     await pool.query(
       `ALTER TABLE sessions ADD COLUMN target_locations_json JSON NULL AFTER village_id`
     ).catch((err: any) => {
@@ -839,7 +836,7 @@ const ensureEssentialTablesAndColumns = async () => {
       if (err?.code !== 'ER_DUP_FIELDNAME') { /* ignore */ }
     });
 
-    // ── Self-heal lesson_plans columns & workflow (migration 237) ──
+    // â”€â”€ Self-heal lesson_plans columns & workflow (migration 237) â”€â”€
     const lessonPlanCols = [
       `ALTER TABLE lesson_plans MODIFY COLUMN status VARCHAR(40) NOT NULL DEFAULT 'Draft'`,
       `ALTER TABLE lesson_plans ADD COLUMN submitted_by VARCHAR(64) NULL`,
@@ -857,7 +854,7 @@ const ensureEssentialTablesAndColumns = async () => {
       });
     }
 
-    // ── Self-heal session_reports columns & workflow (migration 238, 239) ──
+    // â”€â”€ Self-heal session_reports columns & workflow (migration 238, 239) â”€â”€
     const sessionReportCols = [
       `ALTER TABLE session_reports MODIFY COLUMN status ENUM('Draft','Submitted','Approved','Rejected','Corrections Required','Edit Request Pending','Delete Request Pending') NOT NULL DEFAULT 'Draft'`,
       `ALTER TABLE session_reports ADD COLUMN village_ids TEXT NULL AFTER day_number`,
@@ -880,7 +877,7 @@ const ensureEssentialTablesAndColumns = async () => {
       });
     }
 
-    // ── Self-heal finance_entries and finance_reports (migration 233, 234) ──
+    // â”€â”€ Self-heal finance_entries and finance_reports (migration 233, 234) â”€â”€
     const financeEntriesCols = [
       `ALTER TABLE finance_entries ADD COLUMN bill_url LONGTEXT NULL AFTER bill_reference`,
       `ALTER TABLE finance_entries ADD COLUMN count INT NULL AFTER bill_url`,
@@ -971,6 +968,8 @@ const mapCluster = (row: any) => ({
   completedSessions: 0,
   totalSessions: 0,
   collegeName: row.college_name || '',
+  collegeId: row.college_id || '',
+  subDistrict: row.subdistrict || '',
   spocName: row.spoc_name || '',
   spocMobile: row.spoc_mobile || '',
 });
@@ -2698,11 +2697,11 @@ app.get('/api/approvals', requireAuth, async (req: AuthenticatedRequest, res: Re
       module: row.module || 'Sessions',
       recordId: isAttendance ? attendanceId : row.record_id || row.id,
       recordTitle: isAttendance
-        ? `${panchayatName} · ${villageName} · Day ${dayNumber} Attendance`
+        ? `${panchayatName} Â· ${villageName} Â· Day ${dayNumber} Attendance`
         : isFinance
-          ? `${financeDetail?.title || (row.module === 'Finance Edit Request' ? 'Finance Edit Request' : 'Finance Submission')} · ${financeDetail?.date || 'Date unavailable'}`
+          ? `${financeDetail?.title || (row.module === 'Finance Edit Request' ? 'Finance Edit Request' : 'Finance Submission')} Â· ${financeDetail?.date || 'Date unavailable'}`
           : isLessonPlan
-            ? `Day ${Number(row.lesson_plan_day_number || lessonPlanMeta.dayNumber || 1)} · ${row.lesson_plan_topic || row.lesson_plan_title || 'Summit Lesson Plan'}`
+            ? `Day ${Number(row.lesson_plan_day_number || lessonPlanMeta.dayNumber || 1)} Â· ${row.lesson_plan_topic || row.lesson_plan_title || 'Summit Lesson Plan'}`
           : row.record_id || 'Approval request',
       submittedBy: row.module === 'Lesson Plan' && row.lesson_plan_submitter_name
         ? row.lesson_plan_submitter_name
@@ -3057,6 +3056,8 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
   const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
   const district = name;
   const collegeDistrict = String(req.body.collegeDistrict || '').trim();
+  const subDistrict = String(req.body.subDistrict || '').trim();
+  const collegeId = String(req.body.collegeId || '').trim();
   const spocName = String(req.body.spocName || req.body.adminName || '').trim();
   const spocMobile = String(req.body.spocMobile || req.body.adminPhone || '').trim();
   const adminEmail = String(req.body.adminEmail || req.body.spocEmail || req.body.email || '').trim().toLowerCase();
@@ -3218,6 +3219,12 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
     } else if (code === 'ER_DATA_TOO_LONG') {
       status = 400;
       message = 'One of the entered values is too long. Please shorten the cluster or college name.';
+    } else if (code === 'ER_BAD_FIELD_ERROR') {
+      status = 500;
+      message = 'The database is missing a required cluster or account column. The server attempted to self-heal the schema; please redeploy and retry.';
+    } else if (code === 'ER_NO_SUCH_TABLE') {
+      status = 500;
+      message = 'The database is missing a required table. The server attempted to initialize the schema; please redeploy and retry.';
     }
     res.status(status).json({ success: false, error: message });
   }
@@ -3506,7 +3513,7 @@ app.get('/api/panchayats/directory', requireAuth, async (req: AuthenticatedReque
     }
     const firstPageHtml = await firstPageResponse.text();
     const paginationPageNumbers = [...firstPageHtml.matchAll(/[?&]gp=(\d+)/g)].map((match) => Number(match[1]));
-    const reportedTotalMatch = firstPageHtml.match(/Showing\s+\d+\s*[–-]\s*\d+\s+of\s+([\d,]+)/i);
+    const reportedTotalMatch = firstPageHtml.match(/Showing\s+\d+\s*[â€“-]\s*\d+\s+of\s+([\d,]+)/i);
     const reportedTotal = reportedTotalMatch ? Number(reportedTotalMatch[1].replace(/,/g, '')) : 0;
     const pageCount = Math.max(1, ...paginationPageNumbers, Math.ceil(reportedTotal / 50));
     if (pageCount > 300) {
@@ -4641,7 +4648,7 @@ app.post('/api/attendance', requireAuth, async (req: AuthenticatedRequest, res: 
       for (const admin of adminRows) {
         await connection.query(
           'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
-          [randomUUID(), admin.id, 'Attendance submitted for review', `${req.user.name || 'Cluster Admin'} submitted ${dayLabel} attendance for ${panchayatName} · ${villageName}.`, 'approval'],
+          [randomUUID(), admin.id, 'Attendance submitted for review', `${req.user.name || 'Cluster Admin'} submitted ${dayLabel} attendance for ${panchayatName} Â· ${villageName}.`, 'approval'],
         );
       }
     }
@@ -4894,8 +4901,8 @@ app.put('/api/attendance/:id/review', requireAuth, async (req: AuthenticatedRequ
         const villageName = locationRows[0]?.village_name || 'All Villages';
         const title = action === 'approve' ? 'Attendance approved' : 'Attendance needs resubmission';
         const message = action === 'approve'
-          ? `Super Admin approved Day ${attendance.day_number} attendance for ${panchayatName} · ${villageName}.`
-          : `Super Admin requested changes to Day ${attendance.day_number} attendance for ${panchayatName} · ${villageName}${remarks ? `: ${remarks}` : '.'}`;
+          ? `Super Admin approved Day ${attendance.day_number} attendance for ${panchayatName} Â· ${villageName}.`
+          : `Super Admin requested changes to Day ${attendance.day_number} attendance for ${panchayatName} Â· ${villageName}${remarks ? `: ${remarks}` : '.'}`;
         for (const admin of clusterAdmins) {
           await pool.query(
             'INSERT INTO notifications (id, user_id, title, message, type, is_read, created_at) VALUES (?, ?, ?, ?, ?, 0, NOW())',
@@ -5053,7 +5060,7 @@ app.get('/api/lesson-plans', requireAuth, async (req: AuthenticatedRequest, res:
         gradesList: extraMeta.gradesList || String(row.target_standard || extraMeta.grades || '').split(',').map((value: string) => value.trim()).filter(Boolean),
         targetStandard: row.target_standard || extraMeta.grades || '',
         date: extraMeta.date || (row.created_at ? new Date(row.created_at).toISOString().split('T')[0] : ''),
-        academicYear: extraMeta.academicYear || '2025 – 2026',
+        academicYear: extraMeta.academicYear || '2025 â€“ 2026',
         title: row.title,
         topic: row.topic || row.title,
         objective: row.objective || '',
@@ -5508,8 +5515,8 @@ app.get('/api/finance', requireAuth, async (req: AuthenticatedRequest, res: Resp
         const amount = Number(entry.amount || 0);
         const bill = entry.bill_url ? { url: entry.bill_url, fileName: entry.bill_reference || '', detectedAmount: amount, isVerified: true } : null;
         if (entry.category === 'Travel') {
-          const routeMatch = description.match(/Travel:\s*(.*?)\s*→\s*(.*?)\s*\(/i);
-          const formulaMatch = description.match(/\((\d+)\s*vols?\s*×\s*₹?([\d.]+)/i);
+          const routeMatch = description.match(/Travel:\s*(.*?)\s*â†’\s*(.*?)\s*\(/i);
+          const formulaMatch = description.match(/\((\d+)\s*vols?\s*Ã—\s*â‚¹?([\d.]+)/i);
           routes.push({
             id: entry.id,
             from: routeMatch?.[1]?.trim() || description.replace(/^Travel:\s*/i, ''),
@@ -9286,7 +9293,7 @@ app.post('/api/academic-years', requireAuth, async (req: AuthenticatedRequest, r
   const copiedPhotoFiles: string[] = [];
   try {
     const { name, startDate, endDate } = req.body;
-    const normalizedName = String(name || '').trim().replace(/[–—]/g, '-');
+    const normalizedName = String(name || '').trim().replace(/[â€“â€”]/g, '-');
     const id = `ay-${randomUUID()}`;
     const startYear = Number(normalizedName.split('-')[0]);
     const endYear = Number(normalizedName.split('-')[1]);
@@ -9395,7 +9402,7 @@ app.put('/api/academic-years/:id', requireAuth, async (req: AuthenticatedRequest
       res.status(409).json({ success: false, error: 'Archived academic years are read-only.' });
       return;
     }
-    const name = String(req.body.name || '').trim().replace(/[–—]/g, '-');
+    const name = String(req.body.name || '').trim().replace(/[â€“â€”]/g, '-');
     const startYear = Number(name.split('-')[0]);
     const endYear = Number(name.split('-')[1]);
     if (!/^\d{4}-\d{4}$/.test(name) || endYear <= startYear) {
@@ -9762,27 +9769,27 @@ const startServer = async () => {
     console.log('[1/5] [CONFIG] Initializing environment and storage...');
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
     fs.mkdirSync(BACKUPS_DIR, { recursive: true });
-    console.log(`      ✓ Uploads directory ready (${UPLOADS_DIR})`);
-    console.log(`      ✓ Backups directory ready (${BACKUPS_DIR})`);
+    console.log(`      âœ“ Uploads directory ready (${UPLOADS_DIR})`);
+    console.log(`      âœ“ Backups directory ready (${BACKUPS_DIR})`);
 
     // Stage 2: Database Connection & Pool
     console.log('[2/5] [DB] Connecting to MySQL database...');
     await initializeDatabase();
-    console.log(`      ✓ Connected to database '${process.env.DB_NAME || 'TQI_ERP'}' (${process.env.DB_USER || 'root'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 3306})`);
+    console.log(`      âœ“ Connected to database '${process.env.DB_NAME || 'TQI_ERP'}' (${process.env.DB_USER || 'root'}@${process.env.DB_HOST || 'localhost'}:${process.env.DB_PORT || 3306})`);
 
     // Stage 3: Schema Migrations & Integrity
     console.log('[3/5] [DB] Verifying schema and migrations...');
     const migrationCount = await runSqlFiles();
     await ensureEssentialTablesAndColumns().catch(() => undefined);
-    console.log(`      ✓ Database schema verified (${migrationCount} migration(s) applied - up to date)`);
+    console.log(`      âœ“ Database schema verified (${migrationCount} migration(s) applied - up to date)`);
 
     // Stage 4: Authentication & Bootstrap
     console.log('[4/5] [AUTH] Verifying user accounts...');
     const authStatus = await initDatabaseSchema();
     if (authStatus?.bootstrapped) {
-      console.log(`      ✓ Super Admin bootstrapped successfully (${authStatus.adminEmail})`);
+      console.log(`      âœ“ Super Admin bootstrapped successfully (${authStatus.adminEmail})`);
     } else {
-      console.log(`      ✓ User accounts verified (${authStatus?.userCount ?? 1} user(s) ready)`);
+      console.log(`      âœ“ User accounts verified (${authStatus?.userCount ?? 1} user(s) ready)`);
     }
 
     // Stage 5: HTTP Listener
@@ -9793,14 +9800,14 @@ const startServer = async () => {
       backupTimer.unref?.();
 
       console.log('\n==================================================');
-      console.log(`🚀 TQI Backend API active and listening on port ${PORT}`);
-      console.log(`👉 Local API    : http://localhost:${PORT}`);
-      console.log(`👉 Health Check : http://localhost:${PORT}/api/health`);
+      console.log(`ðŸš€ TQI Backend API active and listening on port ${PORT}`);
+      console.log(`ðŸ‘‰ Local API    : http://localhost:${PORT}`);
+      console.log(`ðŸ‘‰ Health Check : http://localhost:${PORT}/api/health`);
       console.log('==================================================\n');
     });
   } catch (error: any) {
     console.error('\n==================================================');
-    console.error('❌ [STARTUP ERROR] Backend service failed to start');
+    console.error('âŒ [STARTUP ERROR] Backend service failed to start');
     console.error('==================================================');
     console.error(`Error: ${error?.message || error}`);
     if (error?.code === 'ECONNREFUSED' || error?.message?.includes('ECONNREFUSED')) {
