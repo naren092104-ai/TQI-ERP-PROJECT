@@ -5,6 +5,7 @@ interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
   JWT_SECRET: string;
   BACKEND_API_URL?: string;
+  EMAIL_WEBHOOK_URL?: string;
   CORS_ORIGINS?: string;
 }
 
@@ -84,6 +85,39 @@ const photoType = (caption: unknown, explicitType: unknown) => {
   if (text.startsWith('[homework]') || text.includes('#homework')) return 'homework';
   if (text.startsWith('[feedback]') || text.includes('#feedback')) return 'feedback';
   return 'session';
+};
+
+const sendClusterCredentialsEmail = async (
+  request: Request,
+  env: Env,
+  details: { to: string; spocName: string; clusterName: string; collegeName: string; temporaryPassword: string },
+) => {
+  const webhookUrl = env.EMAIL_WEBHOOK_URL?.trim();
+  if (webhookUrl) {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to: details.to,
+        subject: 'TQI ERP – Cluster Registration Successful',
+        ...details,
+      }),
+    });
+    return response.ok;
+  }
+
+  const backendApiUrl = (env.BACKEND_API_URL || '').replace(/\/+$/, '');
+  if (!backendApiUrl) return false;
+  const response = await fetch(`${backendApiUrl}/internal/cluster-credentials-email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: request.headers.get('Authorization') || '',
+    },
+    body: JSON.stringify({ ...details, role: 'Cluster Admin' }),
+  });
+  const result = await response.json().catch(() => null) as any;
+  return response.ok && result?.success === true && result?.emailSent === true;
 };
 
 const allowedTables = new Set([
@@ -813,20 +847,82 @@ export default {
       });
 
       let emailSent = false;
-      const emailWebhook = (env as any).EMAIL_WEBHOOK_URL?.trim();
-      if (emailWebhook) {
-        try {
-          const emailResponse = await fetch(emailWebhook, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: adminEmail, subject: 'TQI ERP – Cluster Registration Successful', spocName, clusterName: name, collegeName, district }),
-          });
-          emailSent = emailResponse.ok;
-        } catch {
-          emailSent = false;
-        }
+      try {
+        emailSent = await sendClusterCredentialsEmail(request, env, {
+          to: adminEmail,
+          spocName,
+          clusterName: name,
+          collegeName,
+          temporaryPassword,
+        });
+      } catch (error) {
+        console.error('Unable to deliver cluster credentials email:', error);
       }
 
       return json({ success: true, emailSent, temporaryPassword, loginEmail: adminEmail, clusterName: name, cluster: Array.isArray(clusterData) ? clusterData[0] : clusterData }, 201, headers);
+    }
+
+    const resendClusterCredentials = url.pathname.match(/^\/api\/clusters\/([^/]+)\/resend-credentials$/);
+    if (resendClusterCredentials && request.method === 'POST') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (user.role !== 'Super Admin') return json({ success: false, error: 'Only Super Admin can resend cluster credentials.' }, 403, headers);
+
+      try {
+        const academicYearId = String(url.searchParams.get('academicYearId') || '').trim();
+        const clusterFilters: Record<string, string> = {
+          select: 'id,name,district,college_name,admin_id,academic_year_id',
+          id: `eq.${resendClusterCredentials[1]}`,
+          limit: '1',
+        };
+        if (academicYearId) clusterFilters.academic_year_id = `eq.${academicYearId}`;
+        const clusters = await supabaseRows(env, 'clusters', clusterFilters);
+        const cluster = clusters[0];
+        if (!cluster) return json({ success: false, error: 'Cluster not found in the selected academic year.' }, 404, headers);
+
+        const userFilters: Record<string, string> = { select: 'id,name,email,status', limit: '1' };
+        if (cluster.admin_id) userFilters.id = `eq.${cluster.admin_id}`;
+        else userFilters.cluster_id = `eq.${cluster.id}`;
+        const clusterUsers = await supabaseRows(env, 'users', userFilters);
+        const clusterAdmin = clusterUsers[0];
+        if (!clusterAdmin?.email) return json({ success: false, error: 'Cluster Admin account was not found.' }, 404, headers);
+
+        const temporaryPassword = `${crypto.randomUUID().replace(/-/g, '').slice(0, 16)}Aa1!`;
+        const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+        const userUpdate = await fetch(`${env.SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(clusterAdmin.id)}`, {
+          method: 'PATCH',
+          headers: { ...supabaseHeaders(env), Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            password_hash: passwordHash,
+            must_change_password: true,
+            password_reset_at: new Date().toISOString(),
+            password_created_at: new Date().toISOString(),
+            status: 'Active',
+            updated_at: new Date().toISOString(),
+          }),
+        });
+        if (!userUpdate.ok) {
+          console.error('Unable to reset cluster admin password in Supabase:', { status: userUpdate.status });
+          return json({ success: false, error: 'Unable to reset cluster admin credentials.' }, 503, headers);
+        }
+
+        let emailSent = false;
+        try {
+          emailSent = await sendClusterCredentialsEmail(request, env, {
+            to: String(clusterAdmin.email),
+            spocName: String(clusterAdmin.name || 'Cluster Admin'),
+            clusterName: String(cluster.name || cluster.id),
+            collegeName: String(cluster.college_name || ''),
+            temporaryPassword,
+          });
+        } catch (error) {
+          console.error('Unable to resend cluster credentials email:', error);
+        }
+        return json({ success: true, emailSent, temporaryPassword, loginEmail: clusterAdmin.email, clusterName: cluster.name || cluster.id }, 200, headers);
+      } catch (error) {
+        console.error('Failed to reset cluster credentials:', error);
+        return json({ success: false, error: 'Unable to reset cluster credentials.' }, 503, headers);
+      }
     }
 
     const clusterUpdate = url.pathname.match(/^\/api\/clusters\/([^/]+)$/);

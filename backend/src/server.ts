@@ -1571,6 +1571,48 @@ app.post('/api/auth/reset-password', authRateLimit('reset-password', 10, 15 * 60
   }
 });
 
+app.post('/api/internal/cluster-credentials-email', authRateLimit('cluster-credentials-email', 10, 15 * 60 * 1000), async (req: Request, res: Response) => {
+  const authorization = req.headers.authorization || '';
+  const token = authorization.replace(/^Bearer\s+/i, '');
+  let claims: any;
+  try {
+    claims = jwt.verify(token, JWT_SECRET);
+  } catch {
+    res.status(401).json({ success: false, error: 'Authentication required.' });
+    return;
+  }
+  if (!claims?.id || claims.role !== 'Super Admin') {
+    res.status(403).json({ success: false, error: 'Only Super Admin can send cluster credentials.' });
+    return;
+  }
+
+  const recipient = String(req.body.to || '').trim().toLowerCase();
+  const name = String(req.body.spocName || '').trim();
+  const clusterName = String(req.body.clusterName || '').trim();
+  const collegeName = String(req.body.collegeName || '').trim();
+  const temporaryPassword = String(req.body.temporaryPassword || '');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient) || !name || !clusterName || !collegeName || temporaryPassword.length < 8 || temporaryPassword.length > 128) {
+    res.status(400).json({ success: false, error: 'Valid recipient, cluster details, and temporary password are required.' });
+    return;
+  }
+
+  try {
+    await sendOnboardingCredentialsEmail({
+      recipient,
+      name,
+      temporaryPassword,
+      role: 'Cluster Admin',
+      clusterName,
+      projectRoot: PROJECT_ROOT,
+      loginUrl: process.env.FRONTEND_URL || process.env.APP_URL,
+    });
+    res.json({ success: true, emailSent: true });
+  } catch (error) {
+    console.error('[CLUSTER CREDENTIALS EMAIL] Delivery failed.');
+    res.status(503).json({ success: false, emailSent: false, error: 'Unable to send credentials email. Check the server mail configuration.' });
+  }
+});
+
 app.get('/api/auth/me', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   res.json({ success: true, user: req.user, activeRole: req.user.role, clusterId: req.user.clusterId });
 });
