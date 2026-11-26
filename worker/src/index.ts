@@ -396,7 +396,8 @@ export default {
         const requestedCluster = String(url.searchParams.get('cluster') || url.searchParams.get('clusterId') || 'all');
         const clusterId = await resolveWorkerClusterId(env, user, year.id, requestedCluster.toLowerCase());
         const filters: Record<string, string> = {
-          select: 'id,cluster_id,session_id,academic_year_id,day_number,file_path,file_url,original_filename,mime_type,file_size,uploaded_by,uploaded_at,caption,photo_type,panchayat_id,panchayat_name,village_id,village_name,visit_date',
+          // Older deployments can be missing newer optional metadata columns; select * keeps the gallery readable.
+          select: '*',
           academic_year_id: `eq.${year.id}`,
           order: 'day_number.asc,uploaded_at.desc',
           limit: '1000',
@@ -406,14 +407,14 @@ export default {
         const clusterIds = [...new Set(photoRows.map((row) => String(row.cluster_id || '')).filter(Boolean))];
         const userIds = [...new Set(photoRows.map((row) => String(row.uploaded_by || '')).filter(Boolean))];
         const [clusterRows, userRows, deleteRows] = await Promise.all([
-          clusterIds.length ? supabaseRows(env, 'clusters', { select: 'id,name', id: `in.(${clusterIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
-          userIds.length ? supabaseRows(env, 'users', { select: 'id,name', id: `in.(${userIds.join(',')})`, limit: '1000' }) : Promise.resolve([]),
+          clusterIds.length ? supabaseRows(env, 'clusters', { select: 'id,name', id: `in.(${clusterIds.join(',')})`, limit: '1000' }).catch((error) => { console.warn('Unable to resolve photo cluster names:', error); return []; }) : Promise.resolve([]),
+          userIds.length ? supabaseRows(env, 'users', { select: 'id,name', id: `in.(${userIds.join(',')})`, limit: '1000' }).catch((error) => { console.warn('Unable to resolve photo uploader names:', error); return []; }) : Promise.resolve([]),
           supabaseRows(env, 'session_photo_delete_requests', {
             select: 'id,photo_id,status,reason',
             academic_year_id: `eq.${year.id}`,
             status: 'eq.PENDING',
             limit: '1000',
-          }),
+          }).catch((error) => { console.warn('Unable to load photo deletion request badges:', error); return []; }),
         ]);
         const clusterNames = new Map(clusterRows.map((row) => [String(row.id), String(row.name || row.id)]));
         const userNames = new Map(userRows.map((row) => [String(row.id), String(row.name || '')]));
