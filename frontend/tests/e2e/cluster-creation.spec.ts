@@ -4,6 +4,7 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
   const payload = Buffer.from(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 3600 })).toString('base64url');
   const token = `header.${payload}.signature`;
   let createCalls = 0;
+  let submittedCluster: Record<string, unknown> = {};
   let releaseCreateRequest: () => void = () => undefined;
   const pendingCreateResponse = new Promise<void>((resolve) => { releaseCreateRequest = resolve; });
 
@@ -42,6 +43,7 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
     }
     if (pathname.endsWith('/clusters') && route.request().method() === 'POST') {
       createCalls += 1;
+      submittedCluster = route.request().postDataJSON();
       await pendingCreateResponse;
       await route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ success: false, error: 'A cluster for this college and district already exists in the selected academic year.' }) });
       return;
@@ -57,6 +59,7 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
   await expect(page.getByRole('heading', { name: 'Super Admin Dashboard', exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'Clusters', exact: true }).click();
   await page.getByRole('button', { name: /Create cluster/i }).click();
+  await page.getByRole('textbox', { name: 'Cluster Name *' }).fill('Theni Community Cluster');
   const districtSelect = page.locator('form [role="combobox"]').first();
   await districtSelect.click();
   await expect(page.getByRole('option')).toHaveCount(38);
@@ -71,6 +74,8 @@ test('cluster creation displays existing duplicate conflict and prevents repeate
   const submitRequest = submit.click();
   await expect(submit).toBeDisabled({ timeout: 5000 });
   expect(createCalls).toBe(1);
+  expect(submittedCluster.name).toBe('Theni Community Cluster');
+  expect(submittedCluster.district).toBe('Dharmapuri');
   releaseCreateRequest();
   await submitRequest;
   await expect(page.getByText('A cluster for this college and district already exists in the selected academic year.')).toBeVisible();

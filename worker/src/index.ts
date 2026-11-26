@@ -778,12 +778,13 @@ export default {
 
       const body = await request.json() as any;
       const name = String(body.name || '').trim();
+      const district = String(body.district || name).trim();
       const collegeName = String(body.collegeName || '').trim();
       const spocName = String(body.spocName || body.adminName || '').trim();
       const spocMobile = String(body.spocMobile || body.adminPhone || '').replace(/\D/g, '').slice(-10);
       const adminEmail = String(body.adminEmail || '').trim().toLowerCase();
-      if (!name || !collegeName || !spocName || !/^\d{10}$/.test(spocMobile) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
-        return json({ success: false, error: 'Cluster name, college, SPOC name, valid 10-digit phone, and valid email are required.' }, 400, headers);
+      if (!name || !district || !collegeName || !spocName || !/^\d{10}$/.test(spocMobile) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+        return json({ success: false, error: 'Cluster name, district, college, SPOC name, valid 10-digit phone, and valid email are required.' }, 400, headers);
       }
 
       const clusterId = `cluster-${crypto.randomUUID()}`;
@@ -793,7 +794,7 @@ export default {
 
       const clusterResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/clusters`, {
         method: 'POST', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
-        body: JSON.stringify({ id: clusterId, name, district: name, state: 'Tamil Nadu', college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
+        body: JSON.stringify({ id: clusterId, name, district, state: 'Tamil Nadu', college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, status: 'Active', academic_year_id: body.academicYearId || null }),
       });
       const clusterData = await clusterResponse.json();
       if (!clusterResponse.ok) {
@@ -817,7 +818,7 @@ export default {
         try {
           const emailResponse = await fetch(emailWebhook, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to: adminEmail, subject: 'TQI ERP – Cluster Registration Successful', spocName, clusterName: name, collegeName, district: name }),
+            body: JSON.stringify({ to: adminEmail, subject: 'TQI ERP – Cluster Registration Successful', spocName, clusterName: name, collegeName, district }),
           });
           emailSent = emailResponse.ok;
         } catch {
@@ -826,6 +827,46 @@ export default {
       }
 
       return json({ success: true, emailSent, temporaryPassword, loginEmail: adminEmail, clusterName: name, cluster: Array.isArray(clusterData) ? clusterData[0] : clusterData }, 201, headers);
+    }
+
+    const clusterUpdate = url.pathname.match(/^\/api\/clusters\/([^/]+)$/);
+    if (clusterUpdate && request.method === 'PUT') {
+      const user = await authenticatedUser(request, env);
+      if (!user) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (user.role !== 'Super Admin') return json({ success: false, error: 'Only Super Admin can update clusters.' }, 403, headers);
+
+      const body = await request.json() as any;
+      const name = String(body.name || '').trim();
+      const district = String(body.district || name).trim();
+      const collegeName = String(body.collegeName || '').trim();
+      const spocName = String(body.spocName || body.adminName || '').trim();
+      const spocMobile = String(body.spocMobile || body.adminPhone || '').replace(/\D/g, '').slice(-10);
+      const adminEmail = String(body.adminEmail || '').trim().toLowerCase();
+      const academicYearId = String(body.academicYearId || url.searchParams.get('academicYearId') || '').trim();
+      if (!name || !district || !collegeName || !spocName || !/^\d{10}$/.test(spocMobile) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(adminEmail)) {
+        return json({ success: false, error: 'Cluster name, district, college, SPOC name, valid 10-digit phone, and valid email are required.' }, 400, headers);
+      }
+
+      const clusterFilter = `id=eq.${encodeURIComponent(clusterUpdate[1])}${academicYearId ? `&academic_year_id=eq.${encodeURIComponent(academicYearId)}` : ''}`;
+      const response = await fetch(`${env.SUPABASE_URL}/rest/v1/clusters?${clusterFilter}`, {
+        method: 'PATCH',
+        headers: { ...supabaseHeaders(env), Prefer: 'return=representation' },
+        body: JSON.stringify({ name, district, college_name: collegeName, spoc_name: spocName, spoc_mobile: `+91 ${spocMobile}`, state: 'Tamil Nadu', updated_at: new Date().toISOString() }),
+      });
+      const rows = await response.json();
+      if (!response.ok) {
+        console.error('Unable to update cluster in Supabase:', { status: response.status, code: (rows as any)?.code || 'unknown' });
+        return json({ success: false, error: 'Unable to update cluster in Supabase.' }, 400, headers);
+      }
+      const cluster = Array.isArray(rows) ? rows[0] : rows;
+      if (cluster?.admin_id) {
+        await fetch(`${env.SUPABASE_URL}/rest/v1/users?id=eq.${encodeURIComponent(cluster.admin_id)}`, {
+          method: 'PATCH',
+          headers: supabaseHeaders(env),
+          body: JSON.stringify({ name: spocName, email: adminEmail, phone: `+91 ${spocMobile}`, updated_at: new Date().toISOString() }),
+        });
+      }
+      return json({ success: true, data: cluster }, 200, headers);
     }
 
     if (url.pathname === '/api/admin/backups' && request.method === 'GET') {

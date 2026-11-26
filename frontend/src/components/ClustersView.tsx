@@ -53,6 +53,7 @@ interface CredentialDisplay {
 
 interface ClusterDraft {
   name: string;
+  district: string;
   collegeName: string;
   spocName: string;
   spocMobile: string;
@@ -60,7 +61,7 @@ interface ClusterDraft {
 }
 
 const emptyDraft: ClusterDraft = {
-  name: '', collegeName: '',
+  name: '', district: '', collegeName: '',
   spocName: '', spocMobile: '', adminEmail: '',
 };
 
@@ -190,6 +191,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     setEditingCluster(cluster);
     setDraft({
       name: cluster.name || '',
+      district: cluster.district || cluster.name || '',
       collegeName: cluster.collegeName || '',
       spocName: cluster.spocName || cluster.adminName || '',
       spocMobile: String(cluster.spocMobile || cluster.adminPhone || '').replace(/\D/g, '').slice(-10),
@@ -211,6 +213,10 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
     }
     if (!draft.name.trim()) {
       setFormError('Cluster name is required.');
+      return;
+    }
+    if (!draft.district.trim()) {
+      setFormError('Select a district.');
       return;
     }
     if (!draft.collegeName.trim()) {
@@ -235,7 +241,7 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
       spocName: draft.spocName.trim(),
       adminEmail: email,
       collegeName: draft.collegeName.trim(),
-      district: draft.name.trim(),
+      district: draft.district.trim(),
       name: draft.name.trim(),
       academicYearId: selectedAcademicYearId,
     } as Partial<Cluster>;
@@ -593,9 +599,10 @@ export const ClustersView: React.FC<ClustersViewProps> = ({
             <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-1 pr-2 sm:px-1">
               {formError && <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-sm text-rose-700">{formError}</p>}
               <section className="space-y-3"><h3 className="text-xs font-bold uppercase tracking-wider text-slate-400">Cluster and college</h3>
+                <label className={labelClass}>Cluster Name *<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="Enter cluster name" className={inputClass} /></label>
                 <div>
-                  <label className={labelClass}>District * (Cluster Name)</label>
-                  <Select value={draft.name} onValueChange={(value) => setDraft({ ...draft, name: value })}>
+                  <label className={labelClass}>District *</label>
+                  <Select value={draft.district} onValueChange={(value) => setDraft({ ...draft, district: value })}>
                     <SelectTrigger className="mt-1 h-10 w-full rounded-xl border-slate-200 bg-white text-sm text-slate-800 focus:ring-4 focus:ring-blue-100">
                       <SelectValue placeholder="Select one of 38 Tamil Nadu districts" />
                     </SelectTrigger>

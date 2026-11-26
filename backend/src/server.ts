@@ -3054,7 +3054,7 @@ app.post('/api/clusters', requireAuth, async (req: AuthenticatedRequest, res: Re
 
   const collegeName = String(req.body.collegeName || '').trim();
   const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
-  const district = name;
+  const district = String(req.body.district || name).trim().replace(/\s+/g, ' ');
   const collegeDistrict = String(req.body.collegeDistrict || '').trim();
   const subDistrict = String(req.body.subDistrict || '').trim();
   const collegeId = String(req.body.collegeId || '').trim();
@@ -6808,6 +6808,7 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
   if (!year) { res.status(404).json({ success: false, error: 'No academic year is available.' }); return; }
   if (isArchivedAcademicYear(year)) { res.status(409).json({ success: false, error: 'Archived academic years are read-only.' }); return; }
   const name = String(req.body.name || '').trim().replace(/\s+/g, ' ');
+  const district = String(req.body.district ?? name).trim().replace(/\s+/g, ' ') || name;
   const collegeName = String(req.body.collegeName ?? req.body.college_name ?? '').trim();
   const collegeDistrict = String(req.body.collegeDistrict ?? req.body.college_district ?? '').trim();
   const spocName = String(req.body.spocName ?? req.body.spoc_name ?? '').trim();
@@ -6860,8 +6861,8 @@ app.put('/api/clusters/:id', requireAuth, async (req: AuthenticatedRequest, res:
       ? 'name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, college_district = ?, state = ?'
       : 'name = ?, college_name = ?, spoc_name = ?, spoc_mobile = ?, district = ?, state = ?';
     const clusterValues = collegeDistrict
-      ? [name, collegeName, adminName, normalizedPhone, name, collegeDistrict, 'Tamil Nadu', req.params.id, year.id]
-      : [name, collegeName, adminName, normalizedPhone, name, 'Tamil Nadu', req.params.id, year.id];
+      ? [name, collegeName, adminName, normalizedPhone, district, collegeDistrict, 'Tamil Nadu', req.params.id, year.id]
+      : [name, collegeName, adminName, normalizedPhone, district, 'Tamil Nadu', req.params.id, year.id];
     await connection.query(`UPDATE clusters SET ${clusterUpdates} WHERE id = ? AND academic_year_id = ?`, clusterValues);
     if (adminId) {
       await connection.query(
