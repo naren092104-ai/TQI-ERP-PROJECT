@@ -464,8 +464,11 @@ export const AcademicSetupView: React.FC<AcademicSetupViewProps> = ({
   };
 
   const deleteAcademicYear = async (year: AcademicYear) => {
-    const activeNotice = year.isActive ? ' Another available academic year will be activated automatically.' : '';
-    if (!window.confirm(`Permanently delete ${year.name} and all data belonging to it?${activeNotice} This cannot be undone.`)) return;
+    if (year.isActive) {
+      setToast({ type: 'error', message: 'The active academic year cannot be deleted. Activate another year first.' });
+      return;
+    }
+    if (!window.confirm(`Delete unused academic year ${year.name}? Any dependent data or relationships will block deletion safely.`)) return;
     try {
       const response = await fetch(apiUrl(`/api/academic-years/${year.id}`), {
         method: 'DELETE',

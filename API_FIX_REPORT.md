@@ -14,6 +14,15 @@
 - Preserved reset and backup security confirmations in the Express backend.
 - Added backup snapshot JSON storage to Supabase migration design.
 
+## Academic Year DELETE Fix
+- Implemented `DELETE /api/academic-years/:id` in the Cloudflare Worker.
+- Added JWT/Super Admin authorization.
+- Active academic years return 409.
+- Missing IDs return 404.
+- Invalid IDs return 400.
+- Dependent records return 409 and block deletion.
+- Frontend blocks delete for active academic years locally.
+
 ## Database Migration
 - `supabase/migrations/003_admin_backup_reset_history.sql`
 - Creates `operational_backups` table and indexes.

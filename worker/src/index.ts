@@ -271,6 +271,43 @@ export default {
       return json({ success: response.ok, data }, response.ok ? 200 : 400, headers);
     }
 
+    const academicYearDelete = url.pathname.match(/^\/api\/academic-years\/([^/]+)$/);
+    if (academicYearDelete && request.method === 'DELETE') {
+      const token = (request.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '');
+      const payload = await verifyJwt(token, env.JWT_SECRET);
+      if (!payload?.id) return json({ success: false, error: 'Authentication required.' }, 401, headers);
+      if (payload.role !== 'Super Admin') return json({ success: false, error: 'Only Super Admin can delete academic years.' }, 403, headers);
+
+      const id = academicYearDelete[1];
+      if (!/^academic-year-[a-zA-Z0-9-]+$/.test(id)) return json({ success: false, error: 'Invalid academic year ID.' }, 400, headers);
+
+      const yearResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/academic_years?id=eq.${encodeURIComponent(id)}&select=*`, { headers: supabaseHeaders(env) });
+      const years = await yearResponse.json() as any[];
+      if (!years.length) return json({ success: false, error: 'Academic year not found.' }, 404, headers);
+      const year = years[0];
+      if (Boolean(year.is_active) || String(year.status || '').toUpperCase() === 'ACTIVE') {
+        return json({ success: false, error: 'The active academic year cannot be deleted. Activate another year first.' }, 409, headers);
+      }
+
+      const dependentTables = ['clusters','panchayats','villages','students','volunteers','schools','modules','sessions','attendance_sessions','lesson_plans','session_photos','session_reports','finance_entries','approvals','date_change_requests','session_submissions','academic_setup'];
+      const dependencies: string[] = [];
+      for (const table of dependentTables) {
+        const response = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}?select=id&academic_year_id=eq.${encodeURIComponent(id)}&limit=1`, { headers: supabaseHeaders(env) });
+        if (response.ok) {
+          const rows = await response.json();
+          if (Array.isArray(rows) && rows.length) dependencies.push(table);
+        }
+      }
+      if (dependencies.length) {
+        return json({ success: false, error: `Academic year has dependent records in: ${dependencies.join(', ')}. Archive or remove its data before deletion.`, dependencies }, 409, headers);
+      }
+
+      await fetch(`${env.SUPABASE_URL}/rest/v1/academic_setup?academic_year_id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: supabaseHeaders(env) });
+      const deleteResponse = await fetch(`${env.SUPABASE_URL}/rest/v1/academic_years?id=eq.${encodeURIComponent(id)}`, { method: 'DELETE', headers: { ...supabaseHeaders(env), Prefer: 'return=representation' } });
+      if (!deleteResponse.ok) return json({ success: false, error: 'Unable to delete academic year.' }, 400, headers);
+      return json({ success: true, data: { id, name: year.name } }, 200, headers);
+    }
+
     const match = url.pathname.match(/^\/api\/supabase\/([a-z_]+)(?:\/([^/]+))?$/);
     if (!match) return json({ success: false, error: 'API endpoint not found.' }, 404, headers);
 
